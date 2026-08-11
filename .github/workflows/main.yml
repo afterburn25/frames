@@ -1,4 +1,4 @@
-name: Frames 0.9.20 Runtime Certification v11
+name: Frames 0.9.21 Runtime Certification v12
 
 on:
   workflow_dispatch:
@@ -13,8 +13,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
-      EXPECTED_FRAMES_VERSION: '0.9.20'
-      EXPECTED_SOURCE_SHA256: 'e1a7325e0f0e0bd456f68dbf04e929ee50e0f09fa01768a9ea79d1671dc0b69b'
+      EXPECTED_FRAMES_VERSION: '0.9.21'
+      EXPECTED_SOURCE_SHA256: '3166b531a3e8de4df3e5380e985b15721508a5e5b087ce1a7494906444cd6b06'
 
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +31,7 @@ jobs:
           command -v python3
           command -v unzip
 
-      - name: Locate exact Frames 0.9.20 source and bundled Nexus
+      - name: Locate exact Frames 0.9.21 source and bundled Nexus
         shell: bash
         run: |
           set -euo pipefail
@@ -61,7 +61,7 @@ jobs:
             echo "Source SHA-256: $actual_sha"
             if [[ "$actual_sha" != "$EXPECTED_SOURCE_SHA256" ]]; then
               {
-                echo "FAIL: Frames source archive hash does not match the authoritative 0.9.20 source."
+                echo "FAIL: Frames source archive hash does not match the authoritative 0.9.21 source."
                 echo "Expected: $EXPECTED_SOURCE_SHA256"
                 echo "Actual:   $actual_sha"
                 echo "File:     $source_zip"
@@ -195,7 +195,7 @@ jobs:
             ./tools/build.sh
             python3 tools/make_esp.py
             python3 tools/verify_release.py
-            python3 tools/verify_runtime_repair_0920.py
+            python3 tools/verify_runtime_repair_0921.py
             python3 tools/runtime_preflight.py --require-ready
           } 2>&1 | tee "$CONSOLE"
 
@@ -327,7 +327,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frames-0.9.20-runtime-evidence
+          name: frames-0.9.21-runtime-evidence
           path: ${{ github.workspace }}/runtime-evidence
           if-no-files-found: error
           retention-days: 14
