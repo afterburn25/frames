@@ -3,8 +3,7 @@ name: Frames Runtime Certification
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [ main ]
 
 jobs:
   qemu-ovmf-certification:
@@ -12,331 +11,135 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-
-      - name: Initialize evidence
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$GITHUB_WORKSPACE/runtime-evidence"
-
-          {
-            echo "Frames runtime certification"
-            echo "run_id=${GITHUB_RUN_ID:-unknown}"
-            echo "run_attempt=${GITHUB_RUN_ATTEMPT:-unknown}"
-            echo "runner_os=${RUNNER_OS:-unknown}"
-            echo "runner_arch=${RUNNER_ARCH:-unknown}"
-            echo "workspace=$GITHUB_WORKSPACE"
-            date -u '+timestamp_utc=%Y-%m-%dT%H:%M:%SZ'
-          } > "$GITHUB_WORKSPACE/runtime-evidence/WORKFLOW-STATUS.txt"
+      - uses: actions/checkout@v4
 
       - name: Install QEMU and OVMF
-        shell: bash
         run: |
-          set -euo pipefail
-
           sudo apt-get update
           sudo apt-get install -y qemu-system-x86 ovmf clang lld python3 unzip
 
-          {
-            echo "=== QEMU ==="
-            qemu-system-x86_64 --version || true
-
-            echo
-            echo "=== Installed packages ==="
-            dpkg-query -W qemu-system-x86 ovmf clang lld python3 unzip || true
-          } > "$GITHUB_WORKSPACE/runtime-evidence/TOOL-VERSIONS.txt" 2>&1
-
-      - name: Locate Frames 0.9.12 source
+      - name: Locate Frames source and bundled Nexus
         shell: bash
         run: |
           set -euo pipefail
+          frames_dir=""
 
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-          SOURCE_ZIP="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type f -name 'Frames-0.9.12-Source*.zip' | head -n1)"
-
-          if [[ -z "$SOURCE_ZIP" ]]; then
-            echo "ERROR: Frames 0.9.12 source ZIP not found." | tee "$EVIDENCE/SOURCE-DISCOVERY.txt"
-            ls -la "$GITHUB_WORKSPACE" | tee -a "$EVIDENCE/SOURCE-DISCOVERY.txt"
-            exit 31
+          if [[ -f "$GITHUB_WORKSPACE/VERSION" && -f "$GITHUB_WORKSPACE/tools/qemu_certify.sh" ]]; then
+            frames_dir="$GITHUB_WORKSPACE"
           fi
 
-          echo "Using source: $SOURCE_ZIP" | tee "$EVIDENCE/SOURCE-DISCOVERY.txt"
-
-          rm -rf "$RUNNER_TEMP/frames-source"
-          mkdir -p "$RUNNER_TEMP/frames-source"
-
-          unzip -q "$SOURCE_ZIP" -d "$RUNNER_TEMP/frames-source"
-
-          FRAMES_DIR="$RUNNER_TEMP/frames-source/Frames-0.9.12"
-          NEXUS_EXE="$FRAMES_DIR/toolchain/Nexus-Language-5.17.0/nexus"
-
-          if [[ ! -d "$FRAMES_DIR" ]]; then
-            echo "ERROR: Frames-0.9.12 directory was not found after extraction." | tee -a "$EVIDENCE/SOURCE-DISCOVERY.txt"
-            find "$RUNNER_TEMP/frames-source" -maxdepth 3 -print | tee -a "$EVIDENCE/SOURCE-DISCOVERY.txt"
-            exit 32
+          if [[ -z "$frames_dir" ]]; then
+            candidate="$(find "$GITHUB_WORKSPACE" -maxdepth 4 -type f -name VERSION -print | while read -r v; do d="${v%/VERSION}"; [[ -f "$d/tools/qemu_certify.sh" ]] && echo "$d"; done | head -n1 || true)"
+            [[ -n "$candidate" ]] && frames_dir="$candidate"
           fi
 
-          test -f "$FRAMES_DIR/VERSION"
-          test -f "$FRAMES_DIR/tools/build.sh"
-          test -f "$FRAMES_DIR/tools/qemu_certify.sh"
-          test -f "$NEXUS_EXE"
-
-          chmod +x "$NEXUS_EXE"
-          chmod +x "$FRAMES_DIR"/tools/*.sh
-          chmod +x "$FRAMES_DIR"/tools/*.py
-
-          FRAMES_VERSION="$(tr -d '\r\n' < "$FRAMES_DIR/VERSION")"
-
-          if [[ "$FRAMES_VERSION" != "0.9.12" ]]; then
-            echo "ERROR: Expected Frames 0.9.12 but found $FRAMES_VERSION." | tee -a "$EVIDENCE/SOURCE-DISCOVERY.txt"
-            exit 33
-          fi
-
-          echo "FRAMES_DIR=$FRAMES_DIR" >> "$GITHUB_ENV"
-          echo "FRAMES_VERSION=$FRAMES_VERSION" >> "$GITHUB_ENV"
-          echo "NEXUS_EXE=$NEXUS_EXE" >> "$GITHUB_ENV"
-
-          {
-            echo "Frames directory: $FRAMES_DIR"
-            echo "Frames version: $FRAMES_VERSION"
-            echo "Nexus executable: $NEXUS_EXE"
-            "$NEXUS_EXE" --version
-            echo "Frames source discovery PASS"
-          } | tee -a "$EVIDENCE/SOURCE-DISCOVERY.txt"
-
-      - name: Locate OVMF firmware
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-
-          OVMF_CODE="$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE.fd' \) | head -n1)"
-          OVMF_VARS="$(find /usr/share/OVMF -type f \( -name 'OVMF_VARS_4M.fd' -o -name 'OVMF_VARS.fd' \) | head -n1 || true)"
-
-          if [[ -z "$OVMF_CODE" ]]; then
-            echo "ERROR: OVMF_CODE firmware was not found." | tee "$EVIDENCE/FIRMWARE.txt"
-            exit 41
-          fi
-
-          echo "OVMF_CODE=$OVMF_CODE" >> "$GITHUB_ENV"
-
-          if [[ -n "$OVMF_VARS" ]]; then
-            echo "OVMF_VARS=$OVMF_VARS" >> "$GITHUB_ENV"
-          fi
-
-          {
-            echo "OVMF_CODE=$OVMF_CODE"
-            echo "OVMF_VARS=${OVMF_VARS:-none}"
-            ls -l "$OVMF_CODE" || true
-
-            if [[ -n "$OVMF_VARS" ]]; then
-              ls -l "$OVMF_VARS" || true
+          if [[ -z "$frames_dir" ]]; then
+            source_zip="$(find "$GITHUB_WORKSPACE" -maxdepth 2 -type f -name 'Frames-*-Source.zip' -print | sort -V | tail -n1 || true)"
+            if [[ -n "$source_zip" ]]; then
+              rm -rf "$RUNNER_TEMP/frames-source"
+              mkdir -p "$RUNNER_TEMP/frames-source"
+              echo "Extracting source archive: $source_zip"
+              unzip -q "$source_zip" -d "$RUNNER_TEMP/frames-source"
+              candidate="$(find "$RUNNER_TEMP/frames-source" -maxdepth 5 -type f -name VERSION -print | while read -r v; do d="${v%/VERSION}"; [[ -f "$d/tools/qemu_certify.sh" ]] && echo "$d"; done | head -n1 || true)"
+              [[ -n "$candidate" ]] && frames_dir="$candidate"
             fi
-          } | tee "$EVIDENCE/FIRMWARE.txt"
+          fi
 
-      - name: Run Frames runtime certification
+          if [[ -z "$frames_dir" ]]; then
+            echo "Frames source tree was not found."
+            find "$GITHUB_WORKSPACE" -maxdepth 3 -type f | sort | head -200
+            exit 1
+          fi
+
+          nexus_path="$(find "$frames_dir/toolchain" -maxdepth 3 -type f -name nexus -path '*/Nexus-Language-*/nexus' -print | sort -V | tail -n1 || true)"
+          if [[ -z "$nexus_path" ]]; then
+            echo "Bundled Nexus compiler was not found under $frames_dir/toolchain"
+            exit 1
+          fi
+
+          frames_version="$(tr -d '\r\n' < "$frames_dir/VERSION")"
+          echo "FRAMES_DIR=$frames_dir" >> "$GITHUB_ENV"
+          echo "FRAMES_VERSION=$frames_version" >> "$GITHUB_ENV"
+          echo "NEXUS_EXE=$nexus_path" >> "$GITHUB_ENV"
+          echo "Frames source: $frames_dir"
+          echo "Frames version: $frames_version"
+          echo "Nexus compiler: $nexus_path"
+
+      - name: Locate firmware
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE.fd' \) | head -n1)"
+          vars="$(find /usr/share/OVMF -type f \( -name 'OVMF_VARS_4M.fd' -o -name 'OVMF_VARS.fd' \) | head -n1)"
+          test -n "$code"
+          echo "OVMF_CODE=$code" >> "$GITHUB_ENV"
+          [[ -n "$vars" ]] && echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"
+          echo "OVMF CODE: $code"
+          echo "OVMF VARS: ${vars:-<none>}"
+
+      - name: Runtime certification and marker diagnosis
         id: runtime
         shell: bash
         env:
-          FRAMES_BOOT_TIMEOUT: "60"
+          FRAMES_BOOT_TIMEOUT: '60'
         run: |
           set -uo pipefail
-
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-          CONSOLE="$EVIDENCE/CERTIFICATION-CONSOLE.log"
-
-          mkdir -p "$EVIDENCE"
-          : > "$CONSOLE"
-
-          if [[ -z "${FRAMES_DIR:-}" || ! -d "${FRAMES_DIR:-}" ]]; then
-            echo "ERROR: FRAMES_DIR is unavailable." | tee -a "$CONSOLE"
-            echo "97" > "$EVIDENCE/CERTIFICATION-EXIT-CODE.txt"
-            echo "cert_rc=97" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
           cd "$FRAMES_DIR"
-
-          mkdir -p build
-
+          mkdir -p "$FRAMES_DIR/build"
           export NEXUS="$NEXUS_EXE"
-
-          chmod +x "$NEXUS_EXE"
-          chmod +x tools/*.sh
-          chmod +x tools/*.py
-
-          {
-            echo "Frames version: $FRAMES_VERSION"
-            echo "Frames directory: $FRAMES_DIR"
-            echo "Nexus: $NEXUS"
-            echo "OVMF_CODE: ${OVMF_CODE:-unset}"
-            echo "OVMF_VARS: ${OVMF_VARS:-unset}"
-            echo
-            echo "Starting Frames runtime certification..."
-          } | tee -a "$CONSOLE"
+          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py
 
           set +e
-
-          ./tools/qemu_certify.sh 2>&1 | tee -a "$CONSOLE"
-          CERT_RC=${PIPESTATUS[0]}
-
+          ./tools/qemu_certify.sh
+          cert_rc=$?
           set -e
 
-          echo "$CERT_RC" > "$EVIDENCE/CERTIFICATION-EXIT-CODE.txt"
-          echo "cert_rc=$CERT_RC" >> "$GITHUB_OUTPUT"
-
-          echo "qemu_certify.sh exit code: $CERT_RC" | tee -a "$CONSOLE"
-
-          if [[ -f build/serial.log ]]; then
-            cp -f build/serial.log "$EVIDENCE/serial.log"
-
-            echo | tee -a "$CONSOLE"
-            echo "=== Last 150 serial lines ===" | tee -a "$CONSOLE"
-            tail -n 150 build/serial.log | tee -a "$CONSOLE"
-          else
-            echo "WARNING: build/serial.log was not produced." | tee -a "$CONSOLE"
-
-            find build -maxdepth 2 -type f -print 2>/dev/null \
-              | sort \
-              > "$EVIDENCE/BUILD-FILES.txt" || true
+          LOG="$FRAMES_DIR/build/serial.log"
+          echo
+          echo "================ Frames runtime marker diagnosis ================"
+          echo "qemu_certify.sh exit code: $cert_rc"
+          if [[ ! -f "$LOG" ]]; then
+            echo "serial.log was not produced."
+            exit "$cert_rc"
           fi
 
-          exit 0
+          python3 - "$FRAMES_DIR/tools/qemu_certify.sh" "$LOG" <<'PY'
+          import pathlib, re, sys, json
+          script=pathlib.Path(sys.argv[1]).read_text(errors='replace')
+          log_path=pathlib.Path(sys.argv[2]); log=log_path.read_text(errors='replace')
+          m=re.search(r'for marker in\s+(.*?);\s*do',script,re.S)
+          if not m:
+              print('Could not parse expected marker list from qemu_certify.sh')
+              raise SystemExit(2)
+          expected=m.group(1).split(); present=[x for x in expected if x in log]; missing=[x for x in expected if x not in log]
+          print(f'Expected markers: {len(expected)}'); print(f'Present markers:  {len(present)}'); print(f'Missing markers:  {len(missing)}')
+          print('\nMISSING MARKERS:')
+          for x in missing: print(f'  - {x}')
+          print('\nLAST 120 SERIAL LINES:')
+          for line in log.splitlines()[-120:]: print(line)
+          (log_path.parent/'MISSING-RUNTIME-MARKERS.json').write_text(json.dumps({'expected_count':len(expected),'present_count':len(present),'missing_count':len(missing),'missing':missing},indent=2)+'\n')
+          PY
+          echo "================================================================="
+          exit "$cert_rc"
 
       - name: Build runtime evidence
         if: always()
         shell: bash
         run: |
           set +e
-
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-
-          mkdir -p "$EVIDENCE"
-
-          {
-            echo "frames_version=${FRAMES_VERSION:-unknown}"
-            echo "frames_dir=${FRAMES_DIR:-unknown}"
-            echo "runtime_step_outcome=${{ steps.runtime.outcome }}"
-            echo "runtime_cert_rc=${{ steps.runtime.outputs.cert_rc }}"
-            date -u '+evidence_built_utc=%Y-%m-%dT%H:%M:%SZ'
-          } > "$EVIDENCE/EVIDENCE-SUMMARY.txt"
-
-          if [[ -n "${FRAMES_DIR:-}" && -d "${FRAMES_DIR:-}" ]]; then
+          mkdir -p "$GITHUB_WORKSPACE/runtime-evidence"
+          if [[ -n "${FRAMES_DIR:-}" && -f "$FRAMES_DIR/build/serial.log" ]]; then
             cd "$FRAMES_DIR"
-
-            if [[ -f build/serial.log ]]; then
-              if [[ -f tools/runtime_evidence.py ]]; then
-                python3 tools/runtime_evidence.py --serial build/serial.log || true
-              fi
-
-              if [[ -f tools/runtime_storage_cert.py ]]; then
-                python3 tools/runtime_storage_cert.py --serial build/serial.log || true
-              fi
-            fi
-
-            for FILE in \
-              build/serial.log \
-              build/RUNTIME-EVIDENCE.json \
-              build/STORAGE-RUNTIME-CERT.json \
-              build/RUNTIME-CERTIFICATION.json
-            do
-              if [[ -f "$FILE" ]]; then
-                cp -f "$FILE" "$EVIDENCE/"
-              fi
+            python3 tools/runtime_evidence.py --serial build/serial.log || true
+            python3 tools/runtime_storage_cert.py --serial build/serial.log || true
+            for f in build/serial.log build/MISSING-RUNTIME-MARKERS.json build/RUNTIME-EVIDENCE.json build/STORAGE-RUNTIME-CERT.json build/RUNTIME-CERTIFICATION.json; do
+              [[ -f "$f" ]] && cp "$f" "$GITHUB_WORKSPACE/runtime-evidence/"
             done
           fi
 
-          echo "Evidence files:"
-          find "$EVIDENCE" -maxdepth 1 -type f -printf '%f\n' | sort
-
-      - name: Diagnose missing runtime markers
+      - uses: actions/upload-artifact@v4
         if: always()
-        shell: bash
-        run: |
-          set +e
-
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-
-          if [[ -z "${FRAMES_DIR:-}" || ! -f "${FRAMES_DIR:-}/build/serial.log" ]]; then
-            echo "Marker diagnosis unavailable because serial.log does not exist." > "$EVIDENCE/MARKER-DIAGNOSIS.txt"
-            exit 0
-          fi
-
-          cd "$FRAMES_DIR"
-
-          SCRIPT="tools/qemu_certify.sh"
-          LOG="build/serial.log"
-
-          python3 - "$SCRIPT" "$LOG" "$EVIDENCE/MISSING-RUNTIME-MARKERS.json" <<'PY'
-          import json
-          import pathlib
-          import re
-          import sys
-
-          script = pathlib.Path(sys.argv[1]).read_text(errors="replace")
-          log = pathlib.Path(sys.argv[2]).read_text(errors="replace")
-          output = pathlib.Path(sys.argv[3])
-
-          match = re.search(r"for marker in\s+(.*?);\s*do", script, re.S)
-
-          if not match:
-              result = {
-                  "parse_error": True,
-                  "message": "Could not parse expected marker list"
-              }
-          else:
-              expected = match.group(1).split()
-              present = [m for m in expected if m in log]
-              missing = [m for m in expected if m not in log]
-
-              result = {
-                  "expected_count": len(expected),
-                  "present_count": len(present),
-                  "missing_count": len(missing),
-                  "present": present,
-                  "missing": missing
-              }
-
-              print("Expected markers:", len(expected))
-              print("Present markers:", len(present))
-              print("Missing markers:", len(missing))
-
-              for marker in missing:
-                  print("MISSING:", marker)
-
-          output.write_text(json.dumps(result, indent=2) + "\n")
-          PY
-
-      - name: Upload runtime evidence
-        if: always()
-        uses: actions/upload-artifact@v4
         with:
           name: frames-runtime-evidence
           path: runtime-evidence/
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Enforce certification result
-        if: always()
-        shell: bash
-        run: |
-          set -u
-
-          RC="${{ steps.runtime.outputs.cert_rc }}"
-
-          if [[ -z "$RC" ]]; then
-            echo "Runtime certification never produced an exit code."
-            echo "Download frames-runtime-evidence for diagnostics."
-            exit 1
-          fi
-
-          if [[ "$RC" != "0" ]]; then
-            echo "Frames runtime certification failed with exit code $RC."
-            echo "The frames-runtime-evidence artifact was uploaded."
-            exit "$RC"
-          fi
-
-          echo "Frames runtime certification PASSED."
+          if-no-files-found: warn
