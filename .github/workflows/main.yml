@@ -1,4 +1,4 @@
-name: Frames Runtime Certification
+name: Frames Runtime Certification v6
 
 on:
   workflow_dispatch:
@@ -35,6 +35,19 @@ jobs:
 
           if [[ -z "$frames_dir" ]]; then
             source_zip="$(find "$GITHUB_WORKSPACE" -maxdepth 2 -type f -name 'Frames-*-Source.zip' -print | sort -V | tail -n1 || true)"
+
+            # Also support the packaged Runtime Certification Kit directly.
+            if [[ -z "$source_zip" ]]; then
+              kit_zip="$(find "$GITHUB_WORKSPACE" -maxdepth 2 -type f -name 'Frames-*-Runtime-Certification-Kit*.zip' -print | sort -V | tail -n1 || true)"
+              if [[ -n "$kit_zip" ]]; then
+                rm -rf "$RUNNER_TEMP/frames-kit"
+                mkdir -p "$RUNNER_TEMP/frames-kit"
+                echo "Extracting runtime certification kit: $kit_zip"
+                unzip -q "$kit_zip" -d "$RUNNER_TEMP/frames-kit"
+                source_zip="$(find "$RUNNER_TEMP/frames-kit" -maxdepth 3 -type f -name 'Frames-*-Source.zip' -print | sort -V | tail -n1 || true)"
+              fi
+            fi
+
             if [[ -n "$source_zip" ]]; then
               rm -rf "$RUNNER_TEMP/frames-source"
               mkdir -p "$RUNNER_TEMP/frames-source"
@@ -46,8 +59,16 @@ jobs:
           fi
 
           if [[ -z "$frames_dir" ]]; then
-            echo "Frames source tree was not found."
-            find "$GITHUB_WORKSPACE" -maxdepth 3 -type f | sort | head -200
+            mkdir -p "$GITHUB_WORKSPACE/runtime-evidence"
+            {
+              echo "Frames source tree was not found."
+              echo
+              echo "Repository files:"
+              find "$GITHUB_WORKSPACE" -maxdepth 3 -type f | sort | head -200
+              echo
+              echo "Runner temp files:"
+              find "$RUNNER_TEMP" -maxdepth 4 -type f 2>/dev/null | sort | head -200
+            } | tee "$GITHUB_WORKSPACE/runtime-evidence/SOURCE-DISCOVERY-FAILURE.txt"
             exit 1
           fi
 
