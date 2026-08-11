@@ -1,4 +1,4 @@
-name: Frames Runtime Certification v6
+name: Frames Runtime Certification v7
 
 on:
   workflow_dispatch:
