@@ -89,11 +89,15 @@ jobs:
           export NEXUS="$NEXUS_EXE"
           chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py
 
+          mkdir -p "$GITHUB_WORKSPACE/runtime-evidence"
+          CONSOLE="$GITHUB_WORKSPACE/runtime-evidence/RUNTIME-CERTIFICATION-CONSOLE.log"
+
           set +e
-          ./tools/qemu_certify.sh
-          cert_rc=$?
+          ./tools/qemu_certify.sh 2>&1 | tee "$CONSOLE"
+          cert_rc=${PIPESTATUS[0]}
           set -e
 
+          echo "$cert_rc" > "$GITHUB_WORKSPACE/runtime-evidence/QEMU-CERTIFY-EXIT-CODE.txt"
           LOG="$FRAMES_DIR/build/serial.log"
           echo
           echo "================ Frames runtime marker diagnosis ================"
@@ -127,19 +131,55 @@ jobs:
         shell: bash
         run: |
           set +e
-          mkdir -p "$GITHUB_WORKSPACE/runtime-evidence"
+          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
+          mkdir -p "$EVIDENCE"
+
+          {
+            echo "Frames runtime workflow diagnostics"
+            echo "UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
+            echo "FRAMES_DIR=${FRAMES_DIR:-<unset>}"
+            echo "FRAMES_VERSION=${FRAMES_VERSION:-<unset>}"
+            echo "NEXUS_EXE=${NEXUS_EXE:-<unset>}"
+            echo "OVMF_CODE=${OVMF_CODE:-<unset>}"
+            echo "OVMF_VARS=${OVMF_VARS:-<unset>}"
+            echo
+            echo "Repository files:"
+            find "$GITHUB_WORKSPACE" -maxdepth 2 -type f -print 2>/dev/null | sort | head -200
+            echo
+            echo "Frames build files:"
+            if [[ -n "${FRAMES_DIR:-}" && -d "$FRAMES_DIR/build" ]]; then
+              find "$FRAMES_DIR/build" -maxdepth 2 -type f -printf '%p %s bytes\n' 2>/dev/null | sort
+            else
+              echo "Frames build directory does not exist."
+            fi
+          } > "$EVIDENCE/WORKFLOW-DIAGNOSTICS.txt" 2>&1
+
           if [[ -n "${FRAMES_DIR:-}" && -f "$FRAMES_DIR/build/serial.log" ]]; then
             cd "$FRAMES_DIR"
             python3 tools/runtime_evidence.py --serial build/serial.log || true
             python3 tools/runtime_storage_cert.py --serial build/serial.log || true
-            for f in build/serial.log build/MISSING-RUNTIME-MARKERS.json build/RUNTIME-EVIDENCE.json build/STORAGE-RUNTIME-CERT.json build/RUNTIME-CERTIFICATION.json; do
-              [[ -f "$f" ]] && cp "$f" "$GITHUB_WORKSPACE/runtime-evidence/"
+            for f in \
+              build/serial.log \
+              build/MISSING-RUNTIME-MARKERS.json \
+              build/RUNTIME-EVIDENCE.json \
+              build/STORAGE-RUNTIME-CERT.json \
+              build/RUNTIME-CERTIFICATION.json; do
+              [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
             done
+          else
+            {
+              echo "QEMU did not produce build/serial.log."
+              echo "Inspect RUNTIME-CERTIFICATION-CONSOLE.log and WORKFLOW-DIAGNOSTICS.txt for the earlier failure."
+            } > "$EVIDENCE/NO-SERIAL-LOG.txt"
           fi
+
+          echo "Evidence directory contents:"
+          find "$EVIDENCE" -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: frames-runtime-evidence
-          path: runtime-evidence/
-          if-no-files-found: warn
+          path: ${{ github.workspace }}/runtime-evidence
+          if-no-files-found: error
