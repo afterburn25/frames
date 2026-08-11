@@ -18,33 +18,63 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y qemu-system-x86 ovmf clang lld python3 unzip
 
-      - name: Locate Frames 0.9.9 source
+      - name: Locate Frames source
         shell: bash
         run: |
           set -euo pipefail
 
+          frames_dir=""
+
+          # Layout 1: source files are already at repository root.
           if [[ -f "$GITHUB_WORKSPACE/toolchain/Nexus-Language-5.15.0/nexus" ]]; then
             frames_dir="$GITHUB_WORKSPACE"
-          elif [[ -f "$GITHUB_WORKSPACE/Frames-0.9.9/toolchain/Nexus-Language-5.15.0/nexus" ]]; then
-            frames_dir="$GITHUB_WORKSPACE/Frames-0.9.9"
-          elif [[ -f "$GITHUB_WORKSPACE/Frames-0.9.9-Source.zip" ]]; then
-            mkdir -p "$RUNNER_TEMP/frames-source"
-            unzip -q "$GITHUB_WORKSPACE/Frames-0.9.9-Source.zip" -d "$RUNNER_TEMP/frames-source"
-            frames_dir="$RUNNER_TEMP/frames-source/Frames-0.9.9"
-          else
-            echo "Frames 0.9.9 source tree was not found."
+          fi
+
+          # Layout 2: source is inside a versioned directory in the repository.
+          if [[ -z "$frames_dir" ]]; then
+            nexus_path="$(find "$GITHUB_WORKSPACE" -maxdepth 4 -type f \
+              -path '*/toolchain/Nexus-Language-5.15.0/nexus' \
+              -print -quit || true)"
+            if [[ -n "$nexus_path" ]]; then
+              frames_dir="${nexus_path%/toolchain/Nexus-Language-5.15.0/nexus}"
+            fi
+          fi
+
+          # Layout 3: repository contains a Frames-*-Source.zip.
+          if [[ -z "$frames_dir" ]]; then
+            source_zip="$(find "$GITHUB_WORKSPACE" -maxdepth 2 -type f \
+              -name 'Frames-*-Source.zip' -print | sort -V | tail -n1 || true)"
+            if [[ -n "$source_zip" ]]; then
+              rm -rf "$RUNNER_TEMP/frames-source"
+              mkdir -p "$RUNNER_TEMP/frames-source"
+              echo "Extracting source archive: $source_zip"
+              unzip -q "$source_zip" -d "$RUNNER_TEMP/frames-source"
+
+              nexus_path="$(find "$RUNNER_TEMP/frames-source" -maxdepth 6 -type f \
+                -path '*/toolchain/Nexus-Language-5.15.0/nexus' \
+                -print -quit || true)"
+              if [[ -n "$nexus_path" ]]; then
+                frames_dir="${nexus_path%/toolchain/Nexus-Language-5.15.0/nexus}"
+              fi
+            fi
+          fi
+
+          if [[ -z "$frames_dir" ]]; then
+            echo "Frames source tree was not found."
             echo "Repository root contents:"
-            find "$GITHUB_WORKSPACE" -maxdepth 2 -type f | sort | head -200
+            find "$GITHUB_WORKSPACE" -maxdepth 3 -type f | sort | head -200
             exit 1
           fi
 
           test -f "$frames_dir/toolchain/Nexus-Language-5.15.0/nexus"
           test -f "$frames_dir/tools/qemu_certify.sh"
-          test -f "$frames_dir/tools/runtime_evidence.py"
-          test -f "$frames_dir/tools/runtime_storage_cert.py"
+          test -f "$frames_dir/VERSION"
 
+          frames_version="$(tr -d '\r\n' < "$frames_dir/VERSION")"
           echo "FRAMES_DIR=$frames_dir" >> "$GITHUB_ENV"
+          echo "FRAMES_VERSION=$frames_version" >> "$GITHUB_ENV"
           echo "Frames source: $frames_dir"
+          echo "Frames version: $frames_version"
 
       - name: Locate firmware
         shell: bash
@@ -57,20 +87,68 @@ jobs:
           if [[ -n "$vars" ]]; then
             echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"
           fi
+          echo "OVMF CODE: $code"
+          echo "OVMF VARS: ${vars:-<none>}"
 
-      - name: Runtime certification
+      - name: Runtime certification and marker diagnosis
+        id: runtime
         shell: bash
         env:
           FRAMES_BOOT_TIMEOUT: '60'
         run: |
-          set -euo pipefail
+          set -uo pipefail
           cd "$FRAMES_DIR"
-          # qemu_certify.sh copies the writable OVMF VARS template before build.sh runs.
-          # Ensure its destination exists on a fresh GitHub runner.
           mkdir -p "$FRAMES_DIR/build"
           export NEXUS="$FRAMES_DIR/toolchain/Nexus-Language-5.15.0/nexus"
           chmod +x toolchain/Nexus-Language-5.15.0/nexus tools/*.sh tools/*.py
+
+          set +e
           ./tools/qemu_certify.sh
+          cert_rc=$?
+          set -e
+
+          LOG="$FRAMES_DIR/build/serial.log"
+          echo
+          echo "================ Frames runtime marker diagnosis ================"
+          echo "qemu_certify.sh exit code: $cert_rc"
+
+          if [[ ! -f "$LOG" ]]; then
+            echo "serial.log was not produced."
+            exit "$cert_rc"
+          fi
+
+          python3 - "$FRAMES_DIR/tools/qemu_certify.sh" "$LOG" <<'PY'
+          import pathlib, re, sys, json
+          script = pathlib.Path(sys.argv[1]).read_text(errors='replace')
+          log_path = pathlib.Path(sys.argv[2])
+          log = log_path.read_text(errors='replace')
+          m = re.search(r'for marker in\s+(.*?);\s*do', script, re.S)
+          if not m:
+              print('Could not parse expected marker list from qemu_certify.sh')
+              raise SystemExit(2)
+          expected = m.group(1).split()
+          present = [x for x in expected if x in log]
+          missing = [x for x in expected if x not in log]
+          print(f'Expected markers: {len(expected)}')
+          print(f'Present markers:  {len(present)}')
+          print(f'Missing markers:  {len(missing)}')
+          print('\nMISSING MARKERS:')
+          for x in missing:
+              print(f'  - {x}')
+          print('\nLAST 100 SERIAL LINES:')
+          for line in log.splitlines()[-100:]:
+              print(line)
+          out = log_path.parent / 'MISSING-RUNTIME-MARKERS.json'
+          out.write_text(json.dumps({
+              'expected_count': len(expected),
+              'present_count': len(present),
+              'missing_count': len(missing),
+              'missing': missing,
+          }, indent=2) + '\n')
+          PY
+
+          echo "================================================================="
+          exit "$cert_rc"
 
       - name: Build runtime evidence
         if: always()
@@ -86,6 +164,7 @@ jobs:
 
             for f in \
               build/serial.log \
+              build/MISSING-RUNTIME-MARKERS.json \
               build/RUNTIME-EVIDENCE.json \
               build/STORAGE-RUNTIME-CERT.json \
               build/RUNTIME-CERTIFICATION.json; do
@@ -98,6 +177,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frames-0.9.9-runtime-evidence
+          name: frames-runtime-evidence
           path: runtime-evidence/
           if-no-files-found: warn
