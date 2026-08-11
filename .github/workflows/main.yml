@@ -11,7 +11,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Initialize evidence capture
         if: always()
@@ -43,39 +43,52 @@ jobs:
       - name: Locate Frames source and bundled Nexus
         shell: bash
         run: |
-          set -euo pipefail
+          set -u
+          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
+          mkdir -p "$EVIDENCE"
+          DISC="$EVIDENCE/SOURCE-DISCOVERY.txt"
+          : > "$DISC"
+
+          echo "Repository: $GITHUB_WORKSPACE" | tee -a "$DISC"
+          echo "Runner temp: $RUNNER_TEMP" | tee -a "$DISC"
+
           frames_dir=""
 
+          # 1) Source already unpacked at repository root.
           if [[ -f "$GITHUB_WORKSPACE/VERSION" && -f "$GITHUB_WORKSPACE/tools/qemu_certify.sh" ]]; then
             frames_dir="$GITHUB_WORKSPACE"
+            echo "Using source at repository root." | tee -a "$DISC"
           fi
 
+          # 2) Source already unpacked in one nested Frames-* directory.
           if [[ -z "$frames_dir" ]]; then
-            candidate="$(find "$GITHUB_WORKSPACE" -maxdepth 4 -type f -name VERSION -print | while read -r v; do d="${v%/VERSION}"; [[ -f "$d/tools/qemu_certify.sh" ]] && echo "$d"; done | head -n1 || true)"
-            [[ -n "$candidate" ]] && frames_dir="$candidate"
+            while IFS= read -r version_file; do
+              d="${version_file%/VERSION}"
+              if [[ -f "$d/tools/qemu_certify.sh" ]]; then
+                frames_dir="$d"
+                echo "Using nested source tree: $frames_dir" | tee -a "$DISC"
+                break
+              fi
+            done < <(find "$GITHUB_WORKSPACE" -mindepth 2 -maxdepth 4 -type f -name VERSION -print 2>/dev/null)
           fi
 
+          # 3) Source ZIP at repository root.
           if [[ -z "$frames_dir" ]]; then
-            source_zip="$(find "$GITHUB_WORKSPACE" -maxdepth 2 -type f -name 'Frames-*-Source.zip' -print | sort -V | tail -n1 || true)"
-            if [[ -n "$source_zip" ]]; then
-              rm -rf "$RUNNER_TEMP/frames-source"
-              mkdir -p "$RUNNER_TEMP/frames-source"
-              echo "Extracting source archive: $source_zip"
-              unzip -q "$source_zip" -d "$RUNNER_TEMP/frames-source"
-              candidate="$(find "$RUNNER_TEMP/frames-source" -maxdepth 5 -type f -name VERSION -print | while read -r v; do d="${v%/VERSION}"; [[ -f "$d/tools/qemu_certify.sh" ]] && echo "$d"; done | head -n1 || true)"
-              [[ -n "$candidate" ]] && frames_dir="$candidate"
+            source_zip=""
+            if [[ -f "$GITHUB_WORKSPACE/Frames-0.9.12-Source.zip" ]]; then
+              source_zip="$GITHUB_WORKSPACE/Frames-0.9.12-Source.zip"
+            else
+              while IFS= read -r z; do
+                source_zip="$z"
+              done < <(
+                find "$GITHUB_WORKSPACE" \
+                  -maxdepth 1 \
+                  -type f \
+                  -name 'Frames-*-Source.zip' \
+                  -print 2>/dev/null | sort -V
+              )
             fi
-          fi
 
-          if [[ -z "$frames_dir" ]]; then
-            {
-              echo "Frames source tree was not found."
-              echo "Repository root contents:"
-              find "$GITHUB_WORKSPACE" -maxdepth 3 -type f | sort | head -200
-            } | tee "$GITHUB_WORKSPACE/runtime-evidence/SOURCE-DISCOVERY.txt"
-            exit 1
-          fi
-
-          nexus_path="$(find "$frames_dir/toolchain" -maxdepth 3 -type f -name nexus -path '*/Nexus-Language-*/nexus' -print | sort -V | tail -n1 || true)"
-          if [[ -z "$nexus_path" ]]; then
-            echo "Bundled Nexus compiler was not found under $frames_dir/toolchain" | tee "$GITHUB_WORKSPACE/runtime-evidence/SOURCE
+            if [[ -z "$source_zip" ]]; then
+              echo "ERROR: No Frames-*-Source.zip was found at repository root." | tee -a "$DISC"
+              find "$GITHUB_WORKSPACE" -maxdepth 2 -type f -print 2>/
