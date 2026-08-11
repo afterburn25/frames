@@ -65,6 +65,9 @@ jobs:
         run: |
           set -euo pipefail
           cd "$FRAMES_DIR"
+          # qemu_certify.sh copies the writable OVMF VARS template before build.sh runs.
+          # Ensure its destination exists on a fresh GitHub runner.
+          mkdir -p "$FRAMES_DIR/build"
           export NEXUS="$FRAMES_DIR/toolchain/Nexus-Language-5.15.0/nexus"
           chmod +x toolchain/Nexus-Language-5.15.0/nexus tools/*.sh tools/*.py
           ./tools/qemu_certify.sh
