@@ -83,11 +83,20 @@ jobs:
           echo "Repository: $GITHUB_WORKSPACE" | tee -a "$DISC"
           echo "Runner temp: $RUNNER_TEMP" | tee -a "$DISC"
 
-          SOURCE_ZIP="$GITHUB_WORKSPACE/Frames-0.9.12-Source.zip"
+          SOURCE_ZIP="$(
+            find "$GITHUB_WORKSPACE" \
+              -maxdepth 1 \
+              -type f \
+              -name 'Frames-0.9.12-Source*.zip' \
+              -print \
+              | sort -V \
+              | tail -n1
+          )"
+
           EXTRACT_ROOT="$RUNNER_TEMP/frames-source"
 
-          if [[ ! -f "$SOURCE_ZIP" ]]; then
-            echo "ERROR: Frames-0.9.12-Source.zip not found." \
+          if [[ -z "$SOURCE_ZIP" || ! -f "$SOURCE_ZIP" ]]; then
+            echo "ERROR: No Frames-0.9.12-Source*.zip file was found." \
               | tee -a "$DISC"
 
             echo "Repository files:" | tee -a "$DISC"
@@ -97,116 +106,4 @@ jobs:
               -type f \
               -print 2>/dev/null \
               | sort \
-              | tee -a "$DISC"
-
-            exit 31
-          fi
-
-          echo "Source ZIP: $SOURCE_ZIP" | tee -a "$DISC"
-
-          rm -rf "$EXTRACT_ROOT"
-          mkdir -p "$EXTRACT_ROOT"
-
-          if ! unzip -q "$SOURCE_ZIP" -d "$EXTRACT_ROOT"; then
-            echo "ERROR: Could not extract source ZIP." \
-              | tee -a "$DISC"
-
-            exit 32
-          fi
-
-          FRAMES_DIR="$EXTRACT_ROOT/Frames-0.9.12"
-
-          if [[ ! -d "$FRAMES_DIR" ]]; then
-            echo "ERROR: Expected extracted directory not found:" \
-              | tee -a "$DISC"
-
-            echo "$FRAMES_DIR" | tee -a "$DISC"
-
-            echo "Extracted contents:" | tee -a "$DISC"
-
-            find "$EXTRACT_ROOT" \
-              -maxdepth 3 \
-              -print 2>/dev/null \
-              | sort \
-              | tee -a "$DISC"
-
-            exit 33
-          fi
-
-          REQUIRED_PATHS=(
-            "$FRAMES_DIR/VERSION"
-            "$FRAMES_DIR/tools/build.sh"
-            "$FRAMES_DIR/tools/qemu_certify.sh"
-            "$FRAMES_DIR/toolchain/Nexus-Language-5.17.0/nexus"
-          )
-
-          for path in "${REQUIRED_PATHS[@]}"; do
-            if [[ ! -e "$path" ]]; then
-              echo "ERROR: Required path missing: $path" \
-                | tee -a "$DISC"
-
-              exit 34
-            fi
-          done
-
-          NEXUS_EXE="$FRAMES_DIR/toolchain/Nexus-Language-5.17.0/nexus"
-
-          FRAMES_VERSION="$(
-            tr -d '\r\n' < "$FRAMES_DIR/VERSION"
-          )"
-
-          if [[ "$FRAMES_VERSION" != "0.9.12" ]]; then
-            echo "ERROR: Unexpected Frames version: $FRAMES_VERSION" \
-              | tee -a "$DISC"
-
-            exit 35
-          fi
-
-          chmod +x "$NEXUS_EXE"
-          chmod +x "$FRAMES_DIR"/tools/*.sh
-          chmod +x "$FRAMES_DIR"/tools/*.py
-
-          echo "FRAMES_DIR=$FRAMES_DIR" >> "$GITHUB_ENV"
-          echo "FRAMES_VERSION=$FRAMES_VERSION" >> "$GITHUB_ENV"
-          echo "NEXUS_EXE=$NEXUS_EXE" >> "$GITHUB_ENV"
-
-          {
-            echo
-            echo "Frames directory: $FRAMES_DIR"
-            echo "Frames version: $FRAMES_VERSION"
-            echo "Nexus executable: $NEXUS_EXE"
-            echo
-            "$NEXUS_EXE" --version
-            echo
-            echo "Frames source discovery PASS"
-          } | tee -a "$DISC"
-
-      - name: Locate OVMF firmware
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-
-          OVMF_CODE="$(
-            find /usr/share/OVMF \
-              -type f \
-              \
-                -name 'OVMF_CODE_4M.fd' \
-                -o \
-                -name 'OVMF_CODE.fd' \
-              \
-              -print \
-              | head -n1
-          )"
-
-          OVMF_VARS="$(
-            find /usr/share/OVMF \
-              -type f \
-              \
-                -name 'OVMF_VARS_4M.fd' \
-                -o \
-                -name 'OVMF_VARS.fd' \
-              \
-              -print \
-              | head -n1 || true
+              | tee -a
