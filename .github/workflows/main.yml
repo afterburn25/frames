@@ -18,63 +18,52 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y qemu-system-x86 ovmf clang lld python3 unzip
 
-      - name: Locate Frames source
+      - name: Locate Frames source and bundled Nexus
         shell: bash
         run: |
           set -euo pipefail
-
           frames_dir=""
 
-          # Layout 1: source files are already at repository root.
-          if [[ -f "$GITHUB_WORKSPACE/toolchain/Nexus-Language-5.15.0/nexus" ]]; then
+          if [[ -f "$GITHUB_WORKSPACE/VERSION" && -f "$GITHUB_WORKSPACE/tools/qemu_certify.sh" ]]; then
             frames_dir="$GITHUB_WORKSPACE"
           fi
 
-          # Layout 2: source is inside a versioned directory in the repository.
           if [[ -z "$frames_dir" ]]; then
-            nexus_path="$(find "$GITHUB_WORKSPACE" -maxdepth 4 -type f \
-              -path '*/toolchain/Nexus-Language-5.15.0/nexus' \
-              -print -quit || true)"
-            if [[ -n "$nexus_path" ]]; then
-              frames_dir="${nexus_path%/toolchain/Nexus-Language-5.15.0/nexus}"
-            fi
+            candidate="$(find "$GITHUB_WORKSPACE" -maxdepth 4 -type f -name VERSION -print | while read -r v; do d="${v%/VERSION}"; [[ -f "$d/tools/qemu_certify.sh" ]] && echo "$d"; done | head -n1 || true)"
+            [[ -n "$candidate" ]] && frames_dir="$candidate"
           fi
 
-          # Layout 3: repository contains a Frames-*-Source.zip.
           if [[ -z "$frames_dir" ]]; then
-            source_zip="$(find "$GITHUB_WORKSPACE" -maxdepth 2 -type f \
-              -name 'Frames-*-Source.zip' -print | sort -V | tail -n1 || true)"
+            source_zip="$(find "$GITHUB_WORKSPACE" -maxdepth 2 -type f -name 'Frames-*-Source.zip' -print | sort -V | tail -n1 || true)"
             if [[ -n "$source_zip" ]]; then
               rm -rf "$RUNNER_TEMP/frames-source"
               mkdir -p "$RUNNER_TEMP/frames-source"
               echo "Extracting source archive: $source_zip"
               unzip -q "$source_zip" -d "$RUNNER_TEMP/frames-source"
-
-              nexus_path="$(find "$RUNNER_TEMP/frames-source" -maxdepth 6 -type f \
-                -path '*/toolchain/Nexus-Language-5.15.0/nexus' \
-                -print -quit || true)"
-              if [[ -n "$nexus_path" ]]; then
-                frames_dir="${nexus_path%/toolchain/Nexus-Language-5.15.0/nexus}"
-              fi
+              candidate="$(find "$RUNNER_TEMP/frames-source" -maxdepth 5 -type f -name VERSION -print | while read -r v; do d="${v%/VERSION}"; [[ -f "$d/tools/qemu_certify.sh" ]] && echo "$d"; done | head -n1 || true)"
+              [[ -n "$candidate" ]] && frames_dir="$candidate"
             fi
           fi
 
           if [[ -z "$frames_dir" ]]; then
             echo "Frames source tree was not found."
-            echo "Repository root contents:"
             find "$GITHUB_WORKSPACE" -maxdepth 3 -type f | sort | head -200
             exit 1
           fi
 
-          test -f "$frames_dir/toolchain/Nexus-Language-5.15.0/nexus"
-          test -f "$frames_dir/tools/qemu_certify.sh"
-          test -f "$frames_dir/VERSION"
+          nexus_path="$(find "$frames_dir/toolchain" -maxdepth 3 -type f -name nexus -path '*/Nexus-Language-*/nexus' -print | sort -V | tail -n1 || true)"
+          if [[ -z "$nexus_path" ]]; then
+            echo "Bundled Nexus compiler was not found under $frames_dir/toolchain"
+            exit 1
+          fi
 
           frames_version="$(tr -d '\r\n' < "$frames_dir/VERSION")"
           echo "FRAMES_DIR=$frames_dir" >> "$GITHUB_ENV"
           echo "FRAMES_VERSION=$frames_version" >> "$GITHUB_ENV"
+          echo "NEXUS_EXE=$nexus_path" >> "$GITHUB_ENV"
           echo "Frames source: $frames_dir"
           echo "Frames version: $frames_version"
+          echo "Nexus compiler: $nexus_path"
 
       - name: Locate firmware
         shell: bash
@@ -84,9 +73,7 @@ jobs:
           vars="$(find /usr/share/OVMF -type f \( -name 'OVMF_VARS_4M.fd' -o -name 'OVMF_VARS.fd' \) | head -n1)"
           test -n "$code"
           echo "OVMF_CODE=$code" >> "$GITHUB_ENV"
-          if [[ -n "$vars" ]]; then
-            echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"
-          fi
+          [[ -n "$vars" ]] && echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"
           echo "OVMF CODE: $code"
           echo "OVMF VARS: ${vars:-<none>}"
 
@@ -99,8 +86,8 @@ jobs:
           set -uo pipefail
           cd "$FRAMES_DIR"
           mkdir -p "$FRAMES_DIR/build"
-          export NEXUS="$FRAMES_DIR/toolchain/Nexus-Language-5.15.0/nexus"
-          chmod +x toolchain/Nexus-Language-5.15.0/nexus tools/*.sh tools/*.py
+          export NEXUS="$NEXUS_EXE"
+          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py
 
           set +e
           ./tools/qemu_certify.sh
@@ -111,7 +98,6 @@ jobs:
           echo
           echo "================ Frames runtime marker diagnosis ================"
           echo "qemu_certify.sh exit code: $cert_rc"
-
           if [[ ! -f "$LOG" ]]; then
             echo "serial.log was not produced."
             exit "$cert_rc"
@@ -119,34 +105,20 @@ jobs:
 
           python3 - "$FRAMES_DIR/tools/qemu_certify.sh" "$LOG" <<'PY'
           import pathlib, re, sys, json
-          script = pathlib.Path(sys.argv[1]).read_text(errors='replace')
-          log_path = pathlib.Path(sys.argv[2])
-          log = log_path.read_text(errors='replace')
-          m = re.search(r'for marker in\s+(.*?);\s*do', script, re.S)
+          script=pathlib.Path(sys.argv[1]).read_text(errors='replace')
+          log_path=pathlib.Path(sys.argv[2]); log=log_path.read_text(errors='replace')
+          m=re.search(r'for marker in\s+(.*?);\s*do',script,re.S)
           if not m:
               print('Could not parse expected marker list from qemu_certify.sh')
               raise SystemExit(2)
-          expected = m.group(1).split()
-          present = [x for x in expected if x in log]
-          missing = [x for x in expected if x not in log]
-          print(f'Expected markers: {len(expected)}')
-          print(f'Present markers:  {len(present)}')
-          print(f'Missing markers:  {len(missing)}')
+          expected=m.group(1).split(); present=[x for x in expected if x in log]; missing=[x for x in expected if x not in log]
+          print(f'Expected markers: {len(expected)}'); print(f'Present markers:  {len(present)}'); print(f'Missing markers:  {len(missing)}')
           print('\nMISSING MARKERS:')
-          for x in missing:
-              print(f'  - {x}')
-          print('\nLAST 100 SERIAL LINES:')
-          for line in log.splitlines()[-100:]:
-              print(line)
-          out = log_path.parent / 'MISSING-RUNTIME-MARKERS.json'
-          out.write_text(json.dumps({
-              'expected_count': len(expected),
-              'present_count': len(present),
-              'missing_count': len(missing),
-              'missing': missing,
-          }, indent=2) + '\n')
+          for x in missing: print(f'  - {x}')
+          print('\nLAST 120 SERIAL LINES:')
+          for line in log.splitlines()[-120:]: print(line)
+          (log_path.parent/'MISSING-RUNTIME-MARKERS.json').write_text(json.dumps({'expected_count':len(expected),'present_count':len(present),'missing_count':len(missing),'missing':missing},indent=2)+'\n')
           PY
-
           echo "================================================================="
           exit "$cert_rc"
 
@@ -156,21 +128,12 @@ jobs:
         run: |
           set +e
           mkdir -p "$GITHUB_WORKSPACE/runtime-evidence"
-
           if [[ -n "${FRAMES_DIR:-}" && -f "$FRAMES_DIR/build/serial.log" ]]; then
             cd "$FRAMES_DIR"
             python3 tools/runtime_evidence.py --serial build/serial.log || true
             python3 tools/runtime_storage_cert.py --serial build/serial.log || true
-
-            for f in \
-              build/serial.log \
-              build/MISSING-RUNTIME-MARKERS.json \
-              build/RUNTIME-EVIDENCE.json \
-              build/STORAGE-RUNTIME-CERT.json \
-              build/RUNTIME-CERTIFICATION.json; do
-              if [[ -f "$f" ]]; then
-                cp "$f" "$GITHUB_WORKSPACE/runtime-evidence/"
-              fi
+            for f in build/serial.log build/MISSING-RUNTIME-MARKERS.json build/RUNTIME-EVIDENCE.json build/STORAGE-RUNTIME-CERT.json build/RUNTIME-CERTIFICATION.json; do
+              [[ -f "$f" ]] && cp "$f" "$GITHUB_WORKSPACE/runtime-evidence/"
             done
           fi
 
