@@ -1,4 +1,4 @@
-name: Frames 0.9.39 Physical Boot Safety Certification v39
+name: Frames 0.9.40 Real Hardware Compatibility Certification v40
 
 on:
   workflow_dispatch:
@@ -13,9 +13,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 540
     env:
-      EXPECTED_FRAMES_VERSION: '0.9.39'
-      EXPECTED_SOURCE_SHA256: '7ee62048c2521a6dcc4c259d4d550110b0c71333fab98b712d8fa518f48604e5'
-      EXPECTED_WORKFLOW_REVISION: 'v39'
+      EXPECTED_FRAMES_VERSION: '0.9.40'
+      EXPECTED_SOURCE_SHA256: 'd761997e6cd276c1d46d7db655b0c10836b3e5cd1b3f35189e3f8785af553a6d'
+      EXPECTED_WORKFLOW_REVISION: 'v40'
 
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +32,7 @@ jobs:
           command -v python3
           command -v unzip
 
-      - name: Locate exact Frames 0.9.38 source and bundled Nexus
+      - name: Locate exact Frames 0.9.40 source and bundled Nexus
         shell: bash
         run: |
           set -euo pipefail
@@ -220,7 +220,7 @@ jobs:
             cp build/Frames-${FRAMES_VERSION}-Write-Test.img build/Frames-${FRAMES_VERSION}-Write-Test.before.img
             python3 tools/verify_write_test_image.py --before build/Frames-${FRAMES_VERSION}-Write-Test.before.img --after build/Frames-${FRAMES_VERSION}-Write-Test.img --require-pass
             python3 tools/verify_release.py
-            python3 tools/verify_runtime_repair_0939.py
+            python3 tools/verify_runtime_repair_0940.py
             python3 tools/make_usb_boot_image.py
             python3 tools/make_physical_preview_image.py
             python3 tools/verify_physical_preview_image.py
@@ -614,6 +614,31 @@ jobs:
             > "$EVIDENCE/PHYSICAL-PREVIEW-DEFINING-SHA256.txt"
           exit "$physical_rc"
 
+
+      - name: Real hardware compatibility expansion matrix
+        id: hardware_compat
+        shell: bash
+        run: |
+          set -uo pipefail
+          cd "$FRAMES_DIR"
+          export NEXUS="$NEXUS_EXE"
+          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py
+          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
+          mkdir -p "$EVIDENCE"
+          CONSOLE="$EVIDENCE/HWCOMPAT-CERTIFICATION-CONSOLE.log"
+
+          set +e
+          ./tools/qemu_hardware_compat_matrix_certify.sh 2>&1 | tee "$CONSOLE"
+          compat_rc=${PIPESTATUS[0]}
+          set -e
+          echo "$compat_rc" > "$EVIDENCE/HWCOMPAT-CERTIFY-EXIT-CODE.txt"
+
+          for f in build/hwcompat-*.log build/HWCOMPAT-*.json build/HWCOMPAT-*.txt; do
+            [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
+          done
+          sha256sum             build/BOOTX64.EFI             build/FramesKernel.fkrn             build/System.fex             build/Frames-${FRAMES_VERSION}-ESP.img             build/Frames-${FRAMES_VERSION}-Physical-Hardware-Preview.img             > "$EVIDENCE/HWCOMPAT-DEFINING-SHA256.txt"
+          exit "$compat_rc"
+
       - name: Build runtime evidence
         if: always()
         shell: bash
@@ -734,6 +759,13 @@ jobs:
             done
           fi
 
+
+          if [[ -n "${FRAMES_DIR:-}" && -d "$FRAMES_DIR/build" ]]; then
+            for f in "$FRAMES_DIR"/build/hwcompat-*.log "$FRAMES_DIR"/build/HWCOMPAT-*.json "$FRAMES_DIR"/build/HWCOMPAT-*.txt; do
+              [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
+            done
+          fi
+
           echo "Evidence directory contents:"
           find "$EVIDENCE" -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
 
@@ -741,7 +773,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frames-0.9.39-physical-boot-safety-evidence-v39
+          name: frames-0.9.40-hardware-compat-evidence-v40
           path: ${{ github.workspace }}/runtime-evidence
           if-no-files-found: error
           retention-days: 14
