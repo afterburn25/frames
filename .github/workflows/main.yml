@@ -1,4 +1,4 @@
-name: Frames 0.9.25 Scheduler Stress Certification v16
+name: Frames 0.9.26 Storage-Read Stress Certification v17
 
 on:
   workflow_dispatch:
@@ -13,8 +13,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
-      EXPECTED_FRAMES_VERSION: '0.9.25'
-      EXPECTED_SOURCE_SHA256: 'daf648baff849e2e5042b95d864f66efdfc4f34778a46602cebd566df37dbddf'
+      EXPECTED_FRAMES_VERSION: '0.9.26'
+      EXPECTED_SOURCE_SHA256: '5732facba3a41ee883bd90d10b5aa264e3b0127735cdf7fe8e3b9f48e1b45719'
 
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +31,7 @@ jobs:
           command -v python3
           command -v unzip
 
-      - name: Locate exact Frames 0.9.25 source and bundled Nexus
+      - name: Locate exact Frames 0.9.26 source and bundled Nexus
         shell: bash
         run: |
           set -euo pipefail
@@ -61,7 +61,7 @@ jobs:
             echo "Source SHA-256: $actual_sha"
             if [[ "$actual_sha" != "$EXPECTED_SOURCE_SHA256" ]]; then
               {
-                echo "FAIL: Frames source archive hash does not match the authoritative 0.9.25 source."
+                echo "FAIL: Frames source archive hash does not match the authoritative 0.9.26 source."
                 echo "Expected: $EXPECTED_SOURCE_SHA256"
                 echo "Actual:   $actual_sha"
                 echo "File:     $source_zip"
@@ -195,7 +195,7 @@ jobs:
             ./tools/build.sh
             python3 tools/make_esp.py
             python3 tools/verify_release.py
-            python3 tools/verify_runtime_repair_0925.py
+            python3 tools/verify_runtime_repair_0926.py
             python3 tools/runtime_preflight.py --require-ready
           } 2>&1 | tee "$CONSOLE"
 
@@ -205,7 +205,7 @@ jobs:
         env:
           # The repaired GPT/FAT path performs many more real NVMe reads than
           # older diagnostic builds. Give the two-vCPU TCG run ample headroom.
-          FRAMES_BOOT_TIMEOUT: '120'
+          FRAMES_BOOT_TIMEOUT: '180'
         run: |
           set -uo pipefail
           cd "$FRAMES_DIR"
@@ -241,7 +241,7 @@ jobs:
           expected=m.group(1).split()
           present=[x for x in expected if x in log]
           missing=[x for x in expected if x not in log]
-          fatal=[x for x in ('FRAMES_PAGE_FAULT','FRAMES_AP_PROTECTION_FAULT=','FRAMES_STRESS_ALLOCATOR_FAIL','FRAMES_STRESS_SCHEDULER_FAIL') if x in log]
+          fatal=[x for x in ('FRAMES_PAGE_FAULT','FRAMES_AP_PROTECTION_FAULT=','FRAMES_STRESS_ALLOCATOR_FAIL','FRAMES_STRESS_SCHEDULER_FAIL','FRAMES_STRESS_STORAGE_READ_FAIL') if x in log]
           ack_pos=log.find('FRAMES_RESCHED_IPI_OK')
           fallback_pos=log.find('FRAMES_RESCHED_FALLBACK_SENT')
           eager_rhs = ack_pos >= 0 and fallback_pos > ack_pos
@@ -278,7 +278,7 @@ jobs:
           diag_rc=$?
 
           set +e
-          python3 tools/stress_evidence.py --serial "$LOG" --require-scheduler-pass | tee "$GITHUB_WORKSPACE/runtime-evidence/STRESS-CERTIFICATION-CONSOLE.log"
+          python3 tools/stress_evidence.py --serial "$LOG" --require-storage-read-pass | tee "$GITHUB_WORKSPACE/runtime-evidence/STRESS-CERTIFICATION-CONSOLE.log"
           stress_rc=${PIPESTATUS[0]}
           set -e
           echo "$stress_rc" > "$GITHUB_WORKSPACE/runtime-evidence/STRESS-CERTIFY-EXIT-CODE.txt"
@@ -352,7 +352,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frames-0.9.25-stress-evidence
+          name: frames-0.9.26-stress-evidence
           path: ${{ github.workspace }}/runtime-evidence
           if-no-files-found: error
           retention-days: 14
