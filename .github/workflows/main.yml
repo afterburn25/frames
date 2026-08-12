@@ -1,4 +1,4 @@
-name: Frames 0.9.34 Crash-Consistent Filesystem Write & Recovery Certification v28
+name: Frames 0.9.34 Sacrificial Filesystem Write & Crash-Recovery Certification v29
 
 on:
   workflow_dispatch:
@@ -11,10 +11,11 @@ permissions:
 jobs:
   qemu-ovmf-certification:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       EXPECTED_FRAMES_VERSION: '0.9.34'
-      EXPECTED_SOURCE_SHA256: '567ad9a58cea432e2568a32bc00f4892f9a18432374bed3aa28fa41c29f3dd6f'
+      EXPECTED_SOURCE_SHA256: '332254da868f7ff87a2bb51dd862b0759a17cd323ce2e137b4f52010f2efaa77'
+      EXPECTED_WORKFLOW_REVISION: 'v29'
 
     steps:
       - uses: actions/checkout@v4
@@ -40,72 +41,91 @@ jobs:
           frames_dir=""
           source_zip=""
 
-          # Prefer a sealed source archive for the exact expected release. This
-          # prevents an older unpacked tree or older kit from silently winning.
-          source_zip="$(find "$GITHUB_WORKSPACE" -maxdepth 2 -type f -name "Frames-${EXPECTED_FRAMES_VERSION}-Source*.zip" -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n1 | cut -d' ' -f2- || true)"
+          # v29: fail closed on exact source content, not candidate timestamp.
+          # Scan all direct source ZIPs first, then all matching runtime kits.
+          # A stale same-version ZIP is ignored rather than being allowed to win.
+          candidate_log="$EVIDENCE/SOURCE-CANDIDATES.txt"
+          : > "$candidate_log"
+
+          select_if_exact() {
+            local candidate="$1"
+            local actual_sha
+            actual_sha="$(sha256sum "$candidate" | awk '{print $1}')"
+            printf '%s  %s\n' "$actual_sha" "$candidate" >> "$candidate_log"
+            if [[ "$actual_sha" == "$EXPECTED_SOURCE_SHA256" ]]; then
+              source_zip="$candidate"
+              return 0
+            fi
+            return 1
+          }
+
+          while IFS= read -r candidate; do
+            [[ -n "$candidate" ]] || continue
+            if select_if_exact "$candidate"; then
+              break
+            fi
+          done < <(
+            find "$GITHUB_WORKSPACE" -maxdepth 3 -type f \
+              -name "Frames-${EXPECTED_FRAMES_VERSION}-Source*.zip" -print 2>/dev/null | sort
+          )
 
           if [[ -z "$source_zip" ]]; then
-            kit_zip="$(find "$GITHUB_WORKSPACE" -maxdepth 2 -type f -name "Frames-${EXPECTED_FRAMES_VERSION}-Runtime-Certification-Kit*.zip" -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n1 | cut -d' ' -f2- || true)"
-            if [[ -n "$kit_zip" ]]; then
-              rm -rf "$RUNNER_TEMP/frames-kit"
-              mkdir -p "$RUNNER_TEMP/frames-kit"
-              echo "Extracting exact runtime kit: $kit_zip"
-              unzip -q "$kit_zip" -d "$RUNNER_TEMP/frames-kit"
-              source_zip="$(find "$RUNNER_TEMP/frames-kit" -maxdepth 4 -type f -name "Frames-${EXPECTED_FRAMES_VERSION}-Source*.zip" -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n1 | cut -d' ' -f2- || true)"
-            fi
+            while IFS= read -r kit_zip; do
+              [[ -n "$kit_zip" ]] || continue
+              rm -rf "$RUNNER_TEMP/frames-kit-candidate"
+              mkdir -p "$RUNNER_TEMP/frames-kit-candidate"
+              echo "Inspecting runtime kit: $kit_zip"
+              unzip -q "$kit_zip" -d "$RUNNER_TEMP/frames-kit-candidate"
+              while IFS= read -r candidate; do
+                [[ -n "$candidate" ]] || continue
+                if select_if_exact "$candidate"; then
+                  break 2
+                fi
+              done < <(
+                find "$RUNNER_TEMP/frames-kit-candidate" -maxdepth 5 -type f \
+                  -name "Frames-${EXPECTED_FRAMES_VERSION}-Source*.zip" -print 2>/dev/null | sort
+              )
+            done < <(
+              find "$GITHUB_WORKSPACE" -maxdepth 3 -type f \
+                -name "Frames-${EXPECTED_FRAMES_VERSION}-Runtime-Certification-Kit*.zip" -print 2>/dev/null | sort
+            )
           fi
 
-          if [[ -n "$source_zip" ]]; then
-            actual_sha="$(sha256sum "$source_zip" | awk '{print $1}')"
-            echo "Selected sealed source: $source_zip"
-            echo "Source SHA-256: $actual_sha"
-            if [[ "$actual_sha" != "$EXPECTED_SOURCE_SHA256" ]]; then
-              {
-                echo "FAIL: Frames source archive hash does not match the authoritative 0.9.34 source."
-                echo "Expected: $EXPECTED_SOURCE_SHA256"
-                echo "Actual:   $actual_sha"
-                echo "File:     $source_zip"
-              } | tee "$EVIDENCE/SOURCE-INTEGRITY-FAILURE.txt"
-              exit 1
-            fi
-            rm -rf "$RUNNER_TEMP/frames-source"
-            mkdir -p "$RUNNER_TEMP/frames-source"
-            unzip -q "$source_zip" -d "$RUNNER_TEMP/frames-source"
-            while IFS= read -r vfile; do
-              candidate="${vfile%/VERSION}"
-              [[ -f "$candidate/tools/qemu_certify.sh" ]] || continue
-              version="$(tr -d '\r\n' < "$vfile")"
-              if [[ "$version" == "$EXPECTED_FRAMES_VERSION" ]]; then
-                frames_dir="$candidate"
-                break
-              fi
-            done < <(find "$RUNNER_TEMP/frames-source" -maxdepth 6 -type f -name VERSION -print | sort)
+          if [[ -z "$source_zip" ]]; then
+            {
+              echo "FAIL: no Frames ${EXPECTED_FRAMES_VERSION} source archive matched the exact required SHA-256."
+              echo "Expected: $EXPECTED_SOURCE_SHA256"
+              echo
+              echo "Candidates inspected:"
+              cat "$candidate_log"
+            } | tee "$EVIDENCE/SOURCE-INTEGRITY-FAILURE.txt"
+            exit 1
           fi
 
-          # Fallback: allow an unpacked exact-version source tree only when no
-          # sealed archive/kit is present. Older trees are explicitly ignored.
-          if [[ -z "$frames_dir" && -z "$source_zip" ]]; then
-            while IFS= read -r vfile; do
-              candidate="${vfile%/VERSION}"
-              [[ -f "$candidate/tools/qemu_certify.sh" ]] || continue
-              version="$(tr -d '\r\n' < "$vfile")"
-              if [[ "$version" == "$EXPECTED_FRAMES_VERSION" ]]; then
-                frames_dir="$candidate"
-                break
-              fi
-            done < <(find "$GITHUB_WORKSPACE" -maxdepth 5 -type f -name VERSION -print | sort)
-          fi
+          actual_sha="$(sha256sum "$source_zip" | awk '{print $1}')"
+          echo "Selected sealed source: $source_zip"
+          echo "Source SHA-256: $actual_sha"
+          echo "Workflow revision: $EXPECTED_WORKFLOW_REVISION"
+
+          rm -rf "$RUNNER_TEMP/frames-source"
+          mkdir -p "$RUNNER_TEMP/frames-source"
+          unzip -q "$source_zip" -d "$RUNNER_TEMP/frames-source"
+
+          while IFS= read -r vfile; do
+            candidate="${vfile%/VERSION}"
+            [[ -f "$candidate/tools/qemu_certify.sh" ]] || continue
+            version="$(tr -d '\r\n' < "$vfile")"
+            if [[ "$version" == "$EXPECTED_FRAMES_VERSION" ]]; then
+              frames_dir="$candidate"
+              break
+            fi
+          done < <(find "$RUNNER_TEMP/frames-source" -maxdepth 6 -type f -name VERSION -print | sort)
 
           if [[ -z "$frames_dir" ]]; then
             {
-              echo "FAIL: exact Frames ${EXPECTED_FRAMES_VERSION} source tree was not found."
-              echo "Older/newer Frames releases are deliberately ignored by this workflow."
-              echo
-              echo "Repository files:"
-              find "$GITHUB_WORKSPACE" -maxdepth 3 -type f -print 2>/dev/null | sort | head -300
-              echo
-              echo "Runner temp files:"
-              find "$RUNNER_TEMP" -maxdepth 5 -type f -print 2>/dev/null | sort | head -300
+              echo "FAIL: exact source archive matched SHA but did not contain a valid Frames ${EXPECTED_FRAMES_VERSION} source tree."
+              echo "Selected archive: $source_zip"
+              echo "SHA-256: $actual_sha"
             } | tee "$EVIDENCE/SOURCE-DISCOVERY-FAILURE.txt"
             exit 1
           fi
@@ -205,6 +225,9 @@ jobs:
             python3 tools/verify_lifecycle_image.py --image build/Frames-${FRAMES_VERSION}-Lifecycle-reboot.img --mode reboot --expect-state 0 --require-pass
             python3 tools/verify_lifecycle_image.py --image build/Frames-${FRAMES_VERSION}-Lifecycle-shutdown.img --mode shutdown --expect-state 0 --require-pass
             python3 tools/make_filesystem_test_nvme.py --all
+            for s in 0 1 2 3 4; do
+              python3 tools/verify_filesystem_test_image.py --image "build/Frames-${FRAMES_VERSION}-Filesystem-s${s}.img" --scenario "$s" --phase initial --require-pass
+            done
             sha256sum build/BOOTX64.EFI build/FramesKernel.fkrn build/System.fex build/Frames-${FRAMES_VERSION}-ESP.img build/BOOTSTAT.TXT
             python3 tools/runtime_preflight.py --require-ready
           } 2>&1 | tee "$CONSOLE"
@@ -354,7 +377,7 @@ jobs:
 
           exit "$lifecycle_rc"
 
-      - name: Crash-consistent filesystem write and recovery certification
+      - name: Sacrificial filesystem write and hard-crash recovery certification
         id: filesystem
         shell: bash
         env:
@@ -370,29 +393,38 @@ jobs:
 
           set +e
           ./tools/qemu_filesystem_certify.sh 2>&1 | tee "$CONSOLE"
-          fs_rc=${PIPESTATUS[0]}
+          filesystem_rc=${PIPESTATUS[0]}
           set -e
-          echo "$fs_rc" > "$EVIDENCE/FILESYSTEM-CERTIFY-EXIT-CODE.txt"
+          echo "$filesystem_rc" > "$EVIDENCE/FILESYSTEM-CERTIFY-EXIT-CODE.txt"
 
           for f in \
             build/FILESYSTEM-EVIDENCE.json \
+            build/FILESYSTEM-S0-MEDIA.json \
             build/FILESYSTEM-S1-MEDIA.json \
             build/FILESYSTEM-S2-MEDIA.json \
             build/FILESYSTEM-S3-MEDIA.json \
             build/FILESYSTEM-S4-MEDIA.json \
-            build/FILESYSTEM-S5-MEDIA.json \
+            build/FILESYSTEM-S0-TARGET.json \
             build/FILESYSTEM-S1-TARGET.json \
             build/FILESYSTEM-S2-TARGET.json \
             build/FILESYSTEM-S3-TARGET.json \
             build/FILESYSTEM-S4-TARGET.json \
-            build/FILESYSTEM-S5-TARGET.json; do
+            build/FILESYSTEM-S0-EXIT-CODE.txt \
+            build/FILESYSTEM-S1-CRASH-EXIT-CODE.txt \
+            build/FILESYSTEM-S2-CRASH-EXIT-CODE.txt \
+            build/FILESYSTEM-S3-CRASH-EXIT-CODE.txt \
+            build/FILESYSTEM-S4-CRASH-EXIT-CODE.txt \
+            build/FILESYSTEM-S1-RECOVERY-EXIT-CODE.txt \
+            build/FILESYSTEM-S2-RECOVERY-EXIT-CODE.txt \
+            build/FILESYSTEM-S3-RECOVERY-EXIT-CODE.txt \
+            build/FILESYSTEM-S4-RECOVERY-EXIT-CODE.txt; do
             [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
           done
-          for f in build/fs-s*-serial.log build/fs-s*-qemu-debug.log build/fs-s*-monitor.log build/fs-s*-input.log; do
+          for f in build/fs-s*-serial.log build/fs-s*-qemu-debug.log build/fs-s*-input.log build/fs-s*-monitor.log; do
             [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
           done
 
-          exit "$fs_rc"
+          exit "$filesystem_rc"
 
       - name: Build runtime evidence
         if: always()
@@ -407,6 +439,8 @@ jobs:
             echo "UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
             echo "EXPECTED_FRAMES_VERSION=${EXPECTED_FRAMES_VERSION:-<unset>}"
+            echo "EXPECTED_WORKFLOW_REVISION=${EXPECTED_WORKFLOW_REVISION:-<unset>}"
+            echo "EXPECTED_SOURCE_SHA256=${EXPECTED_SOURCE_SHA256:-<unset>}"
             echo "FRAMES_DIR=${FRAMES_DIR:-<unset>}"
             echo "FRAMES_VERSION=${FRAMES_VERSION:-<unset>}"
             echo "FRAMES_SOURCE_ZIP=${FRAMES_SOURCE_ZIP:-<unset>}"
@@ -477,7 +511,7 @@ jobs:
           fi
 
           if [[ -n "${FRAMES_DIR:-}" && -d "$FRAMES_DIR/build" ]]; then
-            for f in "$FRAMES_DIR"/build/FILESYSTEM-*.json "$FRAMES_DIR"/build/fs-s*-serial.log "$FRAMES_DIR"/build/fs-s*-qemu-debug.log "$FRAMES_DIR"/build/fs-s*-monitor.log "$FRAMES_DIR"/build/fs-s*-input.log; do
+            for f in "$FRAMES_DIR"/build/FILESYSTEM-*.json "$FRAMES_DIR"/build/FILESYSTEM-*.txt "$FRAMES_DIR"/build/fs-s*-serial.log "$FRAMES_DIR"/build/fs-s*-qemu-debug.log "$FRAMES_DIR"/build/fs-s*-input.log "$FRAMES_DIR"/build/fs-s*-monitor.log; do
               [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
             done
           fi
@@ -489,7 +523,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frames-0.9.34-filesystem-evidence
+          name: frames-0.9.34-filesystem-evidence-v29
           path: ${{ github.workspace }}/runtime-evidence
           if-no-files-found: error
           retention-days: 14
