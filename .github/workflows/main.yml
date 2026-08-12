@@ -1,4 +1,4 @@
-name: Frames 0.9.36 FAT32 Allocation & Full File Lifecycle Certification v34
+name: Frames 0.9.37 Scalable SMP & Multi-Core Certification v35
 
 on:
   workflow_dispatch:
@@ -11,11 +11,11 @@ permissions:
 jobs:
   qemu-ovmf-certification:
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: 330
     env:
-      EXPECTED_FRAMES_VERSION: '0.9.36'
-      EXPECTED_SOURCE_SHA256: 'ac50722c8f6ea17b4349f009e5a284fbb341880131445172f22a6144707da428'
-      EXPECTED_WORKFLOW_REVISION: 'v34'
+      EXPECTED_FRAMES_VERSION: '0.9.37'
+      EXPECTED_SOURCE_SHA256: '2e8e0af7191dd4f6549e419abfbbb3e254012dc1b6886bbe4672b167457ffcdd'
+      EXPECTED_WORKFLOW_REVISION: 'v35'
 
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +32,7 @@ jobs:
           command -v python3
           command -v unzip
 
-      - name: Locate exact Frames 0.9.36 source and bundled Nexus
+      - name: Locate exact Frames 0.9.37 source and bundled Nexus
         shell: bash
         run: |
           set -euo pipefail
@@ -220,7 +220,7 @@ jobs:
             cp build/Frames-${FRAMES_VERSION}-Write-Test.img build/Frames-${FRAMES_VERSION}-Write-Test.before.img
             python3 tools/verify_write_test_image.py --before build/Frames-${FRAMES_VERSION}-Write-Test.before.img --after build/Frames-${FRAMES_VERSION}-Write-Test.img --require-pass
             python3 tools/verify_release.py
-            python3 tools/verify_runtime_repair_0936.py
+            python3 tools/verify_runtime_repair_0937.py
             python3 tools/make_lifecycle_test_nvme.py --mode both
             python3 tools/verify_lifecycle_image.py --image build/Frames-${FRAMES_VERSION}-Lifecycle-reboot.img --mode reboot --expect-state 0 --require-pass
             python3 tools/verify_lifecycle_image.py --image build/Frames-${FRAMES_VERSION}-Lifecycle-shutdown.img --mode shutdown --expect-state 0 --require-pass
@@ -281,7 +281,7 @@ jobs:
           expected=m.group(1).split()
           present=[x for x in expected if x in log]
           missing=[x for x in expected if x not in log]
-          fatal=[x for x in ('FRAMES_PAGE_FAULT','FRAMES_AP_PROTECTION_FAULT=','FRAMES_STRESS_ALLOCATOR_FAIL','FRAMES_STRESS_SCHEDULER_FAIL','FRAMES_STRESS_STORAGE_READ_FAIL','FRAMES_STRESS_USB_INPUT_FAIL','FRAMES_STRESS_NETWORK_FAIL','FRAMES_STRESS_DISPLAY_FAIL','FRAMES_STRESS_RECOVERY_FAIL','FRAMES_STRESS_POWER_FAIL','FRAMES_STORAGE_WRITE_INTEGRITY_FAIL','FRAMES_LIFECYCLE_DESTRUCTIVE_FAIL','FRAMES_FS_WRITE_CERT_FAIL','FRAMES_SYSTEM_VOLUME_WRITE_CERT_FAIL','FRAMES_FAT_LIFECYCLE_CERT_FAIL') if x in log]
+          fatal=[x for x in ('FRAMES_PAGE_FAULT','FRAMES_AP_PROTECTION_FAULT=','FRAMES_STRESS_ALLOCATOR_FAIL','FRAMES_STRESS_SCHEDULER_FAIL','FRAMES_STRESS_STORAGE_READ_FAIL','FRAMES_STRESS_USB_INPUT_FAIL','FRAMES_STRESS_NETWORK_FAIL','FRAMES_STRESS_DISPLAY_FAIL','FRAMES_STRESS_RECOVERY_FAIL','FRAMES_STRESS_POWER_FAIL','FRAMES_STORAGE_WRITE_INTEGRITY_FAIL','FRAMES_LIFECYCLE_DESTRUCTIVE_FAIL','FRAMES_FS_WRITE_CERT_FAIL','FRAMES_SYSTEM_VOLUME_WRITE_CERT_FAIL','FRAMES_FAT_LIFECYCLE_CERT_FAIL','FRAMES_SMP_SCALE_CERT_FAIL') if x in log]
           ack_pos=log.find('FRAMES_RESCHED_IPI_OK')
           fallback_pos=log.find('FRAMES_RESCHED_FALLBACK_SENT')
           eager_rhs = ack_pos >= 0 and fallback_pos > ack_pos
@@ -506,6 +506,48 @@ jobs:
 
           exit "$fat_rc"
 
+      - name: Scalable SMP 2 through 96 logical CPU certification
+        id: smp_scale
+        shell: bash
+        run: |
+          set -uo pipefail
+          cd "$FRAMES_DIR"
+          export NEXUS="$NEXUS_EXE"
+          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py
+          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
+          mkdir -p "$EVIDENCE"
+
+          scale_rc=0
+          for cpus in 2 4 8 16 32 64 96; do
+            CONSOLE="$EVIDENCE/SMP-${cpus}-CERTIFICATION-CONSOLE.log"
+            set +e
+            ./tools/qemu_smp_scale_certify.sh "$cpus" 2>&1 | tee "$CONSOLE"
+            rc=${PIPESTATUS[0]}
+            set -e
+            echo "$rc" > "$EVIDENCE/SMP-${cpus}-CERTIFY-EXIT-CODE.txt"
+            for f in \
+              "build/smp-${cpus}-serial.log" \
+              "build/smp-${cpus}-qmp-input.log" \
+              "build/smp-${cpus}-monitor.log" \
+              "build/smp-${cpus}-qemu-debug.log" \
+              "build/SMP-${cpus}-QEMU-EXIT-CODE.txt" \
+              "build/SMP-SCALE-${cpus}-EVIDENCE.json"; do
+              [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
+            done
+            if [[ "$rc" -ne 0 ]]; then scale_rc="$rc"; break; fi
+          done
+
+          if [[ "$scale_rc" -eq 0 ]]; then
+            set +e
+            python3 tools/smp_scale_matrix_evidence.py --require-pass 2>&1 | tee "$EVIDENCE/SMP-SCALE-MATRIX-CERTIFICATION-CONSOLE.log"
+            matrix_rc=${PIPESTATUS[0]}
+            set -e
+            [[ -f build/SMP-SCALE-MATRIX-EVIDENCE.json ]] && cp build/SMP-SCALE-MATRIX-EVIDENCE.json "$EVIDENCE/"
+            if [[ "$matrix_rc" -ne 0 ]]; then scale_rc="$matrix_rc"; fi
+          fi
+          echo "$scale_rc" > "$EVIDENCE/SMP-SCALE-CERTIFY-EXIT-CODE.txt"
+          exit "$scale_rc"
+
       - name: Build runtime evidence
         if: always()
         shell: bash
@@ -608,6 +650,12 @@ jobs:
             done
           fi
 
+          if [[ -n "${FRAMES_DIR:-}" && -d "$FRAMES_DIR/build" ]]; then
+            for f in "$FRAMES_DIR"/build/smp-*-serial.log "$FRAMES_DIR"/build/smp-*-qmp-input.log "$FRAMES_DIR"/build/smp-*-monitor.log "$FRAMES_DIR"/build/smp-*-qemu-debug.log "$FRAMES_DIR"/build/SMP-*.json "$FRAMES_DIR"/build/SMP-*.txt; do
+              [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
+            done
+          fi
+
           echo "Evidence directory contents:"
           find "$EVIDENCE" -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
 
@@ -615,7 +663,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frames-0.9.36-fat-lifecycle-evidence-v34
+          name: frames-0.9.37-smp-scale-evidence-v35
           path: ${{ github.workspace }}/runtime-evidence
           if-no-files-found: error
           retention-days: 14
