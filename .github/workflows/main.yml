@@ -1,4 +1,4 @@
-name: Frames 0.9.31 Power Stress/Fault Certification v25
+name: Frames 0.9.32 Persistent Storage Write & Integrity Certification v26
 
 on:
   workflow_dispatch:
@@ -13,8 +13,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
-      EXPECTED_FRAMES_VERSION: '0.9.31'
-      EXPECTED_SOURCE_SHA256: '7270cff0a13a59f8fcd2a1acf80178b8f182068fa3181552c12eeaa718235636'
+      EXPECTED_FRAMES_VERSION: '0.9.32'
+      EXPECTED_SOURCE_SHA256: 'b3d570f5fc8262320b301ff7475687b8d28848c83aaa24d44a4ea57eccdce86e'
 
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +31,7 @@ jobs:
           command -v python3
           command -v unzip
 
-      - name: Locate exact Frames 0.9.31 source and bundled Nexus
+      - name: Locate exact Frames 0.9.32 source and bundled Nexus
         shell: bash
         run: |
           set -euo pipefail
@@ -61,7 +61,7 @@ jobs:
             echo "Source SHA-256: $actual_sha"
             if [[ "$actual_sha" != "$EXPECTED_SOURCE_SHA256" ]]; then
               {
-                echo "FAIL: Frames source archive hash does not match the authoritative 0.9.31 source."
+                echo "FAIL: Frames source archive hash does not match the authoritative 0.9.32 source."
                 echo "Expected: $EXPECTED_SOURCE_SHA256"
                 echo "Actual:   $actual_sha"
                 echo "File:     $source_zip"
@@ -196,8 +196,11 @@ jobs:
             python3 -m compileall -q tools
             ./tools/build.sh
             python3 tools/make_esp.py
+            python3 tools/make_write_test_nvme.py
+            cp build/Frames-${FRAMES_VERSION}-Write-Test.img build/Frames-${FRAMES_VERSION}-Write-Test.before.img
+            python3 tools/verify_write_test_image.py --before build/Frames-${FRAMES_VERSION}-Write-Test.before.img --after build/Frames-${FRAMES_VERSION}-Write-Test.img --require-pass
             python3 tools/verify_release.py
-            python3 tools/verify_runtime_repair_0931.py
+            python3 tools/verify_runtime_repair_0932.py
             sha256sum build/BOOTX64.EFI build/FramesKernel.fkrn build/System.fex build/Frames-${FRAMES_VERSION}-ESP.img build/BOOTSTAT.TXT
             python3 tools/runtime_preflight.py --require-ready
           } 2>&1 | tee "$CONSOLE"
@@ -208,7 +211,7 @@ jobs:
         env:
           # The repaired GPT/FAT path performs many more real NVMe reads than
           # older diagnostic builds. Give the two-vCPU TCG run ample headroom.
-          FRAMES_BOOT_TIMEOUT: '180'
+          FRAMES_BOOT_TIMEOUT: '240'
         run: |
           set -uo pipefail
           cd "$FRAMES_DIR"
@@ -244,7 +247,7 @@ jobs:
           expected=m.group(1).split()
           present=[x for x in expected if x in log]
           missing=[x for x in expected if x not in log]
-          fatal=[x for x in ('FRAMES_PAGE_FAULT','FRAMES_AP_PROTECTION_FAULT=','FRAMES_STRESS_ALLOCATOR_FAIL','FRAMES_STRESS_SCHEDULER_FAIL','FRAMES_STRESS_STORAGE_READ_FAIL','FRAMES_STRESS_USB_INPUT_FAIL','FRAMES_STRESS_NETWORK_FAIL','FRAMES_STRESS_DISPLAY_FAIL','FRAMES_STRESS_RECOVERY_FAIL','FRAMES_STRESS_POWER_FAIL') if x in log]
+          fatal=[x for x in ('FRAMES_PAGE_FAULT','FRAMES_AP_PROTECTION_FAULT=','FRAMES_STRESS_ALLOCATOR_FAIL','FRAMES_STRESS_SCHEDULER_FAIL','FRAMES_STRESS_STORAGE_READ_FAIL','FRAMES_STRESS_USB_INPUT_FAIL','FRAMES_STRESS_NETWORK_FAIL','FRAMES_STRESS_DISPLAY_FAIL','FRAMES_STRESS_RECOVERY_FAIL','FRAMES_STRESS_POWER_FAIL','FRAMES_STORAGE_WRITE_INTEGRITY_FAIL') if x in log]
           ack_pos=log.find('FRAMES_RESCHED_IPI_OK')
           fallback_pos=log.find('FRAMES_RESCHED_FALLBACK_SENT')
           eager_rhs = ack_pos >= 0 and fallback_pos > ack_pos
@@ -283,8 +286,14 @@ jobs:
           set +e
           python3 tools/stress_evidence.py --serial "$LOG" --require-power-pass | tee "$GITHUB_WORKSPACE/runtime-evidence/STRESS-CERTIFICATION-CONSOLE.log"
           stress_rc=${PIPESTATUS[0]}
+          python3 tools/runtime_storage_cert.py --serial "$LOG" --require-pass | tee "$GITHUB_WORKSPACE/runtime-evidence/STORAGE-RUNTIME-CERTIFICATION-CONSOLE.log"
+          storage_rc=${PIPESTATUS[0]}
+          python3 tools/storage_write_evidence.py --serial "$LOG" --media "$FRAMES_DIR/build/WRITE-MEDIA-INTEGRITY.json" --require-pass | tee "$GITHUB_WORKSPACE/runtime-evidence/STORAGE-WRITE-CERTIFICATION-CONSOLE.log"
+          write_rc=${PIPESTATUS[0]}
           set -e
           echo "$stress_rc" > "$GITHUB_WORKSPACE/runtime-evidence/STRESS-CERTIFY-EXIT-CODE.txt"
+          echo "$storage_rc" > "$GITHUB_WORKSPACE/runtime-evidence/STORAGE-RUNTIME-CERTIFY-EXIT-CODE.txt"
+          echo "$write_rc" > "$GITHUB_WORKSPACE/runtime-evidence/STORAGE-WRITE-CERTIFY-EXIT-CODE.txt"
 
           echo "================================================================="
           if [[ "$cert_rc" -eq 0 && "$diag_rc" -ne 0 ]]; then
@@ -292,6 +301,12 @@ jobs:
           fi
           if [[ "$cert_rc" -eq 0 && "$stress_rc" -ne 0 ]]; then
             exit "$stress_rc"
+          fi
+          if [[ "$cert_rc" -eq 0 && "$storage_rc" -ne 0 ]]; then
+            exit "$storage_rc"
+          fi
+          if [[ "$cert_rc" -eq 0 && "$write_rc" -ne 0 ]]; then
+            exit "$write_rc"
           fi
           exit "$cert_rc"
 
@@ -334,6 +349,7 @@ jobs:
             python3 tools/runtime_evidence.py --serial build/serial.log || true
             python3 tools/runtime_storage_cert.py --serial build/serial.log || true
             python3 tools/stress_evidence.py --serial build/serial.log || true
+            python3 tools/storage_write_evidence.py --serial build/serial.log --media build/WRITE-MEDIA-INTEGRITY.json || true
             for f in \
               build/serial.log \
               build/qmp-input.log \
@@ -342,6 +358,9 @@ jobs:
               build/SHORT-CIRCUIT-RUNTIME.json \
               build/RUNTIME-EVIDENCE.json \
               build/STORAGE-RUNTIME-CERT.json \
+              build/STORAGE-WRITE-EVIDENCE.json \
+              build/WRITE-MEDIA-INTEGRITY.json \
+              build/WRITE-TARGET-MANIFEST.json \
               build/RUNTIME-CERTIFICATION.json \
               build/STRESS-EVIDENCE.json; do
               [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
@@ -360,7 +379,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frames-0.9.31-stress-evidence
+          name: frames-0.9.32-storage-write-evidence
           path: ${{ github.workspace }}/runtime-evidence
           if-no-files-found: error
           retention-days: 14
