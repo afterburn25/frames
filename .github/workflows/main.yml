@@ -1,4 +1,4 @@
-name: Frames 0.9.32 Persistent Storage Write & Integrity Certification v26
+name: Frames 0.9.33 Destructive Reboot & Shutdown Certification v27
 
 on:
   workflow_dispatch:
@@ -13,8 +13,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
-      EXPECTED_FRAMES_VERSION: '0.9.32'
-      EXPECTED_SOURCE_SHA256: 'b3d570f5fc8262320b301ff7475687b8d28848c83aaa24d44a4ea57eccdce86e'
+      EXPECTED_FRAMES_VERSION: '0.9.33'
+      EXPECTED_SOURCE_SHA256: 'a9ce4db17f900d9962daf861ec588f4c299581054fb5d3ea96f7984edda88717'
 
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +31,7 @@ jobs:
           command -v python3
           command -v unzip
 
-      - name: Locate exact Frames 0.9.32 source and bundled Nexus
+      - name: Locate exact Frames 0.9.33 source and bundled Nexus
         shell: bash
         run: |
           set -euo pipefail
@@ -61,7 +61,7 @@ jobs:
             echo "Source SHA-256: $actual_sha"
             if [[ "$actual_sha" != "$EXPECTED_SOURCE_SHA256" ]]; then
               {
-                echo "FAIL: Frames source archive hash does not match the authoritative 0.9.32 source."
+                echo "FAIL: Frames source archive hash does not match the authoritative 0.9.33 source."
                 echo "Expected: $EXPECTED_SOURCE_SHA256"
                 echo "Actual:   $actual_sha"
                 echo "File:     $source_zip"
@@ -200,7 +200,10 @@ jobs:
             cp build/Frames-${FRAMES_VERSION}-Write-Test.img build/Frames-${FRAMES_VERSION}-Write-Test.before.img
             python3 tools/verify_write_test_image.py --before build/Frames-${FRAMES_VERSION}-Write-Test.before.img --after build/Frames-${FRAMES_VERSION}-Write-Test.img --require-pass
             python3 tools/verify_release.py
-            python3 tools/verify_runtime_repair_0932.py
+            python3 tools/verify_runtime_repair_0933.py
+            python3 tools/make_lifecycle_test_nvme.py --mode both
+            python3 tools/verify_lifecycle_image.py --image build/Frames-${FRAMES_VERSION}-Lifecycle-reboot.img --mode reboot --expect-state 0 --require-pass
+            python3 tools/verify_lifecycle_image.py --image build/Frames-${FRAMES_VERSION}-Lifecycle-shutdown.img --mode shutdown --expect-state 0 --require-pass
             sha256sum build/BOOTX64.EFI build/FramesKernel.fkrn build/System.fex build/Frames-${FRAMES_VERSION}-ESP.img build/BOOTSTAT.TXT
             python3 tools/runtime_preflight.py --require-ready
           } 2>&1 | tee "$CONSOLE"
@@ -247,7 +250,7 @@ jobs:
           expected=m.group(1).split()
           present=[x for x in expected if x in log]
           missing=[x for x in expected if x not in log]
-          fatal=[x for x in ('FRAMES_PAGE_FAULT','FRAMES_AP_PROTECTION_FAULT=','FRAMES_STRESS_ALLOCATOR_FAIL','FRAMES_STRESS_SCHEDULER_FAIL','FRAMES_STRESS_STORAGE_READ_FAIL','FRAMES_STRESS_USB_INPUT_FAIL','FRAMES_STRESS_NETWORK_FAIL','FRAMES_STRESS_DISPLAY_FAIL','FRAMES_STRESS_RECOVERY_FAIL','FRAMES_STRESS_POWER_FAIL','FRAMES_STORAGE_WRITE_INTEGRITY_FAIL') if x in log]
+          fatal=[x for x in ('FRAMES_PAGE_FAULT','FRAMES_AP_PROTECTION_FAULT=','FRAMES_STRESS_ALLOCATOR_FAIL','FRAMES_STRESS_SCHEDULER_FAIL','FRAMES_STRESS_STORAGE_READ_FAIL','FRAMES_STRESS_USB_INPUT_FAIL','FRAMES_STRESS_NETWORK_FAIL','FRAMES_STRESS_DISPLAY_FAIL','FRAMES_STRESS_RECOVERY_FAIL','FRAMES_STRESS_POWER_FAIL','FRAMES_STORAGE_WRITE_INTEGRITY_FAIL','FRAMES_LIFECYCLE_DESTRUCTIVE_FAIL') if x in log]
           ack_pos=log.find('FRAMES_RESCHED_IPI_OK')
           fallback_pos=log.find('FRAMES_RESCHED_FALLBACK_SENT')
           eager_rhs = ack_pos >= 0 and fallback_pos > ack_pos
@@ -309,6 +312,46 @@ jobs:
             exit "$write_rc"
           fi
           exit "$cert_rc"
+
+      - name: Destructive reboot and shutdown lifecycle certification
+        id: lifecycle
+        shell: bash
+        env:
+          FRAMES_LIFECYCLE_TIMEOUT: '300'
+        run: |
+          set -uo pipefail
+          cd "$FRAMES_DIR"
+          export NEXUS="$NEXUS_EXE"
+          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py
+          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
+          mkdir -p "$EVIDENCE"
+          CONSOLE="$EVIDENCE/LIFECYCLE-CERTIFICATION-CONSOLE.log"
+
+          set +e
+          ./tools/qemu_lifecycle_certify.sh 2>&1 | tee "$CONSOLE"
+          lifecycle_rc=${PIPESTATUS[0]}
+          set -e
+          echo "$lifecycle_rc" > "$EVIDENCE/LIFECYCLE-CERTIFY-EXIT-CODE.txt"
+
+          for f in \
+            build/reboot-serial.log \
+            build/shutdown-serial.log \
+            build/reboot-qemu-debug.log \
+            build/shutdown-qemu-debug.log \
+            build/reboot-qmp-input.log \
+            build/shutdown-qmp-input.log \
+            build/reboot-monitor.log \
+            build/REBOOT-QEMU-EXIT-CODE.txt \
+            build/SHUTDOWN-QEMU-EXIT-CODE.txt \
+            build/REBOOT-MEDIA-VERIFY.json \
+            build/SHUTDOWN-MEDIA-VERIFY.json \
+            build/LIFECYCLE-EVIDENCE.json \
+            build/LIFECYCLE-REBOOT-TARGET.json \
+            build/LIFECYCLE-SHUTDOWN-TARGET.json; do
+            [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
+          done
+
+          exit "$lifecycle_rc"
 
       - name: Build runtime evidence
         if: always()
@@ -372,6 +415,26 @@ jobs:
             } > "$EVIDENCE/NO-SERIAL-LOG.txt"
           fi
 
+          if [[ -n "${FRAMES_DIR:-}" && -d "$FRAMES_DIR/build" ]]; then
+            for f in \
+              "$FRAMES_DIR/build/reboot-serial.log" \
+              "$FRAMES_DIR/build/shutdown-serial.log" \
+              "$FRAMES_DIR/build/reboot-qemu-debug.log" \
+              "$FRAMES_DIR/build/shutdown-qemu-debug.log" \
+              "$FRAMES_DIR/build/reboot-qmp-input.log" \
+              "$FRAMES_DIR/build/shutdown-qmp-input.log" \
+              "$FRAMES_DIR/build/reboot-monitor.log" \
+              "$FRAMES_DIR/build/REBOOT-QEMU-EXIT-CODE.txt" \
+              "$FRAMES_DIR/build/SHUTDOWN-QEMU-EXIT-CODE.txt" \
+              "$FRAMES_DIR/build/REBOOT-MEDIA-VERIFY.json" \
+              "$FRAMES_DIR/build/SHUTDOWN-MEDIA-VERIFY.json" \
+              "$FRAMES_DIR/build/LIFECYCLE-EVIDENCE.json" \
+              "$FRAMES_DIR/build/LIFECYCLE-REBOOT-TARGET.json" \
+              "$FRAMES_DIR/build/LIFECYCLE-SHUTDOWN-TARGET.json"; do
+              [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
+            done
+          fi
+
           echo "Evidence directory contents:"
           find "$EVIDENCE" -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
 
@@ -379,7 +442,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frames-0.9.32-storage-write-evidence
+          name: frames-0.9.33-lifecycle-evidence
           path: ${{ github.workspace }}/runtime-evidence
           if-no-files-found: error
           retention-days: 14
