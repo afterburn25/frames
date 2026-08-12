@@ -1,4 +1,4 @@
-name: Frames 0.9.34 Sacrificial Filesystem Write & Crash-Recovery Certification v29
+name: Frames 0.9.35 Disposable System-Volume Filesystem Write Certification v30
 
 on:
   workflow_dispatch:
@@ -11,11 +11,11 @@ permissions:
 jobs:
   qemu-ovmf-certification:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 120
     env:
-      EXPECTED_FRAMES_VERSION: '0.9.34'
-      EXPECTED_SOURCE_SHA256: '332254da868f7ff87a2bb51dd862b0759a17cd323ce2e137b4f52010f2efaa77'
-      EXPECTED_WORKFLOW_REVISION: 'v29'
+      EXPECTED_FRAMES_VERSION: '0.9.35'
+      EXPECTED_SOURCE_SHA256: 'fe42480d94a7b883763ab41897d0dfabe8d5ee7610764cde44703357f204520a'
+      EXPECTED_WORKFLOW_REVISION: 'v30'
 
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +32,7 @@ jobs:
           command -v python3
           command -v unzip
 
-      - name: Locate exact Frames 0.9.34 source and bundled Nexus
+      - name: Locate exact Frames 0.9.35 source and bundled Nexus
         shell: bash
         run: |
           set -euo pipefail
@@ -220,7 +220,7 @@ jobs:
             cp build/Frames-${FRAMES_VERSION}-Write-Test.img build/Frames-${FRAMES_VERSION}-Write-Test.before.img
             python3 tools/verify_write_test_image.py --before build/Frames-${FRAMES_VERSION}-Write-Test.before.img --after build/Frames-${FRAMES_VERSION}-Write-Test.img --require-pass
             python3 tools/verify_release.py
-            python3 tools/verify_runtime_repair_0934.py
+            python3 tools/verify_runtime_repair_0935.py
             python3 tools/make_lifecycle_test_nvme.py --mode both
             python3 tools/verify_lifecycle_image.py --image build/Frames-${FRAMES_VERSION}-Lifecycle-reboot.img --mode reboot --expect-state 0 --require-pass
             python3 tools/verify_lifecycle_image.py --image build/Frames-${FRAMES_VERSION}-Lifecycle-shutdown.img --mode shutdown --expect-state 0 --require-pass
@@ -228,6 +228,9 @@ jobs:
             for s in 0 1 2 3 4; do
               python3 tools/verify_filesystem_test_image.py --image "build/Frames-${FRAMES_VERSION}-Filesystem-s${s}.img" --scenario "$s" --phase initial --require-pass
             done
+            python3 tools/make_system_volume_clone.py
+            cp build/Frames-${FRAMES_VERSION}-System-Clone.img build/Frames-${FRAMES_VERSION}-System-Clone.before.img
+            python3 tools/verify_system_volume_clone.py --before build/Frames-${FRAMES_VERSION}-System-Clone.before.img --after build/Frames-${FRAMES_VERSION}-System-Clone.img --manifest build/SYSTEM-VOLUME-TARGET.json --require-pass
             sha256sum build/BOOTX64.EFI build/FramesKernel.fkrn build/System.fex build/Frames-${FRAMES_VERSION}-ESP.img build/BOOTSTAT.TXT
             python3 tools/runtime_preflight.py --require-ready
           } 2>&1 | tee "$CONSOLE"
@@ -274,7 +277,7 @@ jobs:
           expected=m.group(1).split()
           present=[x for x in expected if x in log]
           missing=[x for x in expected if x not in log]
-          fatal=[x for x in ('FRAMES_PAGE_FAULT','FRAMES_AP_PROTECTION_FAULT=','FRAMES_STRESS_ALLOCATOR_FAIL','FRAMES_STRESS_SCHEDULER_FAIL','FRAMES_STRESS_STORAGE_READ_FAIL','FRAMES_STRESS_USB_INPUT_FAIL','FRAMES_STRESS_NETWORK_FAIL','FRAMES_STRESS_DISPLAY_FAIL','FRAMES_STRESS_RECOVERY_FAIL','FRAMES_STRESS_POWER_FAIL','FRAMES_STORAGE_WRITE_INTEGRITY_FAIL','FRAMES_LIFECYCLE_DESTRUCTIVE_FAIL','FRAMES_FS_WRITE_CERT_FAIL') if x in log]
+          fatal=[x for x in ('FRAMES_PAGE_FAULT','FRAMES_AP_PROTECTION_FAULT=','FRAMES_STRESS_ALLOCATOR_FAIL','FRAMES_STRESS_SCHEDULER_FAIL','FRAMES_STRESS_STORAGE_READ_FAIL','FRAMES_STRESS_USB_INPUT_FAIL','FRAMES_STRESS_NETWORK_FAIL','FRAMES_STRESS_DISPLAY_FAIL','FRAMES_STRESS_RECOVERY_FAIL','FRAMES_STRESS_POWER_FAIL','FRAMES_STORAGE_WRITE_INTEGRITY_FAIL','FRAMES_LIFECYCLE_DESTRUCTIVE_FAIL','FRAMES_FS_WRITE_CERT_FAIL','FRAMES_SYSTEM_VOLUME_WRITE_CERT_FAIL') if x in log]
           ack_pos=log.find('FRAMES_RESCHED_IPI_OK')
           fallback_pos=log.find('FRAMES_RESCHED_FALLBACK_SENT')
           eager_rhs = ack_pos >= 0 and fallback_pos > ack_pos
@@ -426,6 +429,42 @@ jobs:
 
           exit "$filesystem_rc"
 
+      - name: Disposable system-volume FAT32 write certification
+        id: system_volume
+        shell: bash
+        env:
+          FRAMES_SYSTEM_VOLUME_TIMEOUT: '360'
+        run: |
+          set -uo pipefail
+          cd "$FRAMES_DIR"
+          export NEXUS="$NEXUS_EXE"
+          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py
+          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
+          mkdir -p "$EVIDENCE"
+          CONSOLE="$EVIDENCE/SYSTEM-VOLUME-CERTIFICATION-CONSOLE.log"
+
+          set +e
+          ./tools/qemu_system_volume_certify.sh 2>&1 | tee "$CONSOLE"
+          sysvol_rc=${PIPESTATUS[0]}
+          set -e
+          echo "$sysvol_rc" > "$EVIDENCE/SYSTEM-VOLUME-CERTIFY-EXIT-CODE.txt"
+
+          for f in \
+            build/system-volume-serial.log \
+            build/system-volume-qemu-debug.log \
+            build/system-volume-input.log \
+            build/system-volume-monitor.log \
+            build/SYSTEM-VOLUME-QEMU-EXIT-CODE.txt \
+            build/SYSTEM-VOLUME-TARGET.json \
+            build/SYSTEM-VOLUME-MEDIA.json \
+            build/SYSTEM-VOLUME-MEDIA-CONSOLE.json \
+            build/SYSTEM-VOLUME-EVIDENCE.json \
+            build/SYSTEM-VOLUME-GENERATOR.log; do
+            [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
+          done
+
+          exit "$sysvol_rc"
+
       - name: Build runtime evidence
         if: always()
         shell: bash
@@ -516,6 +555,12 @@ jobs:
             done
           fi
 
+          if [[ -n "${FRAMES_DIR:-}" && -d "$FRAMES_DIR/build" ]]; then
+            for f in "$FRAMES_DIR"/build/system-volume-*.log "$FRAMES_DIR"/build/SYSTEM-VOLUME-*.json "$FRAMES_DIR"/build/SYSTEM-VOLUME-*.txt; do
+              [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
+            done
+          fi
+
           echo "Evidence directory contents:"
           find "$EVIDENCE" -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
 
@@ -523,7 +568,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frames-0.9.34-filesystem-evidence-v29
+          name: frames-0.9.35-system-volume-evidence-v30
           path: ${{ github.workspace }}/runtime-evidence
           if-no-files-found: error
           retention-days: 14
