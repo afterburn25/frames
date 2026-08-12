@@ -1,4 +1,4 @@
-name: Frames 0.9.40 Real Hardware Compatibility Certification v41
+name: Frames 0.9.41 Native USB Mass-Storage Runtime Certification v42
 
 on:
   workflow_dispatch:
@@ -11,11 +11,11 @@ permissions:
 jobs:
   qemu-ovmf-certification:
     runs-on: ubuntu-24.04
-    timeout-minutes: 540
+    timeout-minutes: 720
     env:
-      EXPECTED_FRAMES_VERSION: '0.9.40'
-      EXPECTED_SOURCE_SHA256: 'e40c7a9e19d14f20fef5df95236ed521f27400a25f36cd295e329e3734b98bb4'
-      EXPECTED_WORKFLOW_REVISION: 'v41'
+      EXPECTED_FRAMES_VERSION: '0.9.41'
+      EXPECTED_SOURCE_SHA256: '054c8477a79720c731025bde2407e4d073a12408a458809c135fbc16b518d50c'
+      EXPECTED_WORKFLOW_REVISION: 'v42'
 
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +32,7 @@ jobs:
           command -v python3
           command -v unzip
 
-      - name: Locate exact Frames 0.9.40 source and bundled Nexus
+      - name: Locate exact Frames 0.9.41 source and bundled Nexus
         shell: bash
         run: |
           set -euo pipefail
@@ -220,7 +220,7 @@ jobs:
             cp build/Frames-${FRAMES_VERSION}-Write-Test.img build/Frames-${FRAMES_VERSION}-Write-Test.before.img
             python3 tools/verify_write_test_image.py --before build/Frames-${FRAMES_VERSION}-Write-Test.before.img --after build/Frames-${FRAMES_VERSION}-Write-Test.img --require-pass
             python3 tools/verify_release.py
-            python3 tools/verify_runtime_repair_0940.py
+            python3 tools/verify_runtime_repair_0941.py
             python3 tools/make_usb_boot_image.py
             python3 tools/make_physical_preview_image.py
             python3 tools/verify_physical_preview_image.py
@@ -639,6 +639,43 @@ jobs:
           sha256sum             build/BOOTX64.EFI             build/FramesKernel.fkrn             build/System.fex             build/Frames-${FRAMES_VERSION}-ESP.img             build/Frames-${FRAMES_VERSION}-Physical-Hardware-Preview.img             > "$EVIDENCE/HWCOMPAT-DEFINING-SHA256.txt"
           exit "$compat_rc"
 
+      - name: Native USB mass-storage runtime certification
+        id: native_usb_msc
+        shell: bash
+        run: |
+          set -uo pipefail
+          cd "$FRAMES_DIR"
+          export NEXUS="$NEXUS_EXE"
+          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py
+          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
+          mkdir -p "$EVIDENCE"
+          CONSOLE="$EVIDENCE/USB-MSC-CERTIFICATION-CONSOLE.log"
+
+          set +e
+          ./tools/qemu_usb_msc_matrix_certify.sh 2>&1 | tee "$CONSOLE"
+          usbmsc_rc=${PIPESTATUS[0]}
+          set -e
+          echo "$usbmsc_rc" > "$EVIDENCE/USB-MSC-CERTIFY-EXIT-CODE.txt"
+
+          for f in \
+            build/usb-msc-*.log \
+            build/USB-MSC-*.json \
+            build/USB-MSC-*.txt \
+            build/USB-MSC-DATA-MANIFEST.json; do
+            [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
+          done
+
+          for f in \
+            build/Frames-${FRAMES_VERSION}-USB-MSC-Cert-Boot.img \
+            build/Frames-${FRAMES_VERSION}-USB-MSC-Data.img \
+            build/BOOTX64.EFI \
+            build/FramesKernel.fkrn \
+            build/System.fex; do
+            [[ -f "$f" ]] && sha256sum "$f"
+          done > "$EVIDENCE/USB-MSC-DEFINING-SHA256.txt"
+
+          exit "$usbmsc_rc"
+
       - name: Build runtime evidence
         if: always()
         shell: bash
@@ -766,6 +803,12 @@ jobs:
             done
           fi
 
+          if [[ -n "${FRAMES_DIR:-}" && -d "$FRAMES_DIR/build" ]]; then
+            for f in "$FRAMES_DIR"/build/usb-msc-*.log "$FRAMES_DIR"/build/USB-MSC-*.json "$FRAMES_DIR"/build/USB-MSC-*.txt; do
+              [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
+            done
+          fi
+
           echo "Evidence directory contents:"
           find "$EVIDENCE" -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
 
@@ -773,7 +816,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frames-0.9.40-hardware-compat-evidence-v41
+          name: frames-0.9.41-native-usb-storage-evidence-v42
           path: ${{ github.workspace }}/runtime-evidence
           if-no-files-found: error
           retention-days: 14
