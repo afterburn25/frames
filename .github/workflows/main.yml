@@ -1,4 +1,4 @@
-name: Frames 0.9.27 USB/Input Stress Certification v18
+name: Frames 0.9.27 USB/Input Stress Certification v19 Repair
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 20
     env:
       EXPECTED_FRAMES_VERSION: '0.9.27'
-      EXPECTED_SOURCE_SHA256: '2352c99492f48db50bcb509661ec40ab95161119686b0a45f26af48f42234f8a'
+      EXPECTED_SOURCE_SHA256: '3b1ecc1664bb94731406f7f5f865deae3f482ea36fb75c80ee97c1e3fab9b167'
 
     steps:
       - uses: actions/checkout@v4
@@ -190,12 +190,15 @@ jobs:
           {
             echo "Frames $FRAMES_VERSION preflight"
             echo "Nexus: $($NEXUS_EXE --version)"
+            echo "Clang: $(clang --version | head -n1)"
+            echo "LLD: $(lld-link --version | head -n1)"
             bash -n tools/*.sh
             python3 -m compileall -q tools
             ./tools/build.sh
             python3 tools/make_esp.py
             python3 tools/verify_release.py
             python3 tools/verify_runtime_repair_0927.py
+            sha256sum build/BOOTX64.EFI build/FramesKernel.fkrn build/System.fex build/Frames-${FRAMES_VERSION}-ESP.img build/BOOTSTAT.TXT
             python3 tools/runtime_preflight.py --require-ready
           } 2>&1 | tee "$CONSOLE"
 
@@ -241,7 +244,7 @@ jobs:
           expected=m.group(1).split()
           present=[x for x in expected if x in log]
           missing=[x for x in expected if x not in log]
-          fatal=[x for x in ('FRAMES_PAGE_FAULT','FRAMES_AP_PROTECTION_FAULT=','FRAMES_STRESS_ALLOCATOR_FAIL','FRAMES_STRESS_SCHEDULER_FAIL','FRAMES_STRESS_STORAGE_READ_FAIL') if x in log]
+          fatal=[x for x in ('FRAMES_PAGE_FAULT','FRAMES_AP_PROTECTION_FAULT=','FRAMES_STRESS_ALLOCATOR_FAIL','FRAMES_STRESS_SCHEDULER_FAIL','FRAMES_STRESS_STORAGE_READ_FAIL','FRAMES_STRESS_USB_INPUT_FAIL') if x in log]
           ack_pos=log.find('FRAMES_RESCHED_IPI_OK')
           fallback_pos=log.find('FRAMES_RESCHED_FALLBACK_SENT')
           eager_rhs = ack_pos >= 0 and fallback_pos > ack_pos
@@ -311,6 +314,9 @@ jobs:
             echo "NEXUS_EXE=${NEXUS_EXE:-<unset>}"
             echo "OVMF_CODE=${OVMF_CODE:-<unset>}"
             echo "OVMF_VARS=${OVMF_VARS:-<unset>}"
+            echo "QEMU_VERSION=$(qemu-system-x86_64 --version 2>/dev/null | head -n1 || true)"
+            echo "CLANG_VERSION=$(clang --version 2>/dev/null | head -n1 || true)"
+            echo "LLD_LINK_VERSION=$(lld-link --version 2>/dev/null | head -n1 || true)"
             echo
             echo "Repository files:"
             find "$GITHUB_WORKSPACE" -maxdepth 3 -type f -print 2>/dev/null | sort | head -300
@@ -330,6 +336,8 @@ jobs:
             python3 tools/stress_evidence.py --serial build/serial.log || true
             for f in \
               build/serial.log \
+              build/qmp-input.log \
+              build/qemu-debug.log \
               build/MISSING-RUNTIME-MARKERS.json \
               build/SHORT-CIRCUIT-RUNTIME.json \
               build/RUNTIME-EVIDENCE.json \
