@@ -1,4 +1,4 @@
-name: Frames 0.9.39 Physical Boot Safety Certification v38
+name: Frames 0.9.39 Physical Boot Safety Certification v39
 
 on:
   workflow_dispatch:
@@ -14,8 +14,8 @@ jobs:
     timeout-minutes: 540
     env:
       EXPECTED_FRAMES_VERSION: '0.9.39'
-      EXPECTED_SOURCE_SHA256: '4d81ccb6ae2ef67969f7cea39932847cc419d287906082775e027dbf574ef9c9'
-      EXPECTED_WORKFLOW_REVISION: 'v38'
+      EXPECTED_SOURCE_SHA256: '7ee62048c2521a6dcc4c259d4d550110b0c71333fab98b712d8fa518f48604e5'
+      EXPECTED_WORKFLOW_REVISION: 'v39'
 
     steps:
       - uses: actions/checkout@v4
@@ -741,7 +741,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frames-0.9.39-physical-boot-safety-evidence-v38
+          name: frames-0.9.39-physical-boot-safety-evidence-v39
           path: ${{ github.workspace }}/runtime-evidence
           if-no-files-found: error
           retention-days: 14
