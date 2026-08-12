@@ -1,4 +1,4 @@
-name: Frames 0.9.27 USB/Input Stress Certification v19 Repair
+name: Frames 0.9.27 USB/Input Stress Certification v20 DMA-Lifetime Repair
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 20
     env:
       EXPECTED_FRAMES_VERSION: '0.9.27'
-      EXPECTED_SOURCE_SHA256: '3b1ecc1664bb94731406f7f5f865deae3f482ea36fb75c80ee97c1e3fab9b167'
+      EXPECTED_SOURCE_SHA256: '394098234ee14f9ac6736d0252fc3bea68bbeb9aca77671d0a3ab8e5412d58d2'
 
     steps:
       - uses: actions/checkout@v4
