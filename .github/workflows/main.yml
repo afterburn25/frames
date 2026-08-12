@@ -1,4 +1,4 @@
-name: Frames 0.9.29 Display Stress/Fault Certification v22
+name: Frames 0.9.29 Display Stress/Fault Certification v23
 
 on:
   workflow_dispatch:
@@ -31,7 +31,7 @@ jobs:
           command -v python3
           command -v unzip
 
-      - name: Locate exact Frames 0.9.28 source and bundled Nexus
+      - name: Locate exact Frames 0.9.29 source and bundled Nexus
         shell: bash
         run: |
           set -euo pipefail
@@ -61,7 +61,7 @@ jobs:
             echo "Source SHA-256: $actual_sha"
             if [[ "$actual_sha" != "$EXPECTED_SOURCE_SHA256" ]]; then
               {
-                echo "FAIL: Frames source archive hash does not match the authoritative 0.9.28 source."
+                echo "FAIL: Frames source archive hash does not match the authoritative 0.9.29 source."
                 echo "Expected: $EXPECTED_SOURCE_SHA256"
                 echo "Actual:   $actual_sha"
                 echo "File:     $source_zip"
@@ -197,7 +197,7 @@ jobs:
             ./tools/build.sh
             python3 tools/make_esp.py
             python3 tools/verify_release.py
-            python3 tools/verify_runtime_repair_0928.py
+            python3 tools/verify_runtime_repair_0929.py
             sha256sum build/BOOTX64.EFI build/FramesKernel.fkrn build/System.fex build/Frames-${FRAMES_VERSION}-ESP.img build/BOOTSTAT.TXT
             python3 tools/runtime_preflight.py --require-ready
           } 2>&1 | tee "$CONSOLE"
