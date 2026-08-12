@@ -1,4 +1,4 @@
-name: Frames 0.9.38 Removable USB Boot Certification v37
+name: Frames 0.9.39 Physical Boot Safety Certification v38
 
 on:
   workflow_dispatch:
@@ -11,11 +11,11 @@ permissions:
 jobs:
   qemu-ovmf-certification:
     runs-on: ubuntu-24.04
-    timeout-minutes: 390
+    timeout-minutes: 540
     env:
-      EXPECTED_FRAMES_VERSION: '0.9.38'
-      EXPECTED_SOURCE_SHA256: '44b303cb34471108bc8825ee435023eaaf6cf2e900218f5dea53932b34649928'
-      EXPECTED_WORKFLOW_REVISION: 'v37'
+      EXPECTED_FRAMES_VERSION: '0.9.39'
+      EXPECTED_SOURCE_SHA256: '4d81ccb6ae2ef67969f7cea39932847cc419d287906082775e027dbf574ef9c9'
+      EXPECTED_WORKFLOW_REVISION: 'v38'
 
     steps:
       - uses: actions/checkout@v4
@@ -220,8 +220,12 @@ jobs:
             cp build/Frames-${FRAMES_VERSION}-Write-Test.img build/Frames-${FRAMES_VERSION}-Write-Test.before.img
             python3 tools/verify_write_test_image.py --before build/Frames-${FRAMES_VERSION}-Write-Test.before.img --after build/Frames-${FRAMES_VERSION}-Write-Test.img --require-pass
             python3 tools/verify_release.py
-            python3 tools/verify_runtime_repair_0938.py
+            python3 tools/verify_runtime_repair_0939.py
             python3 tools/make_usb_boot_image.py
+            python3 tools/make_physical_preview_image.py
+            python3 tools/verify_physical_preview_image.py
+            python3 tools/make_physical_sata_guard.py
+            python3 tools/physical_preview_synthetic.py --require-pass
             python3 tools/make_internal_usb_guard.py
             python3 tools/make_lifecycle_test_nvme.py --mode both
             python3 tools/verify_lifecycle_image.py --image build/Frames-${FRAMES_VERSION}-Lifecycle-reboot.img --mode reboot --expect-state 0 --require-pass
@@ -283,7 +287,7 @@ jobs:
           expected=m.group(1).split()
           present=[x for x in expected if x in log]
           missing=[x for x in expected if x not in log]
-          fatal=[x for x in ('FRAMES_PAGE_FAULT','FRAMES_AP_PROTECTION_FAULT=','FRAMES_STRESS_ALLOCATOR_FAIL','FRAMES_STRESS_SCHEDULER_FAIL','FRAMES_STRESS_STORAGE_READ_FAIL','FRAMES_STRESS_USB_INPUT_FAIL','FRAMES_STRESS_NETWORK_FAIL','FRAMES_STRESS_DISPLAY_FAIL','FRAMES_STRESS_RECOVERY_FAIL','FRAMES_STRESS_POWER_FAIL','FRAMES_STORAGE_WRITE_INTEGRITY_FAIL','FRAMES_LIFECYCLE_DESTRUCTIVE_FAIL','FRAMES_FS_WRITE_CERT_FAIL','FRAMES_SYSTEM_VOLUME_WRITE_CERT_FAIL','FRAMES_FAT_LIFECYCLE_CERT_FAIL','FRAMES_SMP_SCALE_CERT_FAIL','FRAMES_USB_BOOT_CERT_FAIL') if x in log]
+          fatal=[x for x in ('FRAMES_PAGE_FAULT','FRAMES_AP_PROTECTION_FAULT=','FRAMES_STRESS_ALLOCATOR_FAIL','FRAMES_STRESS_SCHEDULER_FAIL','FRAMES_STRESS_STORAGE_READ_FAIL','FRAMES_STRESS_USB_INPUT_FAIL','FRAMES_STRESS_NETWORK_FAIL','FRAMES_STRESS_DISPLAY_FAIL','FRAMES_STRESS_RECOVERY_FAIL','FRAMES_STRESS_POWER_FAIL','FRAMES_STORAGE_WRITE_INTEGRITY_FAIL','FRAMES_LIFECYCLE_DESTRUCTIVE_FAIL','FRAMES_FS_WRITE_CERT_FAIL','FRAMES_SYSTEM_VOLUME_WRITE_CERT_FAIL','FRAMES_FAT_LIFECYCLE_CERT_FAIL','FRAMES_SMP_SCALE_CERT_FAIL','FRAMES_USB_BOOT_CERT_FAIL','FRAMES_PHYSICAL_PREVIEW_CERT_FAIL') if x in log]
           ack_pos=log.find('FRAMES_RESCHED_IPI_OK')
           fallback_pos=log.find('FRAMES_RESCHED_FALLBACK_SENT')
           eager_rhs = ack_pos >= 0 and fallback_pos > ack_pos
@@ -575,6 +579,41 @@ jobs:
           sha256sum build/Frames-${FRAMES_VERSION}-USB-Boot.img build/Frames-${FRAMES_VERSION}-ESP.img build/Frames-${FRAMES_VERSION}-USB-Internal-Guard.img > "$EVIDENCE/USB-BOOT-DEFINING-SHA256.txt"
           exit "$usb_rc"
 
+      - name: Physical boot safety certification matrix
+        id: physical_preview
+        shell: bash
+        run: |
+          set -uo pipefail
+          cd "$FRAMES_DIR"
+          export NEXUS="$NEXUS_EXE"
+          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py
+          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
+          mkdir -p "$EVIDENCE"
+          CONSOLE="$EVIDENCE/PHYSICAL-PREVIEW-CERTIFICATION-CONSOLE.log"
+
+          set +e
+          ./tools/qemu_physical_preview_matrix_certify.sh 2>&1 | tee "$CONSOLE"
+          physical_rc=${PIPESTATUS[0]}
+          set -e
+          echo "$physical_rc" > "$EVIDENCE/PHYSICAL-PREVIEW-CERTIFY-EXIT-CODE.txt"
+
+          for f in build/physical-*-serial.log build/physical-*-monitor.log build/physical-*-qemu-debug.log build/PHYSICAL-PREVIEW-*.json build/PHYSICAL-PREVIEW-*.txt; do
+            [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
+          done
+
+          sha256sum \
+            build/Frames-${FRAMES_VERSION}-Physical-Hardware-Preview.img \
+            build/Frames-${FRAMES_VERSION}-ESP.img \
+            build/Frames-${FRAMES_VERSION}-Physical-SATA-Guard.img \
+            build/Frames-${FRAMES_VERSION}-Write-Test.img \
+            build/Frames-${FRAMES_VERSION}-Lifecycle-reboot.img \
+            build/Frames-${FRAMES_VERSION}-Lifecycle-shutdown.img \
+            build/Frames-${FRAMES_VERSION}-Filesystem-s0.img \
+            build/Frames-${FRAMES_VERSION}-System-Clone.img \
+            build/Frames-${FRAMES_VERSION}-FAT-Lifecycle-Clone.img \
+            > "$EVIDENCE/PHYSICAL-PREVIEW-DEFINING-SHA256.txt"
+          exit "$physical_rc"
+
       - name: Build runtime evidence
         if: always()
         shell: bash
@@ -689,6 +728,12 @@ jobs:
             done
           fi
 
+          if [[ -n "${FRAMES_DIR:-}" && -d "$FRAMES_DIR/build" ]]; then
+            for f in "$FRAMES_DIR"/build/physical-*.log "$FRAMES_DIR"/build/PHYSICAL-PREVIEW-*.json "$FRAMES_DIR"/build/PHYSICAL-PREVIEW-*.txt; do
+              [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
+            done
+          fi
+
           echo "Evidence directory contents:"
           find "$EVIDENCE" -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
 
@@ -696,7 +741,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frames-0.9.38-usb-boot-evidence-v37
+          name: frames-0.9.39-physical-boot-safety-evidence-v38
           path: ${{ github.workspace }}/runtime-evidence
           if-no-files-found: error
           retention-days: 14
