@@ -1,4 +1,4 @@
-name: Frames 0.9.45 Nexus SDK Developer Tooling Phase 2 FEX Application Packaging Certification v55
+name: Frames 0.9.46 FAPP Native Application Loader Phase 1 Certification v56
 
 on:
   workflow_dispatch:
@@ -13,9 +13,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 720
     env:
-      EXPECTED_FRAMES_VERSION: '0.9.45'
-      EXPECTED_SOURCE_SHA256: 'f79e43eac7d2047bde1fb20cb7ade9f1ce09bbabffa9acc95d62acf9ca574199'
-      EXPECTED_WORKFLOW_REVISION: 'v55'
+      EXPECTED_FRAMES_VERSION: '0.9.46'
+      EXPECTED_SOURCE_SHA256: 'ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7'
+      EXPECTED_WORKFLOW_REVISION: 'v56'
 
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +32,7 @@ jobs:
           command -v python3
           command -v unzip
 
-      - name: Locate exact Frames 0.9.45 source and bundled Nexus
+      - name: Locate exact Frames 0.9.46 source and bundled Nexus
         shell: bash
         run: |
           set -euo pipefail
@@ -224,7 +224,7 @@ jobs:
             python3 tools/make_developer_preview_image.py
             python3 tools/verify_developer_preview_image.py --image build/Frames-${FRAMES_VERSION}-Developer-Preview.img --package build/HelloFrames.fapp --require-pass
             python3 tools/app_packaging_evidence.py --package build/HelloFrames.fapp --image build/Frames-${FRAMES_VERSION}-Developer-Preview.img --require-pass
-            python3 tools/verify_runtime_repair_0945.py
+            python3 tools/verify_runtime_repair_0946.py
             python3 tools/make_usb_boot_image.py
             python3 tools/make_physical_preview_image.py
             python3 tools/verify_physical_preview_image.py
@@ -736,7 +736,7 @@ jobs:
           } > "$EVIDENCE/APP-PACKAGING-DEFINING-SHA256.txt"
           exit "$app_rc"
 
-      - name: Nexus SDK Developer Tooling Phase 2 runtime certification
+      - name: FAPP Native Application Loader Phase 1 runtime certification
         id: developer_preview
         shell: bash
         run: |
@@ -771,6 +771,30 @@ jobs:
           done > "$EVIDENCE/DEVELOPER-PREVIEW-DEFINING-SHA256.txt"
 
           exit "$preview_rc"
+
+
+      - name: FAPP native application loader Phase 1 certification gate
+        id: app_loader
+        shell: bash
+        run: |
+          set -uo pipefail
+          cd "$FRAMES_DIR"
+          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
+          mkdir -p "$EVIDENCE"
+          CONSOLE="$EVIDENCE/APP-LOADER-CERTIFICATION-CONSOLE.log"
+
+          set +e
+          python3 tools/app_loader_evidence.py --developer-evidence build/DEVELOPER-PREVIEW-EVIDENCE.json --require-pass 2>&1 | tee build/APP-LOADER-EVIDENCE.json | tee "$CONSOLE"
+          loader_rc=${PIPESTATUS[0]}
+          set -e
+          echo "$loader_rc" > "$EVIDENCE/APP-LOADER-CERTIFY-EXIT-CODE.txt"
+          [[ -f build/APP-LOADER-EVIDENCE.json ]] && cp build/APP-LOADER-EVIDENCE.json "$EVIDENCE/"
+          {
+            sha256sum tools/app_loader_evidence.py tools/developer_preview_evidence.py
+            [[ -f build/DEVELOPER-PREVIEW-EVIDENCE.json ]] && sha256sum build/DEVELOPER-PREVIEW-EVIDENCE.json
+            [[ -f build/HelloFrames.fapp ]] && sha256sum build/HelloFrames.fapp
+          } > "$EVIDENCE/APP-LOADER-DEFINING-SHA256.txt"
+          exit "$loader_rc"
 
       - name: Build runtime evidence
         if: always()
@@ -906,7 +930,7 @@ jobs:
           fi
 
           if [[ -n "${FRAMES_DIR:-}" && -d "$FRAMES_DIR/build" ]]; then
-            for f in "$FRAMES_DIR"/build/developer-preview-*.log "$FRAMES_DIR"/build/DEVELOPER-PREVIEW-*.json "$FRAMES_DIR"/build/DEVELOPER-PREVIEW-*.txt "$FRAMES_DIR"/build/APP-PACKAGING-EVIDENCE.json "$FRAMES_DIR"/build/HelloFrames.fapp; do
+            for f in "$FRAMES_DIR"/build/developer-preview-*.log "$FRAMES_DIR"/build/DEVELOPER-PREVIEW-*.json "$FRAMES_DIR"/build/DEVELOPER-PREVIEW-*.txt "$FRAMES_DIR"/build/APP-PACKAGING-EVIDENCE.json "$FRAMES_DIR"/build/APP-LOADER-EVIDENCE.json "$FRAMES_DIR"/build/HelloFrames.fapp; do
               [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
             done
           fi
@@ -918,7 +942,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frames-0.9.45-nexus-sdk-developer-tooling-evidence-v55
+          name: frames-0.9.46-fapp-native-application-loader-evidence-v56
           path: ${{ github.workspace }}/runtime-evidence
           if-no-files-found: error
           retention-days: 14
