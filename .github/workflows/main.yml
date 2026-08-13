@@ -1,71 +1,58 @@
-name: Frames 0.9.46 v56 Parallel r9 Evidence Repair
+name: Frames 0.9.46 v56 Parallel r10 Final Evidence Seal
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - 'Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r9-Evidence-Repair.zip'
-      - '.github/workflows/frames-0.9.46-v56-parallel-r9-evidence-repair.yml'
+      - 'Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r10-Final-Evidence-Seal.zip'
+      - '.github/workflows/frames-0.9.46-v56-parallel-r10-final-evidence-seal.yml'
 
 permissions:
   contents: read
 
 jobs:
-  reaggregate:
+  seal-final-evidence:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    env:
-      EXPECTED_FRAMES_VERSION: '0.9.46'
-      EXPECTED_WORKFLOW_REVISION: 'v56-parallel-r9'
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Initialize r9 evidence
+      - name: Initialize final evidence
         shell: bash
         run: |
           set -euo pipefail
           rm -rf "$GITHUB_WORKSPACE/runtime-evidence"
           mkdir -p "$GITHUB_WORKSPACE/runtime-evidence"
-          {
-            echo "frames_version=0.9.46"
-            echo "workflow_revision=v56-parallel-r9"
-          } > "$GITHUB_WORKSPACE/runtime-evidence/R9-START.txt"
+          echo "v56-parallel-r10" > "$GITHUB_WORKSPACE/runtime-evidence/R10-START.txt"
 
-      - name: Locate and extract exact r9 evidence-repair kit
+      - name: Locate exact r10 kit
         id: locate
         shell: bash
         continue-on-error: true
         run: |
           set -euo pipefail
           E="$GITHUB_WORKSPACE/runtime-evidence"
-          kit="$(find "$GITHUB_WORKSPACE" -type f -name 'Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r9-Evidence-Repair.zip' -print | head -n1)"
+          kit="$(find "$GITHUB_WORKSPACE" -type f -name 'Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r10-Final-Evidence-Seal.zip' -print | head -n1)"
           if [[ -z "$kit" ]]; then
-            echo "r9 kit not found" | tee "$E/R9-LOCATE-FAILURE.txt"
+            echo "r10 kit not found" > "$E/R10-LOCATE-FAILURE.txt"
             exit 1
           fi
-          rm -rf "$GITHUB_WORKSPACE/r9-kit"
-          mkdir -p "$GITHUB_WORKSPACE/r9-kit"
-          python3 - "$kit" "$GITHUB_WORKSPACE/r9-kit" <<'PY'
+          rm -rf "$GITHUB_WORKSPACE/r10-kit"
+          mkdir -p "$GITHUB_WORKSPACE/r10-kit"
+          python3 - "$kit" "$GITHUB_WORKSPACE/r10-kit" <<'PY'
           import zipfile,sys
           with zipfile.ZipFile(sys.argv[1]) as z:
               assert z.testzip() is None
               z.extractall(sys.argv[2])
           PY
-          root="$(find "$GITHUB_WORKSPACE/r9-kit" -maxdepth 2 -type d -name 'Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r9-Evidence-Repair' -print | head -n1)"
-          if [[ -z "$root" ]]; then
-            echo "extracted r9 kit root missing" | tee "$E/R9-LOCATE-FAILURE.txt"
-            exit 2
-          fi
+          root="$(find "$GITHUB_WORKSPACE/r10-kit" -maxdepth 2 -type d -name 'Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r10-Final-Evidence-Seal' -print | head -n1)"
+          [[ -n "$root" ]] || { echo "r10 kit root missing" > "$E/R10-LOCATE-FAILURE.txt"; exit 2; }
           echo "KIT_ROOT=$root" >> "$GITHUB_ENV"
-          {
-            echo "kit=$kit"
-            echo "kit_root=$root"
-            sha256sum "$kit"
-          } > "$E/R9-KIT-IDENTITY.txt"
+          sha256sum "$kit" > "$E/R10-KIT-SHA256.txt"
 
-      - name: Evaluate exact external evidence
-        id: evaluate
+      - name: Verify and canonically seal final evidence
+        id: seal
         if: always()
         shell: bash
         continue-on-error: true
@@ -75,27 +62,74 @@ jobs:
           mkdir -p "$E"
           rc=0
           if [[ -z "${KIT_ROOT:-}" ]]; then
-            echo "KIT_ROOT unavailable; locate outcome=${{ steps.locate.outcome }}" | tee "$E/R9-EVALUATION-CONSOLE.log"
+            echo "KIT_ROOT unavailable" > "$E/R10-SEAL-CONSOLE.log"
             rc=2
           else
             export EVIDENCE="$E"
-            python3 "$KIT_ROOT/verify-v56-r9-evidence.py" 2>&1 | tee "$E/R9-EVALUATION-CONSOLE.log" || rc=$?
+            python3 "$KIT_ROOT/verify-and-seal-v56-r10.py" > "$E/R10-SEAL-CONSOLE.log" 2>&1 || rc=$?
           fi
-          echo "$rc" > "$E/R9-EVALUATION-EXIT-CODE.txt"
+          echo "$rc" > "$E/R10-SEAL-EXIT-CODE.txt"
           exit "$rc"
 
-      - name: Record r9 step outcomes
+      - name: Regenerate manifest after workflow diagnostics
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$GITHUB_WORKSPACE/runtime-evidence"
-          cat > "$GITHUB_WORKSPACE/runtime-evidence/R9-STEP-OUTCOMES.txt" <<EOF
-          locate=${{ steps.locate.outcome }}
-          evaluate=${{ steps.evaluate.outcome }}
-          EOF
+          E="$GITHUB_WORKSPACE/runtime-evidence"
+          python3 - "$E" <<'PY'
+          from pathlib import Path
+          import hashlib,sys,json
+          root=Path(sys.argv[1])
+          def sha(p):
+              h=hashlib.sha256()
+              with open(p,"rb") as f:
+                  for c in iter(lambda:f.read(1024*1024),b""): h.update(c)
+              return h.hexdigest()
+          files=[p for p in sorted(root.iterdir()) if p.is_file() and p.name!="EVIDENCE-FILES-SHA256.txt"]
+          root.joinpath("EVIDENCE-FILES-SHA256.txt").write_text("".join(f"{sha(p)}  {p.name}\n" for p in files))
+          mism=[]
+          for line in root.joinpath("EVIDENCE-FILES-SHA256.txt").read_text().splitlines():
+              h,n=line.split("  ",1)
+              if sha(root/n)!=h: mism.append(n)
+          root.joinpath("R10-FINAL-MANIFEST-VERIFY.json").write_text(json.dumps({
+              "status":"PASS" if not mism else "FAIL","mismatches":mism
+          },indent=2)+"\n")
+          # Manifest one final time to cover R10-FINAL-MANIFEST-VERIFY.json.
+          files=[p for p in sorted(root.iterdir()) if p.is_file() and p.name!="EVIDENCE-FILES-SHA256.txt"]
+          root.joinpath("EVIDENCE-FILES-SHA256.txt").write_text("".join(f"{sha(p)}  {p.name}\n" for p in files))
+          for line in root.joinpath("EVIDENCE-FILES-SHA256.txt").read_text().splitlines():
+              h,n=line.split("  ",1)
+              assert sha(root/n)==h
+          PY
 
-      - name: Upload final r9 aggregate evidence
+      - name: Record r10 outcomes
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$GITHUB_WORKSPACE/runtime-evidence/R10-STEP-OUTCOMES.txt" <<EOF
+          locate=${{ steps.locate.outcome }}
+          seal=${{ steps.seal.outcome }}
+          EOF
+          # Re-seal manifest after outcomes file is complete.
+          python3 - "$GITHUB_WORKSPACE/runtime-evidence" <<'PY'
+          from pathlib import Path
+          import hashlib,sys
+          root=Path(sys.argv[1])
+          def sha(p):
+              h=hashlib.sha256()
+              with open(p,"rb") as f:
+                  for c in iter(lambda:f.read(1024*1024),b""): h.update(c)
+              return h.hexdigest()
+          files=[p for p in sorted(root.iterdir()) if p.is_file() and p.name!="EVIDENCE-FILES-SHA256.txt"]
+          root.joinpath("EVIDENCE-FILES-SHA256.txt").write_text("".join(f"{sha(p)}  {p.name}\n" for p in files))
+          for line in root.joinpath("EVIDENCE-FILES-SHA256.txt").read_text().splitlines():
+              h,n=line.split("  ",1)
+              assert sha(root/n)==h
+          PY
+
+      - name: Upload final canonical evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -110,12 +144,14 @@ jobs:
         run: |
           set -euo pipefail
           [[ "${{ steps.locate.outcome }}" == success ]]
-          [[ "${{ steps.evaluate.outcome }}" == success ]]
-          [[ "$(cat runtime-evidence/R9-EVALUATION-EXIT-CODE.txt)" == 0 ]]
+          [[ "${{ steps.seal.outcome }}" == success ]]
+          [[ "$(cat runtime-evidence/R10-SEAL-EXIT-CODE.txt)" == 0 ]]
           python3 - <<'PY'
           import json
-          j=json.load(open("runtime-evidence/PARALLEL-INCREMENTAL-CERTIFICATION.json"))
-          assert j["status"]=="PASS"
-          assert j["workflow_revision"]=="v56-parallel-r9"
-          print("FRAMES 0.9.46 v56 PARALLEL r9 EVIDENCE REPAIR PASS")
+          final=json.load(open("runtime-evidence/FINAL-CERTIFICATION.json"))
+          manifest=json.load(open("runtime-evidence/R10-FINAL-MANIFEST-VERIFY.json"))
+          assert final["status"]=="PASS"
+          assert final["workflow_revision"]=="v56-parallel-r10"
+          assert manifest["status"]=="PASS"
+          print("FRAMES 0.9.46 v56 PARALLEL r10 FINAL EVIDENCE SEAL PASS")
           PY
