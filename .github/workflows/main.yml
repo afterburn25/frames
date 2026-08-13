@@ -1,189 +1,105 @@
-name: Frames 0.9.46 FAPP Native Application Loader Phase 1 Incremental Certification v56
+name: Frames 0.9.46 FAPP Native Application Loader Phase 1 Parallel Incremental Certification v56
 
 on:
   workflow_dispatch:
   push:
     branches: [ main ]
+    paths:
+      - 'Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel.zip'
+      - '**/Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel.zip'
 
 permissions:
   contents: read
 
-jobs:
-  qemu-ovmf-certification:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 180
-    env:
-      EXPECTED_FRAMES_VERSION: '0.9.46'
-      EXPECTED_SOURCE_SHA256: 'ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7'
-      CERTIFIED_BASELINE_VERSION: '0.9.45'
-      CERTIFIED_BASELINE_SOURCE_SHA256: 'f79e43eac7d2047bde1fb20cb7ade9f1ce09bbabffa9acc95d62acf9ca574199'
-      CERTIFIED_BASELINE_EVIDENCE_SHA256: '054590dd2a76a216f8b0639b8cb419c2ca3bf06d45ae64cda965adf8209065a5'
-      EXPECTED_WORKFLOW_REVISION: 'v56-incremental'
+concurrency:
+  group: frames-0.9.46-v56-parallel-${{ github.ref }}
+  cancel-in-progress: true
 
+env:
+  EXPECTED_FRAMES_VERSION: '0.9.46'
+  EXPECTED_SOURCE_SHA256: 'ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7'
+  CERTIFIED_BASELINE_VERSION: '0.9.45'
+  CERTIFIED_BASELINE_SOURCE_SHA256: 'f79e43eac7d2047bde1fb20cb7ade9f1ce09bbabffa9acc95d62acf9ca574199'
+  CERTIFIED_BASELINE_EVIDENCE_SHA256: '054590dd2a76a216f8b0639b8cb419c2ca3bf06d45ae64cda965adf8209065a5'
+  EXPECTED_WORKFLOW_REVISION: 'v56-parallel'
+  EXPECTED_TRIGGER_KIT: 'Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel.zip'
+
+jobs:
+  prepare:
+    name: Build once + seal certification inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install QEMU, OVMF, and build tools
+      - name: Install build tools
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 ovmf clang lld python3 unzip
-          command -v qemu-system-x86_64
+          sudo apt-get install -y clang lld python3 unzip
           command -v clang
           command -v lld-link
           command -v python3
           command -v unzip
 
-      - name: Locate exact Frames 0.9.46 source and bundled Nexus
+      - name: Locate exact runtime kit and sealed sources
         shell: bash
         run: |
           set -euo pipefail
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-          mkdir -p "$EVIDENCE"
-          frames_dir=""
-          source_zip=""
+          EVIDENCE="$GITHUB_WORKSPACE/prep-evidence"
+          INPUTS="$GITHUB_WORKSPACE/sealed-inputs"
+          PREPARED="$GITHUB_WORKSPACE/prepared-source"
+          mkdir -p "$EVIDENCE" "$INPUTS" "$PREPARED"
 
-          # v29: fail closed on exact source content, not candidate timestamp.
-          # Scan all direct source ZIPs first, then all matching runtime kits.
-          # A stale same-version ZIP is ignored rather than being allowed to win.
-          candidate_log="$EVIDENCE/SOURCE-CANDIDATES.txt"
-          : > "$candidate_log"
-
-          select_if_exact() {
-            local candidate="$1"
-            local actual_sha
-            actual_sha="$(sha256sum "$candidate" | awk '{print $1}')"
-            printf '%s  %s\n' "$actual_sha" "$candidate" >> "$candidate_log"
-            if [[ "$actual_sha" == "$EXPECTED_SOURCE_SHA256" ]]; then
-              source_zip="$candidate"
-              return 0
-            fi
-            return 1
-          }
-
-          while IFS= read -r candidate; do
-            [[ -n "$candidate" ]] || continue
-            if select_if_exact "$candidate"; then
-              break
-            fi
-          done < <(
-            find "$GITHUB_WORKSPACE" -maxdepth 3 -type f \
-              -name "Frames-${EXPECTED_FRAMES_VERSION}-Source*.zip" -print 2>/dev/null | sort
-          )
-
-          if [[ -z "$source_zip" ]]; then
-            while IFS= read -r kit_zip; do
-              [[ -n "$kit_zip" ]] || continue
-              rm -rf "$RUNNER_TEMP/frames-kit-candidate"
-              mkdir -p "$RUNNER_TEMP/frames-kit-candidate"
-              echo "Inspecting runtime kit: $kit_zip"
-              unzip -q "$kit_zip" -d "$RUNNER_TEMP/frames-kit-candidate"
-              while IFS= read -r candidate; do
-                [[ -n "$candidate" ]] || continue
-                if select_if_exact "$candidate"; then
-                  break 2
-                fi
-              done < <(
-                find "$RUNNER_TEMP/frames-kit-candidate" -maxdepth 5 -type f \
-                  -name "Frames-${EXPECTED_FRAMES_VERSION}-Source*.zip" -print 2>/dev/null | sort
-              )
-            done < <(
-              find "$GITHUB_WORKSPACE" -maxdepth 3 -type f \
-                -name "Frames-${EXPECTED_FRAMES_VERSION}-Runtime-Certification-Kit*.zip" -print 2>/dev/null | sort
-            )
-          fi
-
-          if [[ -z "$source_zip" ]]; then
-            {
-              echo "FAIL: no Frames ${EXPECTED_FRAMES_VERSION} source archive matched the exact required SHA-256."
-              echo "Expected: $EXPECTED_SOURCE_SHA256"
-              echo
-              echo "Candidates inspected:"
-              cat "$candidate_log"
-            } | tee "$EVIDENCE/SOURCE-INTEGRITY-FAILURE.txt"
+          kit_zip="$(find "$GITHUB_WORKSPACE" -maxdepth 4 -type f -name "$EXPECTED_TRIGGER_KIT" -print | sort | head -n1 || true)"
+          if [[ -z "$kit_zip" ]]; then
+            echo "Required runtime kit is not present: $EXPECTED_TRIGGER_KIT"
             exit 1
           fi
 
-          actual_sha="$(sha256sum "$source_zip" | awk '{print $1}')"
-          echo "Selected sealed source: $source_zip"
-          echo "Source SHA-256: $actual_sha"
-          echo "Workflow revision: $EXPECTED_WORKFLOW_REVISION"
+          rm -rf "$RUNNER_TEMP/v56-kit"
+          mkdir -p "$RUNNER_TEMP/v56-kit"
+          unzip -q "$kit_zip" -d "$RUNNER_TEMP/v56-kit"
 
-          rm -rf "$RUNNER_TEMP/frames-source"
-          mkdir -p "$RUNNER_TEMP/frames-source"
-          unzip -q "$source_zip" -d "$RUNNER_TEMP/frames-source"
+          candidate="$(find "$RUNNER_TEMP/v56-kit" -type f -name 'Frames-0.9.46-Source-v56.zip' -print | sort | head -n1 || true)"
+          baseline="$(find "$RUNNER_TEMP/v56-kit" -type f -name 'Frames-0.9.45-Source-v55.zip' -print | sort | head -n1 || true)"
+          [[ -n "$candidate" && -n "$baseline" ]]
 
-          while IFS= read -r vfile; do
-            candidate="${vfile%/VERSION}"
-            [[ -f "$candidate/tools/qemu_certify.sh" ]] || continue
-            version="$(tr -d '\r\n' < "$vfile")"
-            if [[ "$version" == "$EXPECTED_FRAMES_VERSION" ]]; then
-              frames_dir="$candidate"
-              break
-            fi
-          done < <(find "$RUNNER_TEMP/frames-source" -maxdepth 6 -type f -name VERSION -print | sort)
+          candidate_sha="$(sha256sum "$candidate" | awk '{print $1}')"
+          baseline_sha="$(sha256sum "$baseline" | awk '{print $1}')"
+          [[ "$candidate_sha" == "$EXPECTED_SOURCE_SHA256" ]]
+          [[ "$baseline_sha" == "$CERTIFIED_BASELINE_SOURCE_SHA256" ]]
 
-          if [[ -z "$frames_dir" ]]; then
-            {
-              echo "FAIL: exact source archive matched SHA but did not contain a valid Frames ${EXPECTED_FRAMES_VERSION} source tree."
-              echo "Selected archive: $source_zip"
-              echo "SHA-256: $actual_sha"
-            } | tee "$EVIDENCE/SOURCE-DISCOVERY-FAILURE.txt"
-            exit 1
-          fi
+          cp "$candidate" "$INPUTS/Frames-0.9.46-Source-v56.zip"
+          cp "$baseline" "$INPUTS/Frames-0.9.45-Source-v55.zip"
+          printf '%s  %s\n' "$candidate_sha" 'Frames-0.9.46-Source-v56.zip' > "$EVIDENCE/SOURCE-IDENTITY-SHA256.txt"
+          printf '%s  %s\n' "$baseline_sha" 'Frames-0.9.45-Source-v55.zip' >> "$EVIDENCE/SOURCE-IDENTITY-SHA256.txt"
+          printf 'workflow_revision=%s\ntrigger_kit=%s\n' "$EXPECTED_WORKFLOW_REVISION" "$EXPECTED_TRIGGER_KIT" > "$EVIDENCE/WORKFLOW-IDENTITY.txt"
 
-          frames_version="$(tr -d '\r\n' < "$frames_dir/VERSION")"
-          if [[ "$frames_version" != "$EXPECTED_FRAMES_VERSION" ]]; then
-            echo "FAIL: selected source reports $frames_version, expected $EXPECTED_FRAMES_VERSION" | tee "$EVIDENCE/VERSION-MISMATCH.txt"
-            exit 1
-          fi
-
+          unzip -q "$INPUTS/Frames-0.9.46-Source-v56.zip" -d "$PREPARED"
+          frames_dir="$(find "$PREPARED" -maxdepth 3 -type f -name VERSION -print | while read -r v; do d="${v%/VERSION}"; [[ "$(tr -d '\r\n' < "$v")" == "$EXPECTED_FRAMES_VERSION" && -f "$d/tools/qemu_certify.sh" ]] && { echo "$d"; break; }; done)"
+          [[ -n "$frames_dir" ]]
           nexus_path="$(find "$frames_dir/toolchain" -maxdepth 3 -type f -name nexus -path '*/Nexus-Language-*/nexus' -print | sort -V | tail -n1 || true)"
-          if [[ -z "$nexus_path" ]]; then
-            echo "FAIL: bundled Nexus compiler was not found under $frames_dir/toolchain" | tee "$EVIDENCE/NEXUS-DISCOVERY-FAILURE.txt"
-            exit 1
-          fi
+          [[ -n "$nexus_path" ]]
 
           echo "FRAMES_DIR=$frames_dir" >> "$GITHUB_ENV"
-          echo "FRAMES_VERSION=$frames_version" >> "$GITHUB_ENV"
+          echo "FRAMES_SOURCE_ZIP=$INPUTS/Frames-0.9.46-Source-v56.zip" >> "$GITHUB_ENV"
+          echo "FRAMES_BASELINE_SOURCE_ZIP=$INPUTS/Frames-0.9.45-Source-v55.zip" >> "$GITHUB_ENV"
           echo "NEXUS_EXE=$nexus_path" >> "$GITHUB_ENV"
-          echo "FRAMES_SOURCE_ZIP=${source_zip:-<unpacked-tree>}" >> "$GITHUB_ENV"
-          echo "============================================================"
-          echo "Frames source:  $frames_dir"
-          echo "Frames version: $frames_version"
-          echo "Nexus compiler: $nexus_path"
-          echo "============================================================"
 
-      - name: Compute change impact and certified inheritance
+      - name: Compute exact v55 to v56 change impact
         shell: bash
         run: |
           set -euo pipefail
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-          mkdir -p "$EVIDENCE"
-          baseline_zip=""
-          check_candidate() {
-            local p="$1"; local h
-            h="$(sha256sum "$p" | awk '{print $1}')"
-            if [[ "$h" == "$CERTIFIED_BASELINE_SOURCE_SHA256" ]]; then baseline_zip="$p"; return 0; fi
-            return 1
-          }
-          while IFS= read -r p; do [[ -n "$p" ]] || continue; check_candidate "$p" && break; done < <(find "$GITHUB_WORKSPACE" -maxdepth 3 -type f -name 'Frames-0.9.45-Source*.zip' -print | sort)
-          if [[ -z "$baseline_zip" ]]; then
-            while IFS= read -r k; do
-              rm -rf "$RUNNER_TEMP/baseline-kit"; mkdir -p "$RUNNER_TEMP/baseline-kit"; unzip -q "$k" -d "$RUNNER_TEMP/baseline-kit" || continue
-              while IFS= read -r p; do [[ -n "$p" ]] || continue; check_candidate "$p" && break 2; done < <(find "$RUNNER_TEMP/baseline-kit" -type f -name 'Frames-0.9.45-Source*.zip' -print | sort)
-            done < <(find "$GITHUB_WORKSPACE" -maxdepth 3 -type f -name 'Frames-0.9.46-Runtime-Certification-Kit-v56-Incremental.zip' -print | sort)
-          fi
-          [[ -n "$baseline_zip" ]] || { echo 'FAIL: certified v55 baseline source not found'; exit 1; }
-          echo "FRAMES_BASELINE_SOURCE_ZIP=$baseline_zip" >> "$GITHUB_ENV"
-          rm -rf "$RUNNER_TEMP/base-src" "$RUNNER_TEMP/cand-src"; mkdir -p "$RUNNER_TEMP/base-src" "$RUNNER_TEMP/cand-src"
-          unzip -q "$baseline_zip" -d "$RUNNER_TEMP/base-src"
-          unzip -q "$FRAMES_SOURCE_ZIP" -d "$RUNNER_TEMP/cand-src"
-          python3 - "$RUNNER_TEMP/base-src" "$RUNNER_TEMP/cand-src" "$EVIDENCE" <<'PYIMPACT'
+          EVIDENCE="$GITHUB_WORKSPACE/prep-evidence"
+          rm -rf "$RUNNER_TEMP/base-src"
+          mkdir -p "$RUNNER_TEMP/base-src"
+          unzip -q "$FRAMES_BASELINE_SOURCE_ZIP" -d "$RUNNER_TEMP/base-src"
+          python3 - "$RUNNER_TEMP/base-src" "$FRAMES_DIR" "$EVIDENCE" <<'PYIMPACT'
           import sys, pathlib, hashlib, difflib, re, json
-          base_dir=pathlib.Path(sys.argv[1]); cand_dir=pathlib.Path(sys.argv[2]); ev=pathlib.Path(sys.argv[3])
-          base=next(p for p in base_dir.iterdir() if p.is_dir()); cand=next(p for p in cand_dir.iterdir() if p.is_dir())
+          base_dir=pathlib.Path(sys.argv[1]); cand=pathlib.Path(sys.argv[2]); ev=pathlib.Path(sys.argv[3])
+          base=next(p for p in base_dir.iterdir() if p.is_dir())
           def H(p): return hashlib.sha256(p.read_bytes()).hexdigest()
           def files(root): return {p.relative_to(root).as_posix():H(p) for p in root.rglob('*') if p.is_file() and 'build' not in p.relative_to(root).parts and '__pycache__' not in p.parts and p.suffix!='.pyc'}
           a,b=files(base),files(cand); changed=sorted(r for r in set(a)|set(b) if a.get(r)!=b.get(r)); (ev/'CHANGED-FILES.txt').write_text('\n'.join(changed)+'\n')
@@ -204,7 +120,7 @@ jobs:
           tools/qemu_developer_preview_certify.sh
           tools/qmp_developer_preview_input.py
           tools/verify_runtime_repair_0946.py'''.splitlines())
-          if set(changed)!=expected: print('FAIL: changed-file set differs from sealed impact contract'); print('\n'.join(changed)); raise SystemExit(1)
+          if set(changed)!=expected: print('Changed-file set differs from sealed impact contract'); print('\n'.join(changed)); raise SystemExit(1)
           lines0=(base/'kernel/main.nx').read_text().splitlines(); lines1=(cand/'kernel/main.nx').read_text().splitlines()
           def fn_at(lines,idx):
            for j in range(idx,-1,-1):
@@ -215,86 +131,41 @@ jobs:
           for tag,i1,i2,j1,j2 in sm.get_opcodes():
            if tag!='equal': funcs.update(fn_at(lines1,j) for j in range(j1,j2)); funcs.update(fn_at(lines0,i) for i in range(i1,i2))
           allow={'setup_user_fex','setup_user_fex_from_mod','dev_text_app','dev_text_title','dev_text_version','developer_preview_execute','developer_preview_launch_fapp','developer_preview_result_text','developer_preview_run','kernel_main','serial_hwcompat_diag','serial_marker_devprev_cmd_app_ok','serial_marker_devprev_fapp_abi_ok','serial_marker_devprev_fapp_exit_ok','serial_marker_devprev_fapp_hash_ok','serial_marker_devprev_fapp_launch_begin','serial_marker_devprev_fapp_manifest_ok'}
-          if not funcs<=allow: print('FAIL: unexpected kernel functions changed:',sorted(funcs-allow)); raise SystemExit(1)
+          if not funcs<=allow: print('Unexpected kernel functions changed:',sorted(funcs-allow)); raise SystemExit(1)
           (ev/'CHANGED-KERNEL-FUNCTIONS.txt').write_text('\n'.join(sorted(funcs))+'\n')
           executed=['source_identity','change_impact','build_release','kernel_boot_smoke','physical_preview','hardware_compat','sdk_tooling','app_packaging','developer_preview','app_loader','safety_locks']
           inherited={'smp_scale':'No SMP/scheduler/AP/interrupt functions or SMP harness files changed.','storage_runtime':'No NVMe/block/storage/DMA source or storage harness files changed.','storage_write':'No storage write-path source or write certification harness files changed.','filesystem':'No filesystem/FAT allocation/crash-recovery source or harness files changed.','fat_lifecycle':'No FAT lifecycle source or harness files changed.','system_volume':'No system-volume write source or harness files changed.','lifecycle':'No reboot/shutdown/power lifecycle source or harness files changed.','usb_boot':'No USB boot/xHCI/HID source or USB boot harness files changed.','usb_msc':'No xHCI/BOT/SCSI/USB-MSC source or harness files changed.','stress':'No stress/fault subsystem source or stress harness files changed.'}
-          impact={'status':'PASS','profile':'frames-incremental-certification-v1','certified_baseline':{'frames_version':'0.9.45','source_sha256':'f79e43eac7d2047bde1fb20cb7ade9f1ce09bbabffa9acc95d62acf9ca574199','evidence_sha256':'054590dd2a76a216f8b0639b8cb419c2ca3bf06d45ae64cda965adf8209065a5'},'candidate':{'frames_version':'0.9.46','source_sha256':'ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7'},'changed_files':changed,'changed_kernel_functions':sorted(funcs),'executed_groups':executed,'inherited_groups':inherited,'rationale':'Kernel changes are confined to FEX/FAPP/Developer Preview functions plus policy plumbing. UEFI changed, so physical-preview and hardware-compatibility are re-executed. Unrelated subsystem groups inherit certified v55 evidence via exact baseline identity and sealed source/function impact analysis.'}
+          impact={'status':'PASS','profile':'frames-incremental-certification-v1','parallel_execution':True,'certified_baseline':{'frames_version':'0.9.45','source_sha256':'f79e43eac7d2047bde1fb20cb7ade9f1ce09bbabffa9acc95d62acf9ca574199','evidence_sha256':'054590dd2a76a216f8b0639b8cb419c2ca3bf06d45ae64cda965adf8209065a5'},'candidate':{'frames_version':'0.9.46','source_sha256':'ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7'},'changed_files':changed,'changed_kernel_functions':sorted(funcs),'executed_groups':executed,'inherited_groups':inherited,'rationale':'Kernel changes are confined to FEX/FAPP/Developer Preview functions plus policy plumbing. UEFI changed, so physical-preview and hardware-compatibility are re-executed. Independent executed groups run in isolated parallel jobs from one preflight-built source artifact. Unrelated subsystem groups inherit certified v55 evidence via exact baseline identity and sealed source/function impact analysis.'}
           (ev/'CHANGE-IMPACT-EVIDENCE.json').write_text(json.dumps(impact,indent=2)+'\n'); (ev/'EXECUTED-CERTIFICATION-GROUPS.json').write_text(json.dumps({'status':'READY','groups':executed},indent=2)+'\n'); (ev/'INHERITED-CERTIFICATION-GROUPS.json').write_text(json.dumps({'status':'READY','baseline_evidence_sha256':impact['certified_baseline']['evidence_sha256'],'groups':inherited},indent=2)+'\n'); (ev/'CERTIFIED-BASELINE.json').write_text(json.dumps(impact['certified_baseline'],indent=2)+'\n')
           print('Incremental impact analysis: PASS'); print('Changed files:',len(changed),'Changed kernel functions:',len(funcs))
           PYIMPACT
-      - name: Locate matching OVMF CODE and VARS pair
-        shell: bash
-        run: |
-          set -euo pipefail
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-          mkdir -p "$EVIDENCE"
-          code=""
-          vars=""
 
-          # CODE and VARS must be a matching pair. Prefer 4M firmware on Ubuntu.
-          for dir in /usr/share/OVMF /usr/share/edk2/ovmf /usr/share/edk2/x64; do
-            if [[ -f "$dir/OVMF_CODE_4M.fd" && -f "$dir/OVMF_VARS_4M.fd" ]]; then
-              code="$dir/OVMF_CODE_4M.fd"
-              vars="$dir/OVMF_VARS_4M.fd"
-              break
-            fi
-          done
-          if [[ -z "$code" ]]; then
-            for dir in /usr/share/OVMF /usr/share/edk2/ovmf /usr/share/edk2/x64; do
-              if [[ -f "$dir/OVMF_CODE.fd" && -f "$dir/OVMF_VARS.fd" ]]; then
-                code="$dir/OVMF_CODE.fd"
-                vars="$dir/OVMF_VARS.fd"
-                break
-              fi
-            done
-          fi
-
-          if [[ -z "$code" || -z "$vars" ]]; then
-            {
-              echo "FAIL: no matching OVMF CODE/VARS pair was found."
-              echo "Available firmware files:"
-              find /usr/share/OVMF /usr/share/edk2 -maxdepth 4 -type f -name 'OVMF_*.fd' -print 2>/dev/null | sort
-            } | tee "$EVIDENCE/OVMF-DISCOVERY-FAILURE.txt"
-            exit 1
-          fi
-
-          # Split OVMF CODE and VARS files are allowed to have different
-          # lengths; pair them by the same firmware family/name, not by size.
-          code_size="$(stat -c %s "$code")"
-          vars_size="$(stat -c %s "$vars")"
-
-          echo "OVMF_CODE=$code" >> "$GITHUB_ENV"
-          echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"
-          echo "OVMF CODE: $code ($code_size bytes)"
-          echo "OVMF VARS: $vars ($vars_size bytes)"
-
-      - name: Preflight exact source before QEMU
+      - name: Build and preflight exact source once
         shell: bash
         run: |
           set -euo pipefail
           cd "$FRAMES_DIR"
-          mkdir -p build "$GITHUB_WORKSPACE/runtime-evidence"
+          mkdir -p build "$GITHUB_WORKSPACE/prep-evidence"
           export NEXUS="$NEXUS_EXE"
-          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py
-          CONSOLE="$GITHUB_WORKSPACE/runtime-evidence/PREFLIGHT-CONSOLE.log"
+          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py sdk/*.sh sdk/*.py
+          CONSOLE="$GITHUB_WORKSPACE/prep-evidence/PREFLIGHT-CONSOLE.log"
           {
-            echo "Frames $FRAMES_VERSION preflight"
+            echo "Frames $EXPECTED_FRAMES_VERSION parallel preflight"
             echo "Nexus: $($NEXUS_EXE --version)"
             echo "Clang: $(clang --version | head -n1)"
             echo "LLD: $(lld-link --version | head -n1)"
             bash -n tools/*.sh
-            python3 -m compileall -q tools
+            python3 -m compileall -q tools sdk
             ./tools/build.sh
             python3 tools/make_esp.py
             python3 tools/make_write_test_nvme.py
-            cp build/Frames-${FRAMES_VERSION}-Write-Test.img build/Frames-${FRAMES_VERSION}-Write-Test.before.img
-            python3 tools/verify_write_test_image.py --before build/Frames-${FRAMES_VERSION}-Write-Test.before.img --after build/Frames-${FRAMES_VERSION}-Write-Test.img --require-pass
+            cp build/Frames-${EXPECTED_FRAMES_VERSION}-Write-Test.img build/Frames-${EXPECTED_FRAMES_VERSION}-Write-Test.before.img
+            python3 tools/verify_write_test_image.py --before build/Frames-${EXPECTED_FRAMES_VERSION}-Write-Test.before.img --after build/Frames-${EXPECTED_FRAMES_VERSION}-Write-Test.img --require-pass
             python3 tools/verify_release.py
             python3 tools/sdk_selftest.py --require-pass
             python3 tools/make_developer_preview_image.py
-            python3 tools/verify_developer_preview_image.py --image build/Frames-${FRAMES_VERSION}-Developer-Preview.img --package build/HelloFrames.fapp --require-pass
-            python3 tools/app_packaging_evidence.py --package build/HelloFrames.fapp --image build/Frames-${FRAMES_VERSION}-Developer-Preview.img --require-pass
+            python3 tools/verify_developer_preview_image.py --image build/Frames-${EXPECTED_FRAMES_VERSION}-Developer-Preview.img --package build/HelloFrames.fapp --require-pass
+            python3 tools/app_packaging_evidence.py --package build/HelloFrames.fapp --image build/Frames-${EXPECTED_FRAMES_VERSION}-Developer-Preview.img --require-pass
             python3 tools/verify_runtime_repair_0946.py
             python3 tools/make_usb_boot_image.py
             python3 tools/make_physical_preview_image.py
@@ -303,255 +174,343 @@ jobs:
             python3 tools/physical_preview_synthetic.py --require-pass
             python3 tools/make_internal_usb_guard.py
             python3 tools/make_lifecycle_test_nvme.py --mode both
-            python3 tools/verify_lifecycle_image.py --image build/Frames-${FRAMES_VERSION}-Lifecycle-reboot.img --mode reboot --expect-state 0 --require-pass
-            python3 tools/verify_lifecycle_image.py --image build/Frames-${FRAMES_VERSION}-Lifecycle-shutdown.img --mode shutdown --expect-state 0 --require-pass
+            python3 tools/verify_lifecycle_image.py --image build/Frames-${EXPECTED_FRAMES_VERSION}-Lifecycle-reboot.img --mode reboot --expect-state 0 --require-pass
+            python3 tools/verify_lifecycle_image.py --image build/Frames-${EXPECTED_FRAMES_VERSION}-Lifecycle-shutdown.img --mode shutdown --expect-state 0 --require-pass
             python3 tools/make_filesystem_test_nvme.py --all
             for s in 0 1 2 3 4; do
-              python3 tools/verify_filesystem_test_image.py --image "build/Frames-${FRAMES_VERSION}-Filesystem-s${s}.img" --scenario "$s" --phase initial --require-pass
+              python3 tools/verify_filesystem_test_image.py --image "build/Frames-${EXPECTED_FRAMES_VERSION}-Filesystem-s${s}.img" --scenario "$s" --phase initial --require-pass
             done
             python3 tools/make_system_volume_clone.py
-            cp build/Frames-${FRAMES_VERSION}-System-Clone.img build/Frames-${FRAMES_VERSION}-System-Clone.before.img
-            python3 tools/verify_system_volume_clone.py --before build/Frames-${FRAMES_VERSION}-System-Clone.before.img --after build/Frames-${FRAMES_VERSION}-System-Clone.img --manifest build/SYSTEM-VOLUME-TARGET.json --require-pass
+            cp build/Frames-${EXPECTED_FRAMES_VERSION}-System-Clone.img build/Frames-${EXPECTED_FRAMES_VERSION}-System-Clone.before.img
+            python3 tools/verify_system_volume_clone.py --before build/Frames-${EXPECTED_FRAMES_VERSION}-System-Clone.before.img --after build/Frames-${EXPECTED_FRAMES_VERSION}-System-Clone.img --manifest build/SYSTEM-VOLUME-TARGET.json --require-pass
             python3 tools/make_fat_lifecycle_clone.py
-            cp build/Frames-${FRAMES_VERSION}-FAT-Lifecycle-Clone.img build/Frames-${FRAMES_VERSION}-FAT-Lifecycle-Clone.before.img
-            python3 tools/verify_fat_lifecycle_clone.py --before build/Frames-${FRAMES_VERSION}-FAT-Lifecycle-Clone.before.img --after build/Frames-${FRAMES_VERSION}-FAT-Lifecycle-Clone.img --manifest build/FAT-LIFECYCLE-TARGET.json --require-pass
+            cp build/Frames-${EXPECTED_FRAMES_VERSION}-FAT-Lifecycle-Clone.img build/Frames-${EXPECTED_FRAMES_VERSION}-FAT-Lifecycle-Clone.before.img
+            python3 tools/verify_fat_lifecycle_clone.py --before build/Frames-${EXPECTED_FRAMES_VERSION}-FAT-Lifecycle-Clone.before.img --after build/Frames-${EXPECTED_FRAMES_VERSION}-FAT-Lifecycle-Clone.img --manifest build/FAT-LIFECYCLE-TARGET.json --require-pass
             python3 tools/fat_lifecycle_synthetic.py
-            sha256sum build/BOOTX64.EFI build/FramesKernel.fkrn build/System.fex build/Frames-${FRAMES_VERSION}-ESP.img build/BOOTSTAT.TXT
+            sha256sum build/BOOTX64.EFI build/FramesKernel.fkrn build/System.fex build/Frames-${EXPECTED_FRAMES_VERSION}-ESP.img build/BOOTSTAT.TXT
             python3 tools/runtime_preflight.py --require-ready
           } 2>&1 | tee "$CONSOLE"
 
-      - name: Mandatory kernel and boot smoke certification
-        id: runtime_smoke
+      - name: Seal prepared source artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"
+          find . -type f -print0 | sort -z | xargs -0 sha256sum > "$GITHUB_WORKSPACE/prep-evidence/PREPARED-SOURCE-MANIFEST-SHA256.txt"
+          python3 - "$GITHUB_WORKSPACE/prep-evidence/PREPARED-SOURCE-MANIFEST-SHA256.txt" <<'PY'
+          import pathlib,sys,json
+          p=pathlib.Path(sys.argv[1])
+          count=sum(1 for line in p.read_text().splitlines() if line.strip())
+          pathlib.Path(p.parent/'PREPARED-SOURCE-IDENTITY.json').write_text(json.dumps({'status':'PASS','frames_version':'0.9.46','candidate_source_sha256':'ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7','prepared_file_count':count,'workflow_revision':'v56-parallel'},indent=2)+'\n')
+          print('Prepared source files:',count)
+          PY
+
+      - name: Upload prepared source
+        uses: actions/upload-artifact@v4
+        with:
+          name: frames-v56-parallel-prepared-source
+          path: ${{ github.workspace }}/prepared-source
+          if-no-files-found: error
+          retention-days: 2
+          compression-level: 1
+
+      - name: Upload preparation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: frames-v56-parallel-prep-evidence
+          path: ${{ github.workspace }}/prep-evidence
+          if-no-files-found: error
+          retention-days: 14
+
+  certify:
+    name: Certify ${{ matrix.lane }}
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        lane:
+          - kernel-smoke
+          - physical-preview
+          - hardware-compat
+          - sdk-tooling
+          - app-packaging
+          - developer-loader
+
+    steps:
+      - name: Install lane runtime tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf clang lld python3 unzip
+          command -v qemu-system-x86_64
+          command -v python3
+
+      - name: Download one preflight-built source artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frames-v56-parallel-prepared-source
+          path: ${{ github.workspace }}/prepared-source
+
+      - name: Download preparation evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: frames-v56-parallel-prep-evidence
+          path: ${{ github.workspace }}/prep-evidence
+
+      - name: Verify prepared source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          FRAMES_DIR="$(find "$GITHUB_WORKSPACE/prepared-source" -maxdepth 4 -type f -name VERSION -print | while read -r v; do d="${v%/VERSION}"; [[ "$(tr -d '\r\n' < "$v")" == "$EXPECTED_FRAMES_VERSION" && -f "$d/tools/qemu_certify.sh" ]] && { echo "$d"; break; }; done)"
+          [[ -n "$FRAMES_DIR" && -f "$FRAMES_DIR/VERSION" ]]
+          cd "$FRAMES_DIR"
+          sha256sum -c "$GITHUB_WORKSPACE/prep-evidence/PREPARED-SOURCE-MANIFEST-SHA256.txt" >/dev/null
+          nexus_path="$(find "$FRAMES_DIR/toolchain" -maxdepth 3 -type f -name nexus -path '*/Nexus-Language-*/nexus' -print | sort -V | tail -n1 || true)"
+          [[ -n "$nexus_path" ]]
+          chmod +x "$nexus_path" tools/*.sh tools/*.py sdk/*.sh sdk/*.py
+          echo "FRAMES_DIR=$FRAMES_DIR" >> "$GITHUB_ENV"
+          echo "NEXUS_EXE=$nexus_path" >> "$GITHUB_ENV"
+
+      - name: Locate matching OVMF CODE and VARS pair
+        if: ${{ matrix.lane == 'kernel-smoke' || matrix.lane == 'physical-preview' || matrix.lane == 'hardware-compat' || matrix.lane == 'developer-loader' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=""; vars=""
+          for dir in /usr/share/OVMF /usr/share/edk2/ovmf /usr/share/edk2/x64; do
+            if [[ -f "$dir/OVMF_CODE_4M.fd" && -f "$dir/OVMF_VARS_4M.fd" ]]; then code="$dir/OVMF_CODE_4M.fd"; vars="$dir/OVMF_VARS_4M.fd"; break; fi
+          done
+          if [[ -z "$code" ]]; then
+            for dir in /usr/share/OVMF /usr/share/edk2/ovmf /usr/share/edk2/x64; do
+              if [[ -f "$dir/OVMF_CODE.fd" && -f "$dir/OVMF_VARS.fd" ]]; then code="$dir/OVMF_CODE.fd"; vars="$dir/OVMF_VARS.fd"; break; fi
+            done
+          fi
+          [[ -n "$code" && -n "$vars" ]]
+          echo "OVMF_CODE=$code" >> "$GITHUB_ENV"
+          echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"
+
+      - name: Run isolated certification lane
+        id: lane
         shell: bash
         env:
+          LANE: ${{ matrix.lane }}
           FRAMES_BOOT_TIMEOUT: '240'
         run: |
           set -uo pipefail
           cd "$FRAMES_DIR"
           export NEXUS="$NEXUS_EXE"
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"; mkdir -p "$EVIDENCE"
-          set +e
-          ./tools/qemu_certify.sh 2>&1 | tee "$EVIDENCE/KERNEL-BOOT-SMOKE-CONSOLE.log"
-          rc=${PIPESTATUS[0]}
-          set -e
-          echo "$rc" > "$EVIDENCE/KERNEL-BOOT-SMOKE-CERTIFY-EXIT-CODE.txt"
-          [[ -f build/serial.log ]] && cp build/serial.log "$EVIDENCE/"
-          [[ -f build/qemu-debug.log ]] && cp build/qemu-debug.log "$EVIDENCE/"
-          if [[ -f build/serial.log ]]; then
-            python3 - build/serial.log "$EVIDENCE/KERNEL-BOOT-SMOKE-EVIDENCE.json" <<'PYSMOKE'
+          EVIDENCE="$GITHUB_WORKSPACE/lane-evidence"
+          mkdir -p "$EVIDENCE"
+          printf 'lane=%s\nworkflow_revision=%s\n' "$LANE" "$EXPECTED_WORKFLOW_REVISION" > "$EVIDENCE/LANE-IDENTITY.txt"
+
+          case "$LANE" in
+            kernel-smoke)
+              set +e
+              ./tools/qemu_certify.sh 2>&1 | tee "$EVIDENCE/KERNEL-BOOT-SMOKE-CONSOLE.log"
+              qemu_rc=${PIPESTATUS[0]}
+              smoke_rc=0
+              if [[ -f build/serial.log ]]; then
+                cp build/serial.log "$EVIDENCE/"
+                [[ -f build/qemu-debug.log ]] && cp build/qemu-debug.log "$EVIDENCE/"
+                python3 - build/serial.log "$EVIDENCE/KERNEL-BOOT-SMOKE-EVIDENCE.json" <<'PYSMOKE'
           import sys,json,pathlib
-          s=pathlib.Path(sys.argv[1]).read_text(errors='replace'); fatal=[m for m in ['FRAMES_PAGE_FAULT','FRAMES_AP_PROTECTION_FAULT=','FRAMES_DEVPREV_CERT_FAIL','FRAMES_USB_MSC_CERT_FAIL','FRAMES_FS_WRITE_CERT_FAIL'] if m in s]; req=['FRAMES_KERNEL_READY','FRAMES_USERSPACE_READY']; missing=[m for m in req if m not in s]; status='PASS' if not fatal and not missing else 'FAIL'; pathlib.Path(sys.argv[2]).write_text(json.dumps({'status':status,'profile':'frames-kernel-boot-smoke','missing':missing,'fatal':fatal},indent=2)+'\n'); raise SystemExit(0 if status=='PASS' else 1)
+          s=pathlib.Path(sys.argv[1]).read_text(errors='replace')
+          fatal=[m for m in ['FRAMES_PAGE_FAULT','FRAMES_AP_PROTECTION_FAULT=','FRAMES_DEVPREV_CERT_FAIL','FRAMES_USB_MSC_CERT_FAIL','FRAMES_FS_WRITE_CERT_FAIL'] if m in s]
+          req=['FRAMES_KERNEL_READY','FRAMES_USERSPACE_READY']; missing=[m for m in req if m not in s]
+          status='PASS' if not fatal and not missing else 'FAIL'
+          pathlib.Path(sys.argv[2]).write_text(json.dumps({'status':status,'profile':'frames-kernel-boot-smoke','missing':missing,'fatal':fatal},indent=2)+'\n')
+          raise SystemExit(0 if status=='PASS' else 1)
           PYSMOKE
-          fi
-          exit "$rc"
-      - name: Physical boot safety certification matrix
-        id: physical_preview
-        timeout-minutes: 45
-        shell: bash
-        run: |
-          set -uo pipefail
-          cd "$FRAMES_DIR"
-          export NEXUS="$NEXUS_EXE"
-          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-          mkdir -p "$EVIDENCE"
-          CONSOLE="$EVIDENCE/PHYSICAL-PREVIEW-CERTIFICATION-CONSOLE.log"
+                smoke_rc=$?
+              else
+                smoke_rc=2
+              fi
+              set -e
+              final_rc="$qemu_rc"; [[ "$final_rc" -eq 0 ]] && final_rc="$smoke_rc"
+              echo "$final_rc" > "$EVIDENCE/KERNEL-BOOT-SMOKE-CERTIFY-EXIT-CODE.txt"
+              exit "$final_rc"
+              ;;
 
-          set +e
-          ./tools/qemu_physical_preview_matrix_certify.sh 2>&1 | tee "$CONSOLE"
-          physical_rc=${PIPESTATUS[0]}
-          set -e
-          echo "$physical_rc" > "$EVIDENCE/PHYSICAL-PREVIEW-CERTIFY-EXIT-CODE.txt"
+            physical-preview)
+              set +e
+              ./tools/qemu_physical_preview_matrix_certify.sh 2>&1 | tee "$EVIDENCE/PHYSICAL-PREVIEW-CERTIFICATION-CONSOLE.log"
+              rc=${PIPESTATUS[0]}
+              set -e
+              echo "$rc" > "$EVIDENCE/PHYSICAL-PREVIEW-CERTIFY-EXIT-CODE.txt"
+              for f in build/physical-*-serial.log build/physical-*-monitor.log build/physical-*-qemu-debug.log build/PHYSICAL-PREVIEW-*.json build/PHYSICAL-PREVIEW-*.txt; do [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"; done
+              sha256sum build/Frames-${EXPECTED_FRAMES_VERSION}-Physical-Hardware-Preview.img build/Frames-${EXPECTED_FRAMES_VERSION}-ESP.img build/Frames-${EXPECTED_FRAMES_VERSION}-Physical-SATA-Guard.img build/Frames-${EXPECTED_FRAMES_VERSION}-Write-Test.img build/Frames-${EXPECTED_FRAMES_VERSION}-Lifecycle-reboot.img build/Frames-${EXPECTED_FRAMES_VERSION}-Lifecycle-shutdown.img build/Frames-${EXPECTED_FRAMES_VERSION}-Filesystem-s0.img build/Frames-${EXPECTED_FRAMES_VERSION}-System-Clone.img build/Frames-${EXPECTED_FRAMES_VERSION}-FAT-Lifecycle-Clone.img > "$EVIDENCE/PHYSICAL-PREVIEW-DEFINING-SHA256.txt"
+              exit "$rc"
+              ;;
 
-          for f in build/physical-*-serial.log build/physical-*-monitor.log build/physical-*-qemu-debug.log build/PHYSICAL-PREVIEW-*.json build/PHYSICAL-PREVIEW-*.txt; do
-            [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
-          done
+            hardware-compat)
+              set +e
+              ./tools/qemu_hardware_compat_matrix_certify.sh 2>&1 | tee "$EVIDENCE/HWCOMPAT-CERTIFICATION-CONSOLE.log"
+              rc=${PIPESTATUS[0]}
+              set -e
+              echo "$rc" > "$EVIDENCE/HWCOMPAT-CERTIFY-EXIT-CODE.txt"
+              for f in build/hwcompat-*.log build/HWCOMPAT-*.json build/HWCOMPAT-*.txt; do [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"; done
+              sha256sum build/BOOTX64.EFI build/FramesKernel.fkrn build/System.fex build/Frames-${EXPECTED_FRAMES_VERSION}-ESP.img build/Frames-${EXPECTED_FRAMES_VERSION}-Physical-Hardware-Preview.img > "$EVIDENCE/HWCOMPAT-DEFINING-SHA256.txt"
+              exit "$rc"
+              ;;
 
-          sha256sum \
-            build/Frames-${FRAMES_VERSION}-Physical-Hardware-Preview.img \
-            build/Frames-${FRAMES_VERSION}-ESP.img \
-            build/Frames-${FRAMES_VERSION}-Physical-SATA-Guard.img \
-            build/Frames-${FRAMES_VERSION}-Write-Test.img \
-            build/Frames-${FRAMES_VERSION}-Lifecycle-reboot.img \
-            build/Frames-${FRAMES_VERSION}-Lifecycle-shutdown.img \
-            build/Frames-${FRAMES_VERSION}-Filesystem-s0.img \
-            build/Frames-${FRAMES_VERSION}-System-Clone.img \
-            build/Frames-${FRAMES_VERSION}-FAT-Lifecycle-Clone.img \
-            > "$EVIDENCE/PHYSICAL-PREVIEW-DEFINING-SHA256.txt"
-          exit "$physical_rc"
+            sdk-tooling)
+              set +e
+              python3 tools/sdk_selftest.py --require-pass 2>&1 | tee "$EVIDENCE/SDK-TOOLING-CERTIFICATION-CONSOLE.log"
+              rc=${PIPESTATUS[0]}
+              set -e
+              echo "$rc" > "$EVIDENCE/SDK-TOOLING-CERTIFY-EXIT-CODE.txt"
+              [[ -f build/SDK-TOOLING-EVIDENCE.json ]] && cp build/SDK-TOOLING-EVIDENCE.json "$EVIDENCE/"
+              { sha256sum sdk/SDK-MANIFEST.json sdk/examples/hello/main.nx sdk/fapp_tool.py; [[ -f build/HelloFrames-SDK.fex ]] && sha256sum build/HelloFrames-SDK.fex; [[ -f build/HelloFrames.fapp ]] && sha256sum build/HelloFrames.fapp; } > "$EVIDENCE/SDK-TOOLING-DEFINING-SHA256.txt"
+              exit "$rc"
+              ;;
 
+            app-packaging)
+              set +e
+              python3 tools/sdk_selftest.py --require-pass >/dev/null 2>&1
+              prep_rc=$?
+              python3 tools/make_developer_preview_image.py >/dev/null 2>&1
+              image_rc=$?
+              python3 tools/app_packaging_evidence.py --package build/HelloFrames.fapp --image build/Frames-${EXPECTED_FRAMES_VERSION}-Developer-Preview.img --require-pass 2>&1 | tee "$EVIDENCE/APP-PACKAGING-CERTIFICATION-CONSOLE.log"
+              app_rc=${PIPESTATUS[0]}
+              set -e
+              rc="$prep_rc"; [[ "$rc" -eq 0 ]] && rc="$image_rc"; [[ "$rc" -eq 0 ]] && rc="$app_rc"
+              echo "$rc" > "$EVIDENCE/APP-PACKAGING-CERTIFY-EXIT-CODE.txt"
+              [[ -f build/APP-PACKAGING-EVIDENCE.json ]] && cp build/APP-PACKAGING-EVIDENCE.json "$EVIDENCE/"
+              [[ -f build/HelloFrames.fapp ]] && cp build/HelloFrames.fapp "$EVIDENCE/"
+              { sha256sum sdk/fapp_tool.py sdk/SDK-MANIFEST.json; [[ -f build/HelloFrames.fapp ]] && sha256sum build/HelloFrames.fapp; [[ -f build/Frames-${EXPECTED_FRAMES_VERSION}-Developer-Preview.img ]] && sha256sum build/Frames-${EXPECTED_FRAMES_VERSION}-Developer-Preview.img; } > "$EVIDENCE/APP-PACKAGING-DEFINING-SHA256.txt"
+              exit "$rc"
+              ;;
 
-      - name: Real hardware compatibility expansion matrix
-        id: hardware_compat
-        timeout-minutes: 45
-        shell: bash
-        run: |
-          set -uo pipefail
-          cd "$FRAMES_DIR"
-          export NEXUS="$NEXUS_EXE"
-          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-          mkdir -p "$EVIDENCE"
-          CONSOLE="$EVIDENCE/HWCOMPAT-CERTIFICATION-CONSOLE.log"
+            developer-loader)
+              set +e
+              ./tools/qemu_developer_preview_certify.sh 2>&1 | tee "$EVIDENCE/DEVELOPER-PREVIEW-CERTIFICATION-CONSOLE.log"
+              preview_rc=${PIPESTATUS[0]}
+              set -e
+              echo "$preview_rc" > "$EVIDENCE/DEVELOPER-PREVIEW-CERTIFY-EXIT-CODE.txt"
+              for f in build/developer-preview-*.log build/DEVELOPER-PREVIEW-*.json build/DEVELOPER-PREVIEW-*.txt; do [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"; done
+              for f in build/Frames-${EXPECTED_FRAMES_VERSION}-Developer-Preview.img build/HelloFrames.fapp build/BOOTX64.EFI build/FramesKernel.fkrn build/System.fex; do [[ -f "$f" ]] && sha256sum "$f"; done > "$EVIDENCE/DEVELOPER-PREVIEW-DEFINING-SHA256.txt"
 
-          set +e
-          ./tools/qemu_hardware_compat_matrix_certify.sh 2>&1 | tee "$CONSOLE"
-          compat_rc=${PIPESTATUS[0]}
-          set -e
-          echo "$compat_rc" > "$EVIDENCE/HWCOMPAT-CERTIFY-EXIT-CODE.txt"
+              loader_rc=99
+              if [[ "$preview_rc" -eq 0 ]]; then
+                set +e
+                python3 tools/app_loader_evidence.py --developer-evidence build/DEVELOPER-PREVIEW-EVIDENCE.json --require-pass 2>&1 | tee build/APP-LOADER-EVIDENCE.json | tee "$EVIDENCE/APP-LOADER-CERTIFICATION-CONSOLE.log"
+                loader_rc=${PIPESTATUS[0]}
+                set -e
+              fi
+              echo "$loader_rc" > "$EVIDENCE/APP-LOADER-CERTIFY-EXIT-CODE.txt"
+              [[ -f build/APP-LOADER-EVIDENCE.json ]] && cp build/APP-LOADER-EVIDENCE.json "$EVIDENCE/"
+              { sha256sum tools/app_loader_evidence.py tools/developer_preview_evidence.py; [[ -f build/DEVELOPER-PREVIEW-EVIDENCE.json ]] && sha256sum build/DEVELOPER-PREVIEW-EVIDENCE.json; [[ -f build/HelloFrames.fapp ]] && sha256sum build/HelloFrames.fapp; } > "$EVIDENCE/APP-LOADER-DEFINING-SHA256.txt"
+              rc="$preview_rc"; [[ "$rc" -eq 0 ]] && rc="$loader_rc"
+              exit "$rc"
+              ;;
 
-          for f in build/hwcompat-*.log build/HWCOMPAT-*.json build/HWCOMPAT-*.txt; do
-            [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
-          done
-          sha256sum             build/BOOTX64.EFI             build/FramesKernel.fkrn             build/System.fex             build/Frames-${FRAMES_VERSION}-ESP.img             build/Frames-${FRAMES_VERSION}-Physical-Hardware-Preview.img             > "$EVIDENCE/HWCOMPAT-DEFINING-SHA256.txt"
-          exit "$compat_rc"
+            *)
+              echo "Unknown lane: $LANE" >&2
+              exit 64
+              ;;
+          esac
 
-      - name: Nexus SDK Phase 2 host tooling certification
-        id: sdk_tooling
-        shell: bash
-        run: |
-          set -uo pipefail
-          cd "$FRAMES_DIR"
-          export NEXUS="$NEXUS_EXE"
-          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py sdk/*.sh
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-          mkdir -p "$EVIDENCE"
-          CONSOLE="$EVIDENCE/SDK-TOOLING-CERTIFICATION-CONSOLE.log"
-
-          set +e
-          python3 tools/sdk_selftest.py --require-pass 2>&1 | tee "$CONSOLE"
-          sdk_rc=${PIPESTATUS[0]}
-          set -e
-          echo "$sdk_rc" > "$EVIDENCE/SDK-TOOLING-CERTIFY-EXIT-CODE.txt"
-
-          [[ -f build/SDK-TOOLING-EVIDENCE.json ]] && cp build/SDK-TOOLING-EVIDENCE.json "$EVIDENCE/"
-          {
-            sha256sum sdk/SDK-MANIFEST.json sdk/examples/hello/main.nx sdk/fapp_tool.py
-            [[ -f build/HelloFrames-SDK.fex ]] && sha256sum build/HelloFrames-SDK.fex
-            [[ -f build/HelloFrames.fapp ]] && sha256sum build/HelloFrames.fapp
-          } > "$EVIDENCE/SDK-TOOLING-DEFINING-SHA256.txt"
-
-          exit "$sdk_rc"
-
-      - name: FEX application packaging certification
-        id: app_packaging
-        shell: bash
-        run: |
-          set -uo pipefail
-          cd "$FRAMES_DIR"
-          export NEXUS="$NEXUS_EXE"
-          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py sdk/*.sh sdk/*.py
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-          mkdir -p "$EVIDENCE"
-          CONSOLE="$EVIDENCE/APP-PACKAGING-CERTIFICATION-CONSOLE.log"
-
-          set +e
-          python3 tools/sdk_selftest.py --require-pass >/dev/null 2>&1
-          python3 tools/make_developer_preview_image.py >/dev/null 2>&1
-          python3 tools/app_packaging_evidence.py --package build/HelloFrames.fapp --image build/Frames-${FRAMES_VERSION}-Developer-Preview.img --require-pass 2>&1 | tee "$CONSOLE"
-          app_rc=${PIPESTATUS[0]}
-          set -e
-          echo "$app_rc" > "$EVIDENCE/APP-PACKAGING-CERTIFY-EXIT-CODE.txt"
-          [[ -f build/APP-PACKAGING-EVIDENCE.json ]] && cp build/APP-PACKAGING-EVIDENCE.json "$EVIDENCE/"
-          [[ -f build/HelloFrames.fapp ]] && cp build/HelloFrames.fapp "$EVIDENCE/"
-          {
-            sha256sum sdk/fapp_tool.py sdk/SDK-MANIFEST.json
-            [[ -f build/HelloFrames.fapp ]] && sha256sum build/HelloFrames.fapp
-            [[ -f build/Frames-${FRAMES_VERSION}-Developer-Preview.img ]] && sha256sum build/Frames-${FRAMES_VERSION}-Developer-Preview.img
-          } > "$EVIDENCE/APP-PACKAGING-DEFINING-SHA256.txt"
-          exit "$app_rc"
-
-      - name: FAPP Native Application Loader Phase 1 runtime certification
-        id: developer_preview
-        timeout-minutes: 30
-        shell: bash
-        run: |
-          set -uo pipefail
-          cd "$FRAMES_DIR"
-          export NEXUS="$NEXUS_EXE"
-          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-          mkdir -p "$EVIDENCE"
-          CONSOLE="$EVIDENCE/DEVELOPER-PREVIEW-CERTIFICATION-CONSOLE.log"
-
-          set +e
-          ./tools/qemu_developer_preview_certify.sh 2>&1 | tee "$CONSOLE"
-          preview_rc=${PIPESTATUS[0]}
-          set -e
-          echo "$preview_rc" > "$EVIDENCE/DEVELOPER-PREVIEW-CERTIFY-EXIT-CODE.txt"
-
-          for f in \
-            build/developer-preview-*.log \
-            build/DEVELOPER-PREVIEW-*.json \
-            build/DEVELOPER-PREVIEW-*.txt; do
-            [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
-          done
-
-          for f in \
-            build/Frames-${FRAMES_VERSION}-Developer-Preview.img \
-            build/HelloFrames.fapp \
-            build/BOOTX64.EFI \
-            build/FramesKernel.fkrn \
-            build/System.fex; do
-            [[ -f "$f" ]] && sha256sum "$f"
-          done > "$EVIDENCE/DEVELOPER-PREVIEW-DEFINING-SHA256.txt"
-
-          exit "$preview_rc"
-
-
-      - name: FAPP native application loader Phase 1 certification gate
-        id: app_loader
-        shell: bash
-        run: |
-          set -uo pipefail
-          cd "$FRAMES_DIR"
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-          mkdir -p "$EVIDENCE"
-          CONSOLE="$EVIDENCE/APP-LOADER-CERTIFICATION-CONSOLE.log"
-
-          set +e
-          python3 tools/app_loader_evidence.py --developer-evidence build/DEVELOPER-PREVIEW-EVIDENCE.json --require-pass 2>&1 | tee build/APP-LOADER-EVIDENCE.json | tee "$CONSOLE"
-          loader_rc=${PIPESTATUS[0]}
-          set -e
-          echo "$loader_rc" > "$EVIDENCE/APP-LOADER-CERTIFY-EXIT-CODE.txt"
-          [[ -f build/APP-LOADER-EVIDENCE.json ]] && cp build/APP-LOADER-EVIDENCE.json "$EVIDENCE/"
-          {
-            sha256sum tools/app_loader_evidence.py tools/developer_preview_evidence.py
-            [[ -f build/DEVELOPER-PREVIEW-EVIDENCE.json ]] && sha256sum build/DEVELOPER-PREVIEW-EVIDENCE.json
-            [[ -f build/HelloFrames.fapp ]] && sha256sum build/HelloFrames.fapp
-          } > "$EVIDENCE/APP-LOADER-DEFINING-SHA256.txt"
-          exit "$loader_rc"
-
-      - name: Build incremental certification evidence
-        if: always()
-        shell: bash
-        run: |
-          set +e
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"; mkdir -p "$EVIDENCE"
-          { echo "Frames 0.9.46 incremental certification diagnostics"; echo "UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"; echo "EXPECTED_WORKFLOW_REVISION=${EXPECTED_WORKFLOW_REVISION:-<unset>}"; echo "EXPECTED_SOURCE_SHA256=${EXPECTED_SOURCE_SHA256:-<unset>}"; echo "CERTIFIED_BASELINE_SOURCE_SHA256=${CERTIFIED_BASELINE_SOURCE_SHA256:-<unset>}"; echo "CERTIFIED_BASELINE_EVIDENCE_SHA256=${CERTIFIED_BASELINE_EVIDENCE_SHA256:-<unset>}"; echo "FRAMES_SOURCE_ZIP=${FRAMES_SOURCE_ZIP:-<unset>}"; echo "FRAMES_BASELINE_SOURCE_ZIP=${FRAMES_BASELINE_SOURCE_ZIP:-<unset>}"; echo "QEMU_VERSION=$(qemu-system-x86_64 --version 2>/dev/null | head -n1 || true)"; } > "$EVIDENCE/WORKFLOW-DIAGNOSTICS.txt"
-          if [[ -n "${FRAMES_DIR:-}" && -d "$FRAMES_DIR/build" ]]; then
-            for f in "$FRAMES_DIR"/build/physical-*.log "$FRAMES_DIR"/build/PHYSICAL-PREVIEW-*.json "$FRAMES_DIR"/build/PHYSICAL-PREVIEW-*.txt "$FRAMES_DIR"/build/hwcompat-*.log "$FRAMES_DIR"/build/HWCOMPAT-*.json "$FRAMES_DIR"/build/HWCOMPAT-*.txt "$FRAMES_DIR"/build/developer-preview-*.log "$FRAMES_DIR"/build/DEVELOPER-PREVIEW-*.json "$FRAMES_DIR"/build/DEVELOPER-PREVIEW-*.txt "$FRAMES_DIR"/build/SDK-TOOLING-EVIDENCE.json "$FRAMES_DIR"/build/APP-PACKAGING-EVIDENCE.json "$FRAMES_DIR"/build/APP-LOADER-EVIDENCE.json "$FRAMES_DIR"/build/HelloFrames.fapp; do [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"; done
-          fi
-          python3 - "$EVIDENCE" <<'PYAGG'
-          import sys,pathlib,json,hashlib
-          p=pathlib.Path(sys.argv[1]); required=['KERNEL-BOOT-SMOKE-CERTIFY-EXIT-CODE.txt','PHYSICAL-PREVIEW-CERTIFY-EXIT-CODE.txt','HWCOMPAT-CERTIFY-EXIT-CODE.txt','SDK-TOOLING-CERTIFY-EXIT-CODE.txt','APP-PACKAGING-CERTIFY-EXIT-CODE.txt','DEVELOPER-PREVIEW-CERTIFY-EXIT-CODE.txt','APP-LOADER-CERTIFY-EXIT-CODE.txt']; missing=[]; nonzero={}
-          for n in required:
-           f=p/n
-           if not f.exists(): missing.append(n); continue
-           try:v=int(f.read_text().strip())
-           except:v=-999
-           if v!=0:nonzero[n]=v
-          impact=p/'CHANGE-IMPACT-EVIDENCE.json'; impact_ok=False
-          if impact.exists():
-           try:impact_ok=json.loads(impact.read_text()).get('status')=='PASS'
-           except:pass
-          status='PASS' if not missing and not nonzero and impact_ok else 'FAIL'; out={'status':status,'profile':'frames-0.9.46-v56-incremental','workflow_revision':'v56-incremental','candidate_source_sha256':'ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7','certified_baseline_source_sha256':'f79e43eac7d2047bde1fb20cb7ade9f1ce09bbabffa9acc95d62acf9ca574199','certified_baseline_evidence_sha256':'054590dd2a76a216f8b0639b8cb419c2ca3bf06d45ae64cda965adf8209065a5','required_executed_exit_codes':required,'missing':missing,'nonzero':nonzero,'impact_pass':impact_ok}; (p/'INCREMENTAL-CERTIFICATION.json').write_text(json.dumps(out,indent=2)+'\n'); files=[hashlib.sha256(f.read_bytes()).hexdigest()+'  '+f.name for f in sorted(p.iterdir()) if f.is_file() and f.name!='EVIDENCE-FILES-SHA256.txt']; (p/'EVIDENCE-FILES-SHA256.txt').write_text('\n'.join(files)+'\n'); print(json.dumps(out,indent=2)); raise SystemExit(0 if status=='PASS' else 1)
-          PYAGG
-      - name: Upload runtime evidence
+      - name: Upload lane evidence
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frames-0.9.46-fapp-native-application-loader-incremental-evidence-v56
+          name: frames-v56-parallel-lane-${{ matrix.lane }}
+          path: ${{ github.workspace }}/lane-evidence
+          if-no-files-found: error
+          retention-days: 14
+
+  aggregate:
+    name: Aggregate parallel certification evidence
+    needs: [prepare, certify]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Download preparation evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: frames-v56-parallel-prep-evidence
+          path: ${{ github.workspace }}/runtime-evidence
+
+      - name: Download all lane evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: frames-v56-parallel-lane-*
+          path: ${{ github.workspace }}/runtime-evidence
+          merge-multiple: true
+
+      - name: Build fail-closed parallel aggregate
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
+          python3 - "$EVIDENCE" <<'PYAGG'
+          import sys,pathlib,json,hashlib
+          p=pathlib.Path(sys.argv[1])
+          required=[
+            'KERNEL-BOOT-SMOKE-CERTIFY-EXIT-CODE.txt',
+            'PHYSICAL-PREVIEW-CERTIFY-EXIT-CODE.txt',
+            'HWCOMPAT-CERTIFY-EXIT-CODE.txt',
+            'SDK-TOOLING-CERTIFY-EXIT-CODE.txt',
+            'APP-PACKAGING-CERTIFY-EXIT-CODE.txt',
+            'DEVELOPER-PREVIEW-CERTIFY-EXIT-CODE.txt',
+            'APP-LOADER-CERTIFY-EXIT-CODE.txt',
+          ]
+          missing=[]; nonzero={}
+          for n in required:
+            f=p/n
+            if not f.exists(): missing.append(n); continue
+            try:v=int(f.read_text().strip())
+            except:v=-999
+            if v!=0: nonzero[n]=v
+          required_json={
+            'CHANGE-IMPACT-EVIDENCE.json':'PASS',
+            'KERNEL-BOOT-SMOKE-EVIDENCE.json':'PASS',
+            'SDK-TOOLING-EVIDENCE.json':'PASS',
+            'APP-PACKAGING-EVIDENCE.json':'PASS',
+            'DEVELOPER-PREVIEW-EVIDENCE.json':'PASS',
+            'APP-LOADER-EVIDENCE.json':'PASS',
+          }
+          json_bad={}
+          for n,want in required_json.items():
+            f=p/n
+            if not f.exists(): json_bad[n]='MISSING'; continue
+            try: got=json.loads(f.read_text()).get('status')
+            except Exception: got='UNREADABLE'
+            if got!=want: json_bad[n]=got
+          status='PASS' if not missing and not nonzero and not json_bad else 'FAIL'
+          out={
+            'status':status,
+            'profile':'frames-0.9.46-v56-parallel-incremental',
+            'workflow_revision':'v56-parallel',
+            'parallel_lanes':['kernel-smoke','physical-preview','hardware-compat','sdk-tooling','app-packaging','developer-loader'],
+            'max_parallel':6,
+            'candidate_source_sha256':'ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7',
+            'certified_baseline_source_sha256':'f79e43eac7d2047bde1fb20cb7ade9f1ce09bbabffa9acc95d62acf9ca574199',
+            'certified_baseline_evidence_sha256':'054590dd2a76a216f8b0639b8cb419c2ca3bf06d45ae64cda965adf8209065a5',
+            'required_exit_codes':required,
+            'missing':missing,
+            'nonzero':nonzero,
+            'json_status_issues':json_bad,
+          }
+          (p/'PARALLEL-INCREMENTAL-CERTIFICATION.json').write_text(json.dumps(out,indent=2)+'\n')
+          files=[]
+          for f in sorted(p.iterdir()):
+            if f.is_file() and f.name!='EVIDENCE-FILES-SHA256.txt': files.append(hashlib.sha256(f.read_bytes()).hexdigest()+'  '+f.name)
+          (p/'EVIDENCE-FILES-SHA256.txt').write_text('\n'.join(files)+'\n')
+          print(json.dumps(out,indent=2))
+          raise SystemExit(0 if status=='PASS' else 1)
+          PYAGG
+
+      - name: Upload final parallel evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frames-0.9.46-fapp-native-application-loader-parallel-evidence-v56
           path: ${{ github.workspace }}/runtime-evidence
           if-no-files-found: error
           retention-days: 14
