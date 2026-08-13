@@ -1,4 +1,4 @@
-name: Frames 0.9.43 Interactive Developer Preview Phase 2 Native FEX Launch Certification v52
+name: Frames 0.9.44 Nexus SDK Developer Tooling Phase 1 Certification v53
 
 on:
   workflow_dispatch:
@@ -13,9 +13,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 720
     env:
-      EXPECTED_FRAMES_VERSION: '0.9.43'
-      EXPECTED_SOURCE_SHA256: '0c06f06336eb6afecc8ffe7e7becc2682cfdea9f77fa5763dbcc533880c9d6be'
-      EXPECTED_WORKFLOW_REVISION: 'v52'
+      EXPECTED_FRAMES_VERSION: '0.9.44'
+      EXPECTED_SOURCE_SHA256: 'cc8ff5ae42a3bc7faf0184aceb597fda713433d6f1624a0c39515560e05d4b31'
+      EXPECTED_WORKFLOW_REVISION: 'v53'
 
     steps:
       - uses: actions/checkout@v4
@@ -222,7 +222,7 @@ jobs:
             python3 tools/verify_release.py
             python3 tools/make_developer_preview_image.py
             python3 tools/verify_developer_preview_image.py --image build/Frames-${FRAMES_VERSION}-Developer-Preview.img --require-pass
-            python3 tools/verify_runtime_repair_0943.py
+            python3 tools/verify_runtime_repair_0944.py
             python3 tools/make_usb_boot_image.py
             python3 tools/make_physical_preview_image.py
             python3 tools/verify_physical_preview_image.py
@@ -678,7 +678,33 @@ jobs:
 
           exit "$usbmsc_rc"
 
-      - name: Interactive developer preview Phase 1 certification
+      - name: Nexus SDK host tooling certification
+        id: sdk_tooling
+        shell: bash
+        run: |
+          set -uo pipefail
+          cd "$FRAMES_DIR"
+          export NEXUS="$NEXUS_EXE"
+          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py sdk/*.sh
+          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
+          mkdir -p "$EVIDENCE"
+          CONSOLE="$EVIDENCE/SDK-TOOLING-CERTIFICATION-CONSOLE.log"
+
+          set +e
+          python3 tools/sdk_selftest.py --require-pass 2>&1 | tee "$CONSOLE"
+          sdk_rc=${PIPESTATUS[0]}
+          set -e
+          echo "$sdk_rc" > "$EVIDENCE/SDK-TOOLING-CERTIFY-EXIT-CODE.txt"
+
+          [[ -f build/SDK-TOOLING-EVIDENCE.json ]] && cp build/SDK-TOOLING-EVIDENCE.json "$EVIDENCE/"
+          {
+            sha256sum sdk/SDK-MANIFEST.json sdk/examples/hello/main.nx
+            [[ -f build/HelloFrames-SDK.fex ]] && sha256sum build/HelloFrames-SDK.fex
+          } > "$EVIDENCE/SDK-TOOLING-DEFINING-SHA256.txt"
+
+          exit "$sdk_rc"
+
+      - name: Nexus SDK Developer Tooling Phase 1 runtime certification
         id: developer_preview
         shell: bash
         run: |
@@ -859,7 +885,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frames-0.9.43-interactive-developer-preview-evidence-v52
+          name: frames-0.9.44-nexus-sdk-developer-tooling-evidence-v53
           path: ${{ github.workspace }}/runtime-evidence
           if-no-files-found: error
           retention-days: 14
