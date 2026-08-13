@@ -1,11 +1,11 @@
-name: Frames 0.9.46 v56 Parallel r8 Evidence Parser Repair
+name: Frames 0.9.46 v56 Parallel r9 Evidence Repair
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - 'Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r8-Evidence-Repair.zip'
-      - '.github/workflows/frames-0.9.46-v56-parallel-r8-evidence-repair.yml'
+      - 'Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r9-Evidence-Repair.zip'
+      - '.github/workflows/frames-0.9.46-v56-parallel-r9-evidence-repair.yml'
 
 permissions:
   contents: read
@@ -16,234 +16,86 @@ jobs:
     timeout-minutes: 15
     env:
       EXPECTED_FRAMES_VERSION: '0.9.46'
-      EXPECTED_WORKFLOW_REVISION: 'v56-parallel-r8'
+      EXPECTED_WORKFLOW_REVISION: 'v56-parallel-r9'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Locate and extract exact r8 evidence-repair kit
+      - name: Initialize r9 evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$GITHUB_WORKSPACE/runtime-evidence"
+          mkdir -p "$GITHUB_WORKSPACE/runtime-evidence"
+          {
+            echo "frames_version=0.9.46"
+            echo "workflow_revision=v56-parallel-r9"
+          } > "$GITHUB_WORKSPACE/runtime-evidence/R9-START.txt"
+
+      - name: Locate and extract exact r9 evidence-repair kit
         id: locate
         shell: bash
         continue-on-error: true
         run: |
           set -euo pipefail
-          kit="$(find "$GITHUB_WORKSPACE" -type f -name 'Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r8-Evidence-Repair.zip' -print | head -n1)"
-          [[ -n "$kit" ]] || { echo "r8 kit not found"; exit 1; }
-          rm -rf "$GITHUB_WORKSPACE/r8-kit"
-          mkdir -p "$GITHUB_WORKSPACE/r8-kit"
-          python3 - "$kit" "$GITHUB_WORKSPACE/r8-kit" <<'PY'
+          E="$GITHUB_WORKSPACE/runtime-evidence"
+          kit="$(find "$GITHUB_WORKSPACE" -type f -name 'Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r9-Evidence-Repair.zip' -print | head -n1)"
+          if [[ -z "$kit" ]]; then
+            echo "r9 kit not found" | tee "$E/R9-LOCATE-FAILURE.txt"
+            exit 1
+          fi
+          rm -rf "$GITHUB_WORKSPACE/r9-kit"
+          mkdir -p "$GITHUB_WORKSPACE/r9-kit"
+          python3 - "$kit" "$GITHUB_WORKSPACE/r9-kit" <<'PY'
           import zipfile,sys
           with zipfile.ZipFile(sys.argv[1]) as z:
               assert z.testzip() is None
               z.extractall(sys.argv[2])
           PY
-          root="$(find "$GITHUB_WORKSPACE/r8-kit" -maxdepth 2 -type d -name 'Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r8-Evidence-Repair' -print | head -n1)"
-          [[ -n "$root" ]] || { echo "extracted kit root missing"; exit 2; }
+          root="$(find "$GITHUB_WORKSPACE/r9-kit" -maxdepth 2 -type d -name 'Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r9-Evidence-Repair' -print | head -n1)"
+          if [[ -z "$root" ]]; then
+            echo "extracted r9 kit root missing" | tee "$E/R9-LOCATE-FAILURE.txt"
+            exit 2
+          fi
           echo "KIT_ROOT=$root" >> "$GITHUB_ENV"
+          {
+            echo "kit=$kit"
+            echo "kit_root=$root"
+            sha256sum "$kit"
+          } > "$E/R9-KIT-IDENTITY.txt"
 
-      - name: Re-evaluate external r7 evidence and build final aggregate
+      - name: Evaluate exact external evidence
         id: evaluate
         if: always()
         shell: bash
         continue-on-error: true
         run: |
+          set -uo pipefail
+          E="$GITHUB_WORKSPACE/runtime-evidence"
+          mkdir -p "$E"
+          rc=0
+          if [[ -z "${KIT_ROOT:-}" ]]; then
+            echo "KIT_ROOT unavailable; locate outcome=${{ steps.locate.outcome }}" | tee "$E/R9-EVALUATION-CONSOLE.log"
+            rc=2
+          else
+            export EVIDENCE="$E"
+            python3 "$KIT_ROOT/verify-v56-r9-evidence.py" 2>&1 | tee "$E/R9-EVALUATION-CONSOLE.log" || rc=$?
+          fi
+          echo "$rc" > "$E/R9-EVALUATION-EXIT-CODE.txt"
+          exit "$rc"
+
+      - name: Record r9 step outcomes
+        if: always()
+        shell: bash
+        run: |
           set -euo pipefail
           mkdir -p "$GITHUB_WORKSPACE/runtime-evidence"
-          export EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-          python3 - <<'PYR8'
+          cat > "$GITHUB_WORKSPACE/runtime-evidence/R9-STEP-OUTCOMES.txt" <<EOF
+          locate=${{ steps.locate.outcome }}
+          evaluate=${{ steps.evaluate.outcome }}
+          EOF
 
-          from pathlib import Path
-          import zipfile, hashlib, json, os, sys
-
-          root=Path(os.environ["KIT_ROOT"])
-          out=Path(os.environ["EVIDENCE"])
-          out.mkdir(parents=True,exist_ok=True)
-
-          EXPECTED_SOURCE="ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7"
-          EXPECTED_BASELINE="f79e43eac7d2047bde1fb20cb7ade9f1ce09bbabffa9acc95d62acf9ca574199"
-          EXPECTED_BASELINE_EVIDENCE="054590dd2a76a216f8b0639b8cb419c2ca3bf06d45ae64cda965adf8209065a5"
-          EXPECTED_R6_AGG="8d731017242888d51ee22a77b93f87b3210650b2d4a6bcff5a54fcbd7fb01d90"
-          EXPECTED_PREPARED_ARCHIVE="f01c0501533e84a595f629a36fc225af0f939f53354fa1a1e873ae79997fd230"
-          LANES={
-          "app-packaging":("frames-v56-parallel-r7-lane-app-packaging.zip","04a4462af7738bdc1838759a064f18442da96ee209de0de5793f82caf4e0e8ff"),
-          "developer-loader":("frames-v56-parallel-r7-lane-developer-loader.zip","ed1ea1cac45ab2e61f3666673bbe08af5c35d9cbde8df99004bbe2869a5f740a"),
-          "hardware-compat":("frames-v56-parallel-r7-lane-hardware-compat.zip","f704108aa4ed654e4d444e2e3cbd01351e788683cebf1240eb5ae234efe238d8"),
-          "kernel-smoke":("frames-v56-parallel-r7-lane-kernel-smoke.zip","19d46f607f09a8fa89eb94ed030aeb242fc6bf9f34851690a6ccd35f8a38f0d4"),
-          "physical-preview":("frames-v56-parallel-r7-lane-physical-preview.zip","044464c5229e11c89877de7b35c49f9f394479dc22d48ba77c9cc90b94716dda"),
-          "sdk-tooling":("frames-v56-parallel-r7-lane-sdk-tooling.zip","2903b9cd83cbe95b3563a191a3eb7322aee59381ff9dadeb48c1a487150f1849"),
-          }
-
-          def sha(p):
-              h=hashlib.sha256()
-              with open(p,"rb") as f:
-                  for c in iter(lambda:f.read(1024*1024),b""): h.update(c)
-              return h.hexdigest()
-
-          def zread(z,name):
-              return z.read(name).decode(errors="replace").strip()
-
-          checks={}
-          source=root/"Frames-0.9.46-Source-v56.zip"
-          checks["source_sha"]=source.exists() and sha(source)==EXPECTED_SOURCE
-          with zipfile.ZipFile(source) as z:
-              checks["source_zip_integrity"]=z.testzip() is None
-              checks["source_version"]=z.read("Frames-0.9.46/VERSION").decode().strip()=="0.9.46"
-
-          r6=root/"frames-0.9.46-fapp-native-application-loader-parallel-evidence-v56-r6.zip"
-          checks["r6_aggregate_sha"]=r6.exists() and sha(r6)==EXPECTED_R6_AGG
-          with zipfile.ZipFile(r6) as z:
-              checks["r6_zip_integrity"]=z.testzip() is None
-              impact=json.loads(z.read("CHANGE-IMPACT-EVIDENCE.json"))
-              ident=json.loads(z.read("PREPARED-SOURCE-IDENTITY.json"))
-              outcomes=zread(z,"PREP-STEP-OUTCOMES.txt")
-              checks["r6_impact_pass"]=(
-                  impact.get("status")=="PASS"
-                  and impact["candidate"]["source_sha256"]==EXPECTED_SOURCE
-                  and impact["certified_baseline"]["source_sha256"]==EXPECTED_BASELINE
-                  and impact["certified_baseline"]["evidence_sha256"]==EXPECTED_BASELINE_EVIDENCE
-              )
-              checks["r6_prepared_identity"]=(
-                  ident.get("status")=="PASS"
-                  and ident.get("candidate_source_sha256")==EXPECTED_SOURCE
-                  and ident.get("frames_version")=="0.9.46"
-              )
-              checks["r6_prep_steps"]=all(f"{k}=success" in outcomes for k in
-                  ["checkout","install","locate","impact","ovmf_prep","build","seal"])
-
-          def validate_handoff(z):
-              assert zread(z,"LANE-HANDOFF-VERIFY-EXIT-CODE.txt")=="0"
-              log=zread(z,"LANE-HANDOFF-VERIFY.log")
-              return (
-                  f"archive_expected_sha256={EXPECTED_PREPARED_ARCHIVE}" in log
-                  and f"archive_actual_sha256={EXPECTED_PREPARED_ARCHIVE}" in log
-                  and "PASS: sealed prepared-source handoff verified" in log
-              )
-
-          reuse={}
-          for lane,(fname,expected_sha) in LANES.items():
-              p=root/fname
-              lane_checks={"sha256":p.exists() and sha(p)==expected_sha}
-              with zipfile.ZipFile(p) as z:
-                  lane_checks["zip_integrity"]=z.testzip() is None
-                  lane_checks["handoff"]=validate_handoff(z)
-                  outcomes=zread(z,"LANE-STEP-OUTCOMES.txt")
-                  lane_checks["workflow_r7"]="workflow_revision=v56-parallel-r7" in zread(z,"LANE-IDENTITY.txt")
-                  if lane!="kernel-smoke":
-            lane_checks["runlane_success"]="runlane=success" in outcomes
-                  if lane=="app-packaging":
-            lane_checks["cert_exit"]=zread(z,"APP-PACKAGING-CERTIFY-EXIT-CODE.txt")=="0"
-            lane_checks["evidence_pass"]=json.loads(z.read("APP-PACKAGING-EVIDENCE.json")).get("status")=="PASS"
-                  elif lane=="developer-loader":
-            lane_checks["preview_exit"]=zread(z,"DEVELOPER-PREVIEW-CERTIFY-EXIT-CODE.txt")=="0"
-            lane_checks["qemu_exit"]=zread(z,"DEVELOPER-PREVIEW-QEMU-EXIT-CODE.txt")=="0"
-            lane_checks["loader_exit"]=zread(z,"APP-LOADER-CERTIFY-EXIT-CODE.txt")=="0"
-            lane_checks["preview_pass"]=json.loads(z.read("DEVELOPER-PREVIEW-EVIDENCE.json")).get("status")=="PASS"
-            lane_checks["loader_pass"]=json.loads(z.read("APP-LOADER-EVIDENCE.json")).get("status")=="PASS"
-                  elif lane=="hardware-compat":
-            lane_checks["cert_exit"]=zread(z,"HWCOMPAT-CERTIFY-EXIT-CODE.txt")=="0"
-            lane_checks["matrix_pass"]=json.loads(z.read("HWCOMPAT-MATRIX-EVIDENCE.json")).get("status")=="PASS"
-            q=[n for n in z.namelist() if n.startswith("HWCOMPAT-") and n.endswith("-QEMU-EXIT-CODE.txt")]
-            lane_checks["all_qemu_zero"]=len(q)==7 and all(zread(z,n)=="0" for n in q)
-                  elif lane=="physical-preview":
-            lane_checks["cert_exit"]=zread(z,"PHYSICAL-PREVIEW-CERTIFY-EXIT-CODE.txt")=="0"
-            lane_checks["matrix_pass"]=json.loads(z.read("PHYSICAL-PREVIEW-MATRIX-EVIDENCE.json")).get("status")=="PASS"
-            q=[n for n in z.namelist() if n.startswith("PHYSICAL-PREVIEW-") and n.endswith("-QEMU-EXIT-CODE.txt")]
-            lane_checks["all_qemu_zero"]=len(q)==7 and all(zread(z,n)=="0" for n in q)
-                  elif lane=="sdk-tooling":
-            lane_checks["cert_exit"]=zread(z,"SDK-TOOLING-CERTIFY-EXIT-CODE.txt")=="0"
-            lane_checks["evidence_pass"]=json.loads(z.read("SDK-TOOLING-EVIDENCE.json")).get("status")=="PASS"
-                  elif lane=="kernel-smoke":
-            # r7 runtime itself passed. Only the r7 parser marker was stale.
-            lane_checks["qemu_certifier_exit"]=zread(z,"KERNEL-BOOT-SMOKE-CERTIFY-EXIT-CODE.txt")=="0"
-            serial=z.read("serial.log").decode(errors="replace")
-            required=[
-                "FRAMES_KERNEL_READY",
-                "FRAMES_USERSPACE_PLATFORM_OK",
-                "FRAMES_RING3_ENTER",
-                "FRAMES_SYSCALL_ABI_OK",
-                "FRAMES_USER_SYSCALL_OK",
-                "FRAMES_FEX_EXIT_OK",
-                "FRAMES_RING3_RETURN",
-            ]
-            counts={m:serial.count(m) for m in required}
-            fatal=[m for m in [
-                "FRAMES_PAGE_FAULT",
-                "FRAMES_AP_PROTECTION_FAULT=",
-                "FRAMES_DEVPREV_CERT_FAIL",
-                "FRAMES_USB_MSC_CERT_FAIL",
-                "FRAMES_FS_WRITE_CERT_FAIL",
-            ] if m in serial]
-            lane_checks["corrected_required_exact_once"]=all(counts[m]==1 for m in required)
-            lane_checks["no_fatal"]=not fatal
-            old=json.loads(z.read("KERNEL-BOOT-SMOKE-EVIDENCE.json"))
-            lane_checks["old_false_negative_identified"]=(
-                old.get("status")=="FAIL"
-                and old.get("missing")==["FRAMES_USERSPACE_READY"]
-            )
-            corrected={
-                "status":"PASS" if lane_checks["qemu_certifier_exit"] and lane_checks["corrected_required_exact_once"] and lane_checks["no_fatal"] else "FAIL",
-                "profile":"frames-kernel-boot-smoke-r8-evidence-parser-repair",
-                "source_runtime":"external-r7-kernel-smoke",
-                "qemu_certifier_exit":0 if lane_checks["qemu_certifier_exit"] else None,
-                "required_marker_counts":counts,
-                "fatal":fatal,
-                "supersedes_false_negative_marker":"FRAMES_USERSPACE_READY",
-                "accepted_marker":"FRAMES_USERSPACE_PLATFORM_OK",
-            }
-            (out/"KERNEL-BOOT-SMOKE-EVIDENCE.json").write_text(json.dumps(corrected,indent=2)+"\n")
-            lane_checks["corrected_evidence_pass"]=corrected["status"]=="PASS"
-              reuse[lane]=lane_checks
-
-          checks["all_reused_lane_checks"]=all(all(v.values()) for v in reuse.values())
-          checks["all_identity_checks"]=all(checks.values())
-
-          status="PASS" if all(checks.values()) else "FAIL"
-          reuse_out={
-              "status":"PASS" if checks["all_reused_lane_checks"] else "FAIL",
-              "profile":"frames-v56-r7-external-lane-reuse",
-              "prepared_source_archive_sha256":EXPECTED_PREPARED_ARCHIVE,
-              "lanes":reuse,
-          }
-          (out/"REUSED-R7-LANES-EVIDENCE.json").write_text(json.dumps(reuse_out,indent=2)+"\n")
-
-          aggregate={
-              "status":status,
-              "profile":"frames-0.9.46-v56-parallel-r8-evidence-repair",
-              "workflow_revision":"v56-parallel-r8",
-              "frames_version":"0.9.46",
-              "candidate_source_sha256":EXPECTED_SOURCE,
-              "certified_baseline":{
-                  "frames_version":"0.9.45",
-                  "source_sha256":EXPECTED_BASELINE,
-                  "evidence_sha256":EXPECTED_BASELINE_EVIDENCE,
-              },
-              "r6_identity_change_impact_evidence_sha256":EXPECTED_R6_AGG,
-              "r7_prepared_source_archive_sha256":EXPECTED_PREPARED_ARCHIVE,
-              "repair":{
-                  "type":"evidence-parser-only",
-                  "old_required_marker":"FRAMES_USERSPACE_READY",
-                  "correct_required_marker":"FRAMES_USERSPACE_PLATFORM_OK",
-                  "source_bytes_changed":False,
-                  "qemu_rerun_required":False,
-              },
-              "checks":checks,
-          }
-          (out/"PARALLEL-INCREMENTAL-CERTIFICATION.json").write_text(json.dumps(aggregate,indent=2)+"\n")
-          (out/"WORKFLOW-IDENTITY.txt").write_text(
-              "frames_version=0.9.46\nworkflow_revision=v56-parallel-r8\n"
-              f"candidate_source_sha256={EXPECTED_SOURCE}\n"
-              f"baseline_source_sha256={EXPECTED_BASELINE}\n"
-          )
-          (out/"EVIDENCE-FILES-SHA256.txt").write_text("")
-          # Fill evidence manifest after core files exist.
-          files=[p for p in sorted(out.iterdir()) if p.is_file() and p.name!="EVIDENCE-FILES-SHA256.txt"]
-          (out/"EVIDENCE-FILES-SHA256.txt").write_text("".join(f"{sha(p)}  {p.name}\n" for p in files))
-          print(json.dumps(aggregate,indent=2))
-          sys.exit(0 if status=="PASS" else 1)
-
-          PYR8
-
-      - name: Upload final r8 aggregate evidence
+      - name: Upload final r9 aggregate evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -259,9 +111,11 @@ jobs:
           set -euo pipefail
           [[ "${{ steps.locate.outcome }}" == success ]]
           [[ "${{ steps.evaluate.outcome }}" == success ]]
+          [[ "$(cat runtime-evidence/R9-EVALUATION-EXIT-CODE.txt)" == 0 ]]
           python3 - <<'PY'
           import json
           j=json.load(open("runtime-evidence/PARALLEL-INCREMENTAL-CERTIFICATION.json"))
           assert j["status"]=="PASS"
-          print("FRAMES 0.9.46 v56 PARALLEL r8 EVIDENCE REPAIR PASS")
+          assert j["workflow_revision"]=="v56-parallel-r9"
+          print("FRAMES 0.9.46 v56 PARALLEL r9 EVIDENCE REPAIR PASS")
           PY
