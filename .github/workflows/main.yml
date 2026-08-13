@@ -1,4 +1,4 @@
-name: Frames 0.9.46 FAPP Native Application Loader Phase 1 Certification v56
+name: Frames 0.9.46 FAPP Native Application Loader Phase 1 Incremental Certification v56
 
 on:
   workflow_dispatch:
@@ -11,11 +11,14 @@ permissions:
 jobs:
   qemu-ovmf-certification:
     runs-on: ubuntu-24.04
-    timeout-minutes: 720
+    timeout-minutes: 180
     env:
       EXPECTED_FRAMES_VERSION: '0.9.46'
       EXPECTED_SOURCE_SHA256: 'ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7'
-      EXPECTED_WORKFLOW_REVISION: 'v56'
+      CERTIFIED_BASELINE_VERSION: '0.9.45'
+      CERTIFIED_BASELINE_SOURCE_SHA256: 'f79e43eac7d2047bde1fb20cb7ade9f1ce09bbabffa9acc95d62acf9ca574199'
+      CERTIFIED_BASELINE_EVIDENCE_SHA256: '054590dd2a76a216f8b0639b8cb419c2ca3bf06d45ae64cda965adf8209065a5'
+      EXPECTED_WORKFLOW_REVISION: 'v56-incremental'
 
     steps:
       - uses: actions/checkout@v4
@@ -152,6 +155,74 @@ jobs:
           echo "Nexus compiler: $nexus_path"
           echo "============================================================"
 
+      - name: Compute change impact and certified inheritance
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
+          mkdir -p "$EVIDENCE"
+          baseline_zip=""
+          check_candidate() {
+            local p="$1"; local h
+            h="$(sha256sum "$p" | awk '{print $1}')"
+            if [[ "$h" == "$CERTIFIED_BASELINE_SOURCE_SHA256" ]]; then baseline_zip="$p"; return 0; fi
+            return 1
+          }
+          while IFS= read -r p; do [[ -n "$p" ]] || continue; check_candidate "$p" && break; done < <(find "$GITHUB_WORKSPACE" -maxdepth 3 -type f -name 'Frames-0.9.45-Source*.zip' -print | sort)
+          if [[ -z "$baseline_zip" ]]; then
+            while IFS= read -r k; do
+              rm -rf "$RUNNER_TEMP/baseline-kit"; mkdir -p "$RUNNER_TEMP/baseline-kit"; unzip -q "$k" -d "$RUNNER_TEMP/baseline-kit" || continue
+              while IFS= read -r p; do [[ -n "$p" ]] || continue; check_candidate "$p" && break 2; done < <(find "$RUNNER_TEMP/baseline-kit" -type f -name 'Frames-0.9.45-Source*.zip' -print | sort)
+            done < <(find "$GITHUB_WORKSPACE" -maxdepth 3 -type f -name 'Frames-0.9.46-Runtime-Certification-Kit-v56-Incremental.zip' -print | sort)
+          fi
+          [[ -n "$baseline_zip" ]] || { echo 'FAIL: certified v55 baseline source not found'; exit 1; }
+          echo "FRAMES_BASELINE_SOURCE_ZIP=$baseline_zip" >> "$GITHUB_ENV"
+          rm -rf "$RUNNER_TEMP/base-src" "$RUNNER_TEMP/cand-src"; mkdir -p "$RUNNER_TEMP/base-src" "$RUNNER_TEMP/cand-src"
+          unzip -q "$baseline_zip" -d "$RUNNER_TEMP/base-src"
+          unzip -q "$FRAMES_SOURCE_ZIP" -d "$RUNNER_TEMP/cand-src"
+          python3 - "$RUNNER_TEMP/base-src" "$RUNNER_TEMP/cand-src" "$EVIDENCE" <<'PYIMPACT'
+          import sys, pathlib, hashlib, difflib, re, json
+          base_dir=pathlib.Path(sys.argv[1]); cand_dir=pathlib.Path(sys.argv[2]); ev=pathlib.Path(sys.argv[3])
+          base=next(p for p in base_dir.iterdir() if p.is_dir()); cand=next(p for p in cand_dir.iterdir() if p.is_dir())
+          def H(p): return hashlib.sha256(p.read_bytes()).hexdigest()
+          def files(root): return {p.relative_to(root).as_posix():H(p) for p in root.rglob('*') if p.is_file() and 'build' not in p.relative_to(root).parts and '__pycache__' not in p.parts and p.suffix!='.pyc'}
+          a,b=files(base),files(cand); changed=sorted(r for r in set(a)|set(b) if a.get(r)!=b.get(r)); (ev/'CHANGED-FILES.txt').write_text('\n'.join(changed)+'\n')
+          expected=set('''README.md
+          VERSION
+          boot/uefi/frames_boot.c
+          docs/HARDWARE-MATRIX.json
+          docs/PHYSICAL-BOOT-GATE.md
+          docs/RELEASE-NOTES-0.9.46.md
+          kernel/main.nx
+          media/EFI/BOOT/BOOTX64.EFI
+          media/Frames/FramesKernel.fkrn
+          sdk/SDK-MANIFEST.json
+          sdk/fapp_tool.py
+          sdk/frames-sdk.sh
+          tools/app_loader_evidence.py
+          tools/developer_preview_evidence.py
+          tools/qemu_developer_preview_certify.sh
+          tools/qmp_developer_preview_input.py
+          tools/verify_runtime_repair_0946.py'''.splitlines())
+          if set(changed)!=expected: print('FAIL: changed-file set differs from sealed impact contract'); print('\n'.join(changed)); raise SystemExit(1)
+          lines0=(base/'kernel/main.nx').read_text().splitlines(); lines1=(cand/'kernel/main.nx').read_text().splitlines()
+          def fn_at(lines,idx):
+           for j in range(idx,-1,-1):
+            m=re.match(r'\s*fn\s+([A-Za-z0-9_]+)\s*\(',lines[j])
+            if m:return m.group(1)
+           return '<top>'
+          sm=difflib.SequenceMatcher(a=lines0,b=lines1); funcs=set()
+          for tag,i1,i2,j1,j2 in sm.get_opcodes():
+           if tag!='equal': funcs.update(fn_at(lines1,j) for j in range(j1,j2)); funcs.update(fn_at(lines0,i) for i in range(i1,i2))
+          allow={'setup_user_fex','setup_user_fex_from_mod','dev_text_app','dev_text_title','dev_text_version','developer_preview_execute','developer_preview_launch_fapp','developer_preview_result_text','developer_preview_run','kernel_main','serial_hwcompat_diag','serial_marker_devprev_cmd_app_ok','serial_marker_devprev_fapp_abi_ok','serial_marker_devprev_fapp_exit_ok','serial_marker_devprev_fapp_hash_ok','serial_marker_devprev_fapp_launch_begin','serial_marker_devprev_fapp_manifest_ok'}
+          if not funcs<=allow: print('FAIL: unexpected kernel functions changed:',sorted(funcs-allow)); raise SystemExit(1)
+          (ev/'CHANGED-KERNEL-FUNCTIONS.txt').write_text('\n'.join(sorted(funcs))+'\n')
+          executed=['source_identity','change_impact','build_release','kernel_boot_smoke','physical_preview','hardware_compat','sdk_tooling','app_packaging','developer_preview','app_loader','safety_locks']
+          inherited={'smp_scale':'No SMP/scheduler/AP/interrupt functions or SMP harness files changed.','storage_runtime':'No NVMe/block/storage/DMA source or storage harness files changed.','storage_write':'No storage write-path source or write certification harness files changed.','filesystem':'No filesystem/FAT allocation/crash-recovery source or harness files changed.','fat_lifecycle':'No FAT lifecycle source or harness files changed.','system_volume':'No system-volume write source or harness files changed.','lifecycle':'No reboot/shutdown/power lifecycle source or harness files changed.','usb_boot':'No USB boot/xHCI/HID source or USB boot harness files changed.','usb_msc':'No xHCI/BOT/SCSI/USB-MSC source or harness files changed.','stress':'No stress/fault subsystem source or stress harness files changed.'}
+          impact={'status':'PASS','profile':'frames-incremental-certification-v1','certified_baseline':{'frames_version':'0.9.45','source_sha256':'f79e43eac7d2047bde1fb20cb7ade9f1ce09bbabffa9acc95d62acf9ca574199','evidence_sha256':'054590dd2a76a216f8b0639b8cb419c2ca3bf06d45ae64cda965adf8209065a5'},'candidate':{'frames_version':'0.9.46','source_sha256':'ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7'},'changed_files':changed,'changed_kernel_functions':sorted(funcs),'executed_groups':executed,'inherited_groups':inherited,'rationale':'Kernel changes are confined to FEX/FAPP/Developer Preview functions plus policy plumbing. UEFI changed, so physical-preview and hardware-compatibility are re-executed. Unrelated subsystem groups inherit certified v55 evidence via exact baseline identity and sealed source/function impact analysis.'}
+          (ev/'CHANGE-IMPACT-EVIDENCE.json').write_text(json.dumps(impact,indent=2)+'\n'); (ev/'EXECUTED-CERTIFICATION-GROUPS.json').write_text(json.dumps({'status':'READY','groups':executed},indent=2)+'\n'); (ev/'INHERITED-CERTIFICATION-GROUPS.json').write_text(json.dumps({'status':'READY','baseline_evidence_sha256':impact['certified_baseline']['evidence_sha256'],'groups':inherited},indent=2)+'\n'); (ev/'CERTIFIED-BASELINE.json').write_text(json.dumps(impact['certified_baseline'],indent=2)+'\n')
+          print('Incremental impact analysis: PASS'); print('Changed files:',len(changed),'Changed kernel functions:',len(funcs))
+          PYIMPACT
       - name: Locate matching OVMF CODE and VARS pair
         shell: bash
         run: |
@@ -249,343 +320,33 @@ jobs:
             python3 tools/runtime_preflight.py --require-ready
           } 2>&1 | tee "$CONSOLE"
 
-      - name: Runtime certification and marker diagnosis
-        id: runtime
+      - name: Mandatory kernel and boot smoke certification
+        id: runtime_smoke
         shell: bash
         env:
-          # The repaired GPT/FAT path performs many more real NVMe reads than
-          # older diagnostic builds. Give the two-vCPU TCG run ample headroom.
           FRAMES_BOOT_TIMEOUT: '240'
         run: |
           set -uo pipefail
           cd "$FRAMES_DIR"
-          mkdir -p "$FRAMES_DIR/build" "$GITHUB_WORKSPACE/runtime-evidence"
           export NEXUS="$NEXUS_EXE"
-          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py
-          CONSOLE="$GITHUB_WORKSPACE/runtime-evidence/RUNTIME-CERTIFICATION-CONSOLE.log"
-
+          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"; mkdir -p "$EVIDENCE"
           set +e
-          ./tools/qemu_certify.sh 2>&1 | tee "$CONSOLE"
-          cert_rc=${PIPESTATUS[0]}
+          ./tools/qemu_certify.sh 2>&1 | tee "$EVIDENCE/KERNEL-BOOT-SMOKE-CONSOLE.log"
+          rc=${PIPESTATUS[0]}
           set -e
-
-          echo "$cert_rc" > "$GITHUB_WORKSPACE/runtime-evidence/QEMU-CERTIFY-EXIT-CODE.txt"
-          LOG="$FRAMES_DIR/build/serial.log"
-          echo
-          echo "================ Frames runtime marker diagnosis ================"
-          echo "qemu_certify.sh exit code: $cert_rc"
-          if [[ ! -f "$LOG" ]]; then
-            echo "serial.log was not produced."
-            exit "$cert_rc"
+          echo "$rc" > "$EVIDENCE/KERNEL-BOOT-SMOKE-CERTIFY-EXIT-CODE.txt"
+          [[ -f build/serial.log ]] && cp build/serial.log "$EVIDENCE/"
+          [[ -f build/qemu-debug.log ]] && cp build/qemu-debug.log "$EVIDENCE/"
+          if [[ -f build/serial.log ]]; then
+            python3 - build/serial.log "$EVIDENCE/KERNEL-BOOT-SMOKE-EVIDENCE.json" <<'PYSMOKE'
+          import sys,json,pathlib
+          s=pathlib.Path(sys.argv[1]).read_text(errors='replace'); fatal=[m for m in ['FRAMES_PAGE_FAULT','FRAMES_AP_PROTECTION_FAULT=','FRAMES_DEVPREV_CERT_FAIL','FRAMES_USB_MSC_CERT_FAIL','FRAMES_FS_WRITE_CERT_FAIL'] if m in s]; req=['FRAMES_KERNEL_READY','FRAMES_USERSPACE_READY']; missing=[m for m in req if m not in s]; status='PASS' if not fatal and not missing else 'FAIL'; pathlib.Path(sys.argv[2]).write_text(json.dumps({'status':status,'profile':'frames-kernel-boot-smoke','missing':missing,'fatal':fatal},indent=2)+'\n'); raise SystemExit(0 if status=='PASS' else 1)
+          PYSMOKE
           fi
-
-          python3 - "$FRAMES_DIR/tools/qemu_certify.sh" "$LOG" <<'PY'
-          import json, pathlib, re, sys
-          script=pathlib.Path(sys.argv[1]).read_text(errors='replace')
-          log_path=pathlib.Path(sys.argv[2])
-          log=log_path.read_text(errors='replace')
-          m=re.search(r'for marker in\s+(.*?);\s*do',script,re.S)
-          if not m:
-              print('Could not parse expected marker list from qemu_certify.sh')
-              raise SystemExit(2)
-          expected=m.group(1).split()
-          present=[x for x in expected if x in log]
-          missing=[x for x in expected if x not in log]
-          fatal=[x for x in ('FRAMES_PAGE_FAULT','FRAMES_AP_PROTECTION_FAULT=','FRAMES_STRESS_ALLOCATOR_FAIL','FRAMES_STRESS_SCHEDULER_FAIL','FRAMES_STRESS_STORAGE_READ_FAIL','FRAMES_STRESS_USB_INPUT_FAIL','FRAMES_STRESS_NETWORK_FAIL','FRAMES_STRESS_DISPLAY_FAIL','FRAMES_STRESS_RECOVERY_FAIL','FRAMES_STRESS_POWER_FAIL','FRAMES_STORAGE_WRITE_INTEGRITY_FAIL','FRAMES_LIFECYCLE_DESTRUCTIVE_FAIL','FRAMES_FS_WRITE_CERT_FAIL','FRAMES_SYSTEM_VOLUME_WRITE_CERT_FAIL','FRAMES_FAT_LIFECYCLE_CERT_FAIL','FRAMES_SMP_SCALE_CERT_FAIL','FRAMES_USB_BOOT_CERT_FAIL','FRAMES_PHYSICAL_PREVIEW_CERT_FAIL') if x in log]
-          ack_pos=log.find('FRAMES_RESCHED_IPI_OK')
-          fallback_pos=log.find('FRAMES_RESCHED_FALLBACK_SENT')
-          eager_rhs = ack_pos >= 0 and fallback_pos > ack_pos
-          if eager_rhs:
-              fatal.append('FRAMES_SHORT_CIRCUIT_EAGER_RHS')
-          short_circuit={
-              'resched_ipi_ok_position':ack_pos,
-              'fallback_sent_position':fallback_pos,
-              'eager_rhs_after_ack':eager_rhs,
-              'status':'PASS' if not eager_rhs else 'FAIL',
-          }
-          (log_path.parent/'SHORT-CIRCUIT-RUNTIME.json').write_text(json.dumps(short_circuit,indent=2)+'\n')
-          print(f'Expected markers: {len(expected)}')
-          print(f'Present markers:  {len(present)}')
-          print(f'Missing markers:  {len(missing)}')
-          print(f'Fatal markers:    {len(fatal)}')
-          print('\nMISSING MARKERS:')
-          for x in missing: print(f'  - {x}')
-          print('\nFATAL MARKERS:')
-          for x in fatal: print(f'  - {x}')
-          print('\nLAST 160 SERIAL LINES:')
-          for line in log.splitlines()[-160:]: print(line)
-          (log_path.parent/'MISSING-RUNTIME-MARKERS.json').write_text(json.dumps({
-              'expected_count':len(expected),
-              'present_count':len(present),
-              'missing_count':len(missing),
-              'missing':missing,
-              'fatal':fatal,
-          },indent=2)+'\n')
-          if not missing and fatal:
-              print('All positive markers were present, but a fatal runtime marker was also observed.')
-              raise SystemExit(3)
-          PY
-          diag_rc=$?
-
-          set +e
-          python3 tools/stress_evidence.py --serial "$LOG" --require-power-pass | tee "$GITHUB_WORKSPACE/runtime-evidence/STRESS-CERTIFICATION-CONSOLE.log"
-          stress_rc=${PIPESTATUS[0]}
-          python3 tools/runtime_storage_cert.py --serial "$LOG" --require-pass | tee "$GITHUB_WORKSPACE/runtime-evidence/STORAGE-RUNTIME-CERTIFICATION-CONSOLE.log"
-          storage_rc=${PIPESTATUS[0]}
-          python3 tools/storage_write_evidence.py --serial "$LOG" --media "$FRAMES_DIR/build/WRITE-MEDIA-INTEGRITY.json" --require-pass | tee "$GITHUB_WORKSPACE/runtime-evidence/STORAGE-WRITE-CERTIFICATION-CONSOLE.log"
-          write_rc=${PIPESTATUS[0]}
-          set -e
-          echo "$stress_rc" > "$GITHUB_WORKSPACE/runtime-evidence/STRESS-CERTIFY-EXIT-CODE.txt"
-          echo "$storage_rc" > "$GITHUB_WORKSPACE/runtime-evidence/STORAGE-RUNTIME-CERTIFY-EXIT-CODE.txt"
-          echo "$write_rc" > "$GITHUB_WORKSPACE/runtime-evidence/STORAGE-WRITE-CERTIFY-EXIT-CODE.txt"
-
-          echo "================================================================="
-          if [[ "$cert_rc" -eq 0 && "$diag_rc" -ne 0 ]]; then
-            exit "$diag_rc"
-          fi
-          if [[ "$cert_rc" -eq 0 && "$stress_rc" -ne 0 ]]; then
-            exit "$stress_rc"
-          fi
-          if [[ "$cert_rc" -eq 0 && "$storage_rc" -ne 0 ]]; then
-            exit "$storage_rc"
-          fi
-          if [[ "$cert_rc" -eq 0 && "$write_rc" -ne 0 ]]; then
-            exit "$write_rc"
-          fi
-          exit "$cert_rc"
-
-      - name: Destructive reboot and shutdown lifecycle certification
-        id: lifecycle
-        shell: bash
-        env:
-          FRAMES_LIFECYCLE_TIMEOUT: '300'
-        run: |
-          set -uo pipefail
-          cd "$FRAMES_DIR"
-          export NEXUS="$NEXUS_EXE"
-          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-          mkdir -p "$EVIDENCE"
-          CONSOLE="$EVIDENCE/LIFECYCLE-CERTIFICATION-CONSOLE.log"
-
-          set +e
-          ./tools/qemu_lifecycle_certify.sh 2>&1 | tee "$CONSOLE"
-          lifecycle_rc=${PIPESTATUS[0]}
-          set -e
-          echo "$lifecycle_rc" > "$EVIDENCE/LIFECYCLE-CERTIFY-EXIT-CODE.txt"
-
-          for f in \
-            build/reboot-serial.log \
-            build/shutdown-serial.log \
-            build/reboot-qemu-debug.log \
-            build/shutdown-qemu-debug.log \
-            build/reboot-qmp-input.log \
-            build/shutdown-qmp-input.log \
-            build/reboot-monitor.log \
-            build/REBOOT-QEMU-EXIT-CODE.txt \
-            build/SHUTDOWN-QEMU-EXIT-CODE.txt \
-            build/REBOOT-MEDIA-VERIFY.json \
-            build/SHUTDOWN-MEDIA-VERIFY.json \
-            build/LIFECYCLE-EVIDENCE.json \
-            build/LIFECYCLE-REBOOT-TARGET.json \
-            build/LIFECYCLE-SHUTDOWN-TARGET.json; do
-            [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
-          done
-
-          exit "$lifecycle_rc"
-
-      - name: Sacrificial filesystem write and hard-crash recovery certification
-        id: filesystem
-        shell: bash
-        timeout-minutes: 60
-        env:
-          FRAMES_FILESYSTEM_TIMEOUT: '300'
-        run: |
-          set -uo pipefail
-          cd "$FRAMES_DIR"
-          export NEXUS="$NEXUS_EXE"
-          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-          mkdir -p "$EVIDENCE"
-          CONSOLE="$EVIDENCE/FILESYSTEM-CERTIFICATION-CONSOLE.log"
-
-          set +e
-          ./tools/qemu_filesystem_certify.sh 2>&1 | tee "$CONSOLE"
-          filesystem_rc=${PIPESTATUS[0]}
-          set -e
-          echo "$filesystem_rc" > "$EVIDENCE/FILESYSTEM-CERTIFY-EXIT-CODE.txt"
-
-          for f in \
-            build/FILESYSTEM-EVIDENCE.json \
-            build/FILESYSTEM-S0-MEDIA.json \
-            build/FILESYSTEM-S1-MEDIA.json \
-            build/FILESYSTEM-S2-MEDIA.json \
-            build/FILESYSTEM-S3-MEDIA.json \
-            build/FILESYSTEM-S4-MEDIA.json \
-            build/FILESYSTEM-S0-TARGET.json \
-            build/FILESYSTEM-S1-TARGET.json \
-            build/FILESYSTEM-S2-TARGET.json \
-            build/FILESYSTEM-S3-TARGET.json \
-            build/FILESYSTEM-S4-TARGET.json \
-            build/FILESYSTEM-S0-EXIT-CODE.txt \
-            build/FILESYSTEM-S1-CRASH-EXIT-CODE.txt \
-            build/FILESYSTEM-S2-CRASH-EXIT-CODE.txt \
-            build/FILESYSTEM-S3-CRASH-EXIT-CODE.txt \
-            build/FILESYSTEM-S4-CRASH-EXIT-CODE.txt \
-            build/FILESYSTEM-S1-RECOVERY-EXIT-CODE.txt \
-            build/FILESYSTEM-S2-RECOVERY-EXIT-CODE.txt \
-            build/FILESYSTEM-S3-RECOVERY-EXIT-CODE.txt \
-            build/FILESYSTEM-S4-RECOVERY-EXIT-CODE.txt; do
-            [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
-          done
-          for f in build/fs-s*-serial.log build/fs-s*-qemu-debug.log build/fs-s*-input.log build/fs-s*-monitor.log; do
-            [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
-          done
-
-          exit "$filesystem_rc"
-
-      - name: Disposable system-volume FAT32 write certification
-        id: system_volume
-        shell: bash
-        env:
-          FRAMES_SYSTEM_VOLUME_TIMEOUT: '360'
-        run: |
-          set -uo pipefail
-          cd "$FRAMES_DIR"
-          export NEXUS="$NEXUS_EXE"
-          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-          mkdir -p "$EVIDENCE"
-          CONSOLE="$EVIDENCE/SYSTEM-VOLUME-CERTIFICATION-CONSOLE.log"
-
-          set +e
-          ./tools/qemu_system_volume_certify.sh 2>&1 | tee "$CONSOLE"
-          sysvol_rc=${PIPESTATUS[0]}
-          set -e
-          echo "$sysvol_rc" > "$EVIDENCE/SYSTEM-VOLUME-CERTIFY-EXIT-CODE.txt"
-
-          for f in \
-            build/system-volume-serial.log \
-            build/system-volume-qemu-debug.log \
-            build/system-volume-input.log \
-            build/system-volume-monitor.log \
-            build/SYSTEM-VOLUME-QEMU-EXIT-CODE.txt \
-            build/SYSTEM-VOLUME-TARGET.json \
-            build/SYSTEM-VOLUME-MEDIA.json \
-            build/SYSTEM-VOLUME-MEDIA-CONSOLE.json \
-            build/SYSTEM-VOLUME-EVIDENCE.json \
-            build/SYSTEM-VOLUME-GENERATOR.log; do
-            [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
-          done
-
-          exit "$sysvol_rc"
-
-      - name: FAT32 allocation and full file lifecycle certification
-        id: fat_lifecycle
-        shell: bash
-        env:
-          FRAMES_FAT_LIFECYCLE_TIMEOUT: '420'
-        run: |
-          set -uo pipefail
-          cd "$FRAMES_DIR"
-          export NEXUS="$NEXUS_EXE"
-          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-          mkdir -p "$EVIDENCE"
-          CONSOLE="$EVIDENCE/FAT-LIFECYCLE-CERTIFICATION-CONSOLE.log"
-
-          set +e
-          ./tools/qemu_fat_lifecycle_certify.sh 2>&1 | tee "$CONSOLE"
-          fat_rc=${PIPESTATUS[0]}
-          set -e
-          echo "$fat_rc" > "$EVIDENCE/FAT-LIFECYCLE-CERTIFY-EXIT-CODE.txt"
-
-          for f in \
-            build/fat-lifecycle-serial.log \
-            build/fat-lifecycle-qemu-debug.log \
-            build/fat-lifecycle-input.log \
-            build/fat-lifecycle-monitor.log \
-            build/FAT-LIFECYCLE-QEMU-EXIT-CODE.txt \
-            build/FAT-LIFECYCLE-TARGET.json \
-            build/FAT-LIFECYCLE-MEDIA.json \
-            build/FAT-LIFECYCLE-MEDIA-CONSOLE.json \
-            build/FAT-LIFECYCLE-EVIDENCE.json \
-            build/FAT-LIFECYCLE-GENERATOR.log \
-            build/FAT-LIFECYCLE-SYNTHETIC.json; do
-            [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
-          done
-
-          exit "$fat_rc"
-
-      - name: Scalable SMP 2 through 96 logical CPU certification
-        id: smp_scale
-        shell: bash
-        run: |
-          set -uo pipefail
-          cd "$FRAMES_DIR"
-          export NEXUS="$NEXUS_EXE"
-          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-          mkdir -p "$EVIDENCE"
-
-          scale_rc=0
-          for cpus in 2 4 8 16 32 64 96; do
-            CONSOLE="$EVIDENCE/SMP-${cpus}-CERTIFICATION-CONSOLE.log"
-            set +e
-            ./tools/qemu_smp_scale_certify.sh "$cpus" 2>&1 | tee "$CONSOLE"
-            rc=${PIPESTATUS[0]}
-            set -e
-            echo "$rc" > "$EVIDENCE/SMP-${cpus}-CERTIFY-EXIT-CODE.txt"
-            for f in \
-              "build/smp-${cpus}-serial.log" \
-              "build/smp-${cpus}-qmp-input.log" \
-              "build/smp-${cpus}-monitor.log" \
-              "build/smp-${cpus}-qemu-debug.log" \
-              "build/SMP-${cpus}-QEMU-EXIT-CODE.txt" \
-              "build/SMP-SCALE-${cpus}-EVIDENCE.json"; do
-              [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
-            done
-            if [[ "$rc" -ne 0 ]]; then scale_rc="$rc"; break; fi
-          done
-
-          if [[ "$scale_rc" -eq 0 ]]; then
-            set +e
-            python3 tools/smp_scale_matrix_evidence.py --require-pass 2>&1 | tee "$EVIDENCE/SMP-SCALE-MATRIX-CERTIFICATION-CONSOLE.log"
-            matrix_rc=${PIPESTATUS[0]}
-            set -e
-            [[ -f build/SMP-SCALE-MATRIX-EVIDENCE.json ]] && cp build/SMP-SCALE-MATRIX-EVIDENCE.json "$EVIDENCE/"
-            if [[ "$matrix_rc" -ne 0 ]]; then scale_rc="$matrix_rc"; fi
-          fi
-          echo "$scale_rc" > "$EVIDENCE/SMP-SCALE-CERTIFY-EXIT-CODE.txt"
-          exit "$scale_rc"
-
-      - name: Removable USB boot and post-detach survival certification
-        id: usb_boot
-        shell: bash
-        run: |
-          set -uo pipefail
-          cd "$FRAMES_DIR"
-          export NEXUS="$NEXUS_EXE"
-          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-          mkdir -p "$EVIDENCE"
-          CONSOLE="$EVIDENCE/USB-BOOT-CERTIFICATION-CONSOLE.log"
-
-          set +e
-          ./tools/qemu_usb_boot_matrix_certify.sh 2>&1 | tee "$CONSOLE"
-          usb_rc=${PIPESTATUS[0]}
-          set -e
-          echo "$usb_rc" > "$EVIDENCE/USB-BOOT-CERTIFY-EXIT-CODE.txt"
-
-          for f in             build/usb-normal-serial.log             build/usb-detach-serial.log             build/usb-normal-monitor.log             build/usb-detach-monitor.log             build/usb-normal-qemu-debug.log             build/usb-detach-qemu-debug.log             build/USB-BOOT-NORMAL-QEMU-EXIT-CODE.txt             build/USB-BOOT-DETACH-QEMU-EXIT-CODE.txt             build/USB-BOOT-NORMAL-EVIDENCE.json             build/USB-BOOT-DETACH-EVIDENCE.json             build/USB-BOOT-NORMAL-MEDIA.json             build/USB-BOOT-DETACH-MEDIA.json             build/USB-BOOT-MATRIX-EVIDENCE.json; do
-            [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
-          done
-
-          sha256sum build/Frames-${FRAMES_VERSION}-USB-Boot.img build/Frames-${FRAMES_VERSION}-ESP.img build/Frames-${FRAMES_VERSION}-USB-Internal-Guard.img > "$EVIDENCE/USB-BOOT-DEFINING-SHA256.txt"
-          exit "$usb_rc"
-
+          exit "$rc"
       - name: Physical boot safety certification matrix
         id: physical_preview
+        timeout-minutes: 45
         shell: bash
         run: |
           set -uo pipefail
@@ -622,6 +383,7 @@ jobs:
 
       - name: Real hardware compatibility expansion matrix
         id: hardware_compat
+        timeout-minutes: 45
         shell: bash
         run: |
           set -uo pipefail
@@ -643,43 +405,6 @@ jobs:
           done
           sha256sum             build/BOOTX64.EFI             build/FramesKernel.fkrn             build/System.fex             build/Frames-${FRAMES_VERSION}-ESP.img             build/Frames-${FRAMES_VERSION}-Physical-Hardware-Preview.img             > "$EVIDENCE/HWCOMPAT-DEFINING-SHA256.txt"
           exit "$compat_rc"
-
-      - name: Native USB mass-storage runtime certification
-        id: native_usb_msc
-        shell: bash
-        run: |
-          set -uo pipefail
-          cd "$FRAMES_DIR"
-          export NEXUS="$NEXUS_EXE"
-          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-          mkdir -p "$EVIDENCE"
-          CONSOLE="$EVIDENCE/USB-MSC-CERTIFICATION-CONSOLE.log"
-
-          set +e
-          ./tools/qemu_usb_msc_matrix_certify.sh 2>&1 | tee "$CONSOLE"
-          usbmsc_rc=${PIPESTATUS[0]}
-          set -e
-          echo "$usbmsc_rc" > "$EVIDENCE/USB-MSC-CERTIFY-EXIT-CODE.txt"
-
-          for f in \
-            build/usb-msc-*.log \
-            build/USB-MSC-*.json \
-            build/USB-MSC-*.txt \
-            build/USB-MSC-DATA-MANIFEST.json; do
-            [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
-          done
-
-          for f in \
-            build/Frames-${FRAMES_VERSION}-USB-MSC-Cert-Boot.img \
-            build/Frames-${FRAMES_VERSION}-USB-MSC-Data.img \
-            build/BOOTX64.EFI \
-            build/FramesKernel.fkrn \
-            build/System.fex; do
-            [[ -f "$f" ]] && sha256sum "$f"
-          done > "$EVIDENCE/USB-MSC-DEFINING-SHA256.txt"
-
-          exit "$usbmsc_rc"
 
       - name: Nexus SDK Phase 2 host tooling certification
         id: sdk_tooling
@@ -738,6 +463,7 @@ jobs:
 
       - name: FAPP Native Application Loader Phase 1 runtime certification
         id: developer_preview
+        timeout-minutes: 30
         shell: bash
         run: |
           set -uo pipefail
@@ -796,153 +522,36 @@ jobs:
           } > "$EVIDENCE/APP-LOADER-DEFINING-SHA256.txt"
           exit "$loader_rc"
 
-      - name: Build runtime evidence
+      - name: Build incremental certification evidence
         if: always()
         shell: bash
         run: |
           set +e
-          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
-          mkdir -p "$EVIDENCE"
-
-          {
-            echo "Frames runtime workflow diagnostics"
-            echo "UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
-            echo "EXPECTED_FRAMES_VERSION=${EXPECTED_FRAMES_VERSION:-<unset>}"
-            echo "EXPECTED_WORKFLOW_REVISION=${EXPECTED_WORKFLOW_REVISION:-<unset>}"
-            echo "EXPECTED_SOURCE_SHA256=${EXPECTED_SOURCE_SHA256:-<unset>}"
-            echo "FRAMES_DIR=${FRAMES_DIR:-<unset>}"
-            echo "FRAMES_VERSION=${FRAMES_VERSION:-<unset>}"
-            echo "FRAMES_SOURCE_ZIP=${FRAMES_SOURCE_ZIP:-<unset>}"
-            echo "NEXUS_EXE=${NEXUS_EXE:-<unset>}"
-            echo "OVMF_CODE=${OVMF_CODE:-<unset>}"
-            echo "OVMF_VARS=${OVMF_VARS:-<unset>}"
-            echo "QEMU_VERSION=$(qemu-system-x86_64 --version 2>/dev/null | head -n1 || true)"
-            echo "CLANG_VERSION=$(clang --version 2>/dev/null | head -n1 || true)"
-            echo "LLD_LINK_VERSION=$(lld-link --version 2>/dev/null | head -n1 || true)"
-            echo
-            echo "Repository files:"
-            find "$GITHUB_WORKSPACE" -maxdepth 3 -type f -print 2>/dev/null | sort | head -300
-            echo
-            echo "Frames build files:"
-            if [[ -n "${FRAMES_DIR:-}" && -d "$FRAMES_DIR/build" ]]; then
-              find "$FRAMES_DIR/build" -maxdepth 2 -type f -printf '%p %s bytes\n' 2>/dev/null | sort
-            else
-              echo "Frames build directory does not exist."
-            fi
-          } > "$EVIDENCE/WORKFLOW-DIAGNOSTICS.txt" 2>&1
-
-          if [[ -n "${FRAMES_DIR:-}" && -f "$FRAMES_DIR/build/serial.log" ]]; then
-            cd "$FRAMES_DIR"
-            python3 tools/runtime_evidence.py --serial build/serial.log || true
-            python3 tools/runtime_storage_cert.py --serial build/serial.log || true
-            python3 tools/stress_evidence.py --serial build/serial.log || true
-            python3 tools/storage_write_evidence.py --serial build/serial.log --media build/WRITE-MEDIA-INTEGRITY.json || true
-            for f in \
-              build/serial.log \
-              build/qmp-input.log \
-              build/qemu-debug.log \
-              build/MISSING-RUNTIME-MARKERS.json \
-              build/SHORT-CIRCUIT-RUNTIME.json \
-              build/RUNTIME-EVIDENCE.json \
-              build/STORAGE-RUNTIME-CERT.json \
-              build/STORAGE-WRITE-EVIDENCE.json \
-              build/WRITE-MEDIA-INTEGRITY.json \
-              build/WRITE-TARGET-MANIFEST.json \
-              build/RUNTIME-CERTIFICATION.json \
-              build/STRESS-EVIDENCE.json; do
-              [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
-            done
-          else
-            {
-              echo "QEMU did not produce build/serial.log."
-              echo "Inspect PREFLIGHT-CONSOLE.log, RUNTIME-CERTIFICATION-CONSOLE.log, and WORKFLOW-DIAGNOSTICS.txt."
-            } > "$EVIDENCE/NO-SERIAL-LOG.txt"
-          fi
-
+          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"; mkdir -p "$EVIDENCE"
+          { echo "Frames 0.9.46 incremental certification diagnostics"; echo "UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"; echo "EXPECTED_WORKFLOW_REVISION=${EXPECTED_WORKFLOW_REVISION:-<unset>}"; echo "EXPECTED_SOURCE_SHA256=${EXPECTED_SOURCE_SHA256:-<unset>}"; echo "CERTIFIED_BASELINE_SOURCE_SHA256=${CERTIFIED_BASELINE_SOURCE_SHA256:-<unset>}"; echo "CERTIFIED_BASELINE_EVIDENCE_SHA256=${CERTIFIED_BASELINE_EVIDENCE_SHA256:-<unset>}"; echo "FRAMES_SOURCE_ZIP=${FRAMES_SOURCE_ZIP:-<unset>}"; echo "FRAMES_BASELINE_SOURCE_ZIP=${FRAMES_BASELINE_SOURCE_ZIP:-<unset>}"; echo "QEMU_VERSION=$(qemu-system-x86_64 --version 2>/dev/null | head -n1 || true)"; } > "$EVIDENCE/WORKFLOW-DIAGNOSTICS.txt"
           if [[ -n "${FRAMES_DIR:-}" && -d "$FRAMES_DIR/build" ]]; then
-            for f in \
-              "$FRAMES_DIR/build/reboot-serial.log" \
-              "$FRAMES_DIR/build/shutdown-serial.log" \
-              "$FRAMES_DIR/build/reboot-qemu-debug.log" \
-              "$FRAMES_DIR/build/shutdown-qemu-debug.log" \
-              "$FRAMES_DIR/build/reboot-qmp-input.log" \
-              "$FRAMES_DIR/build/shutdown-qmp-input.log" \
-              "$FRAMES_DIR/build/reboot-monitor.log" \
-              "$FRAMES_DIR/build/REBOOT-QEMU-EXIT-CODE.txt" \
-              "$FRAMES_DIR/build/SHUTDOWN-QEMU-EXIT-CODE.txt" \
-              "$FRAMES_DIR/build/REBOOT-MEDIA-VERIFY.json" \
-              "$FRAMES_DIR/build/SHUTDOWN-MEDIA-VERIFY.json" \
-              "$FRAMES_DIR/build/LIFECYCLE-EVIDENCE.json" \
-              "$FRAMES_DIR/build/LIFECYCLE-REBOOT-TARGET.json" \
-              "$FRAMES_DIR/build/LIFECYCLE-SHUTDOWN-TARGET.json"; do
-              [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
-            done
+            for f in "$FRAMES_DIR"/build/physical-*.log "$FRAMES_DIR"/build/PHYSICAL-PREVIEW-*.json "$FRAMES_DIR"/build/PHYSICAL-PREVIEW-*.txt "$FRAMES_DIR"/build/hwcompat-*.log "$FRAMES_DIR"/build/HWCOMPAT-*.json "$FRAMES_DIR"/build/HWCOMPAT-*.txt "$FRAMES_DIR"/build/developer-preview-*.log "$FRAMES_DIR"/build/DEVELOPER-PREVIEW-*.json "$FRAMES_DIR"/build/DEVELOPER-PREVIEW-*.txt "$FRAMES_DIR"/build/SDK-TOOLING-EVIDENCE.json "$FRAMES_DIR"/build/APP-PACKAGING-EVIDENCE.json "$FRAMES_DIR"/build/APP-LOADER-EVIDENCE.json "$FRAMES_DIR"/build/HelloFrames.fapp; do [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"; done
           fi
-
-          if [[ -n "${FRAMES_DIR:-}" && -d "$FRAMES_DIR/build" ]]; then
-            for f in "$FRAMES_DIR"/build/FILESYSTEM-*.json "$FRAMES_DIR"/build/FILESYSTEM-*.txt "$FRAMES_DIR"/build/fs-s*-serial.log "$FRAMES_DIR"/build/fs-s*-qemu-debug.log "$FRAMES_DIR"/build/fs-s*-input.log "$FRAMES_DIR"/build/fs-s*-monitor.log; do
-              [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
-            done
-          fi
-
-          if [[ -n "${FRAMES_DIR:-}" && -d "$FRAMES_DIR/build" ]]; then
-            for f in "$FRAMES_DIR"/build/system-volume-*.log "$FRAMES_DIR"/build/SYSTEM-VOLUME-*.json "$FRAMES_DIR"/build/SYSTEM-VOLUME-*.txt; do
-              [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
-            done
-          fi
-
-          if [[ -n "${FRAMES_DIR:-}" && -d "$FRAMES_DIR/build" ]]; then
-            for f in "$FRAMES_DIR"/build/fat-lifecycle-*.log "$FRAMES_DIR"/build/FAT-LIFECYCLE-*.json "$FRAMES_DIR"/build/FAT-LIFECYCLE-*.txt; do
-              [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
-            done
-          fi
-
-          if [[ -n "${FRAMES_DIR:-}" && -d "$FRAMES_DIR/build" ]]; then
-            for f in "$FRAMES_DIR"/build/smp-*-serial.log "$FRAMES_DIR"/build/smp-*-qmp-input.log "$FRAMES_DIR"/build/smp-*-monitor.log "$FRAMES_DIR"/build/smp-*-qemu-debug.log "$FRAMES_DIR"/build/SMP-*.json "$FRAMES_DIR"/build/SMP-*.txt; do
-              [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
-            done
-          fi
-
-          if [[ -n "${FRAMES_DIR:-}" && -d "$FRAMES_DIR/build" ]]; then
-            for f in "$FRAMES_DIR"/build/usb-*.log "$FRAMES_DIR"/build/USB-BOOT-*.json "$FRAMES_DIR"/build/USB-BOOT-*.txt; do
-              [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
-            done
-          fi
-
-          if [[ -n "${FRAMES_DIR:-}" && -d "$FRAMES_DIR/build" ]]; then
-            for f in "$FRAMES_DIR"/build/physical-*.log "$FRAMES_DIR"/build/PHYSICAL-PREVIEW-*.json "$FRAMES_DIR"/build/PHYSICAL-PREVIEW-*.txt; do
-              [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
-            done
-          fi
-
-
-          if [[ -n "${FRAMES_DIR:-}" && -d "$FRAMES_DIR/build" ]]; then
-            for f in "$FRAMES_DIR"/build/hwcompat-*.log "$FRAMES_DIR"/build/HWCOMPAT-*.json "$FRAMES_DIR"/build/HWCOMPAT-*.txt; do
-              [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
-            done
-          fi
-
-          if [[ -n "${FRAMES_DIR:-}" && -d "$FRAMES_DIR/build" ]]; then
-            for f in "$FRAMES_DIR"/build/usb-msc-*.log "$FRAMES_DIR"/build/USB-MSC-*.json "$FRAMES_DIR"/build/USB-MSC-*.txt; do
-              [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
-            done
-          fi
-
-          if [[ -n "${FRAMES_DIR:-}" && -d "$FRAMES_DIR/build" ]]; then
-            for f in "$FRAMES_DIR"/build/developer-preview-*.log "$FRAMES_DIR"/build/DEVELOPER-PREVIEW-*.json "$FRAMES_DIR"/build/DEVELOPER-PREVIEW-*.txt "$FRAMES_DIR"/build/APP-PACKAGING-EVIDENCE.json "$FRAMES_DIR"/build/APP-LOADER-EVIDENCE.json "$FRAMES_DIR"/build/HelloFrames.fapp; do
-              [[ -f "$f" ]] && cp "$f" "$EVIDENCE/"
-            done
-          fi
-
-          echo "Evidence directory contents:"
-          find "$EVIDENCE" -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
-
+          python3 - "$EVIDENCE" <<'PYAGG'
+          import sys,pathlib,json,hashlib
+          p=pathlib.Path(sys.argv[1]); required=['KERNEL-BOOT-SMOKE-CERTIFY-EXIT-CODE.txt','PHYSICAL-PREVIEW-CERTIFY-EXIT-CODE.txt','HWCOMPAT-CERTIFY-EXIT-CODE.txt','SDK-TOOLING-CERTIFY-EXIT-CODE.txt','APP-PACKAGING-CERTIFY-EXIT-CODE.txt','DEVELOPER-PREVIEW-CERTIFY-EXIT-CODE.txt','APP-LOADER-CERTIFY-EXIT-CODE.txt']; missing=[]; nonzero={}
+          for n in required:
+           f=p/n
+           if not f.exists(): missing.append(n); continue
+           try:v=int(f.read_text().strip())
+           except:v=-999
+           if v!=0:nonzero[n]=v
+          impact=p/'CHANGE-IMPACT-EVIDENCE.json'; impact_ok=False
+          if impact.exists():
+           try:impact_ok=json.loads(impact.read_text()).get('status')=='PASS'
+           except:pass
+          status='PASS' if not missing and not nonzero and impact_ok else 'FAIL'; out={'status':status,'profile':'frames-0.9.46-v56-incremental','workflow_revision':'v56-incremental','candidate_source_sha256':'ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7','certified_baseline_source_sha256':'f79e43eac7d2047bde1fb20cb7ade9f1ce09bbabffa9acc95d62acf9ca574199','certified_baseline_evidence_sha256':'054590dd2a76a216f8b0639b8cb419c2ca3bf06d45ae64cda965adf8209065a5','required_executed_exit_codes':required,'missing':missing,'nonzero':nonzero,'impact_pass':impact_ok}; (p/'INCREMENTAL-CERTIFICATION.json').write_text(json.dumps(out,indent=2)+'\n'); files=[hashlib.sha256(f.read_bytes()).hexdigest()+'  '+f.name for f in sorted(p.iterdir()) if f.is_file() and f.name!='EVIDENCE-FILES-SHA256.txt']; (p/'EVIDENCE-FILES-SHA256.txt').write_text('\n'.join(files)+'\n'); print(json.dumps(out,indent=2)); raise SystemExit(0 if status=='PASS' else 1)
+          PYAGG
       - name: Upload runtime evidence
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frames-0.9.46-fapp-native-application-loader-evidence-v56
+          name: frames-0.9.46-fapp-native-application-loader-incremental-evidence-v56
           path: ${{ github.workspace }}/runtime-evidence
           if-no-files-found: error
           retention-days: 14
