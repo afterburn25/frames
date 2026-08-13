@@ -1,4 +1,4 @@
-name: Frames 0.9.44 Nexus SDK Developer Tooling Phase 1 Certification v53
+name: Frames 0.9.45 Nexus SDK Developer Tooling Phase 2 FAPP Packaging Certification v54
 
 on:
   workflow_dispatch:
@@ -13,9 +13,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 720
     env:
-      EXPECTED_FRAMES_VERSION: '0.9.44'
-      EXPECTED_SOURCE_SHA256: 'cc8ff5ae42a3bc7faf0184aceb597fda713433d6f1624a0c39515560e05d4b31'
-      EXPECTED_WORKFLOW_REVISION: 'v53'
+      EXPECTED_FRAMES_VERSION: '0.9.45'
+      EXPECTED_SOURCE_SHA256: '60c207d9a1c1936bc0f9c35f7fdcd111380a1f275b36bd7f40acf0f44134184a'
+      EXPECTED_WORKFLOW_REVISION: 'v54'
 
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +32,7 @@ jobs:
           command -v python3
           command -v unzip
 
-      - name: Locate exact Frames 0.9.43 source and bundled Nexus
+      - name: Locate exact Frames 0.9.45 source and bundled Nexus
         shell: bash
         run: |
           set -euo pipefail
@@ -220,9 +220,11 @@ jobs:
             cp build/Frames-${FRAMES_VERSION}-Write-Test.img build/Frames-${FRAMES_VERSION}-Write-Test.before.img
             python3 tools/verify_write_test_image.py --before build/Frames-${FRAMES_VERSION}-Write-Test.before.img --after build/Frames-${FRAMES_VERSION}-Write-Test.img --require-pass
             python3 tools/verify_release.py
+            python3 tools/sdk_selftest.py --require-pass
             python3 tools/make_developer_preview_image.py
-            python3 tools/verify_developer_preview_image.py --image build/Frames-${FRAMES_VERSION}-Developer-Preview.img --require-pass
-            python3 tools/verify_runtime_repair_0944.py
+            python3 tools/verify_developer_preview_image.py --image build/Frames-${FRAMES_VERSION}-Developer-Preview.img --package build/HelloFrames.fapp --require-pass
+            python3 tools/app_packaging_evidence.py --package build/HelloFrames.fapp --image build/Frames-${FRAMES_VERSION}-Developer-Preview.img --require-pass
+            python3 tools/verify_runtime_repair_0945.py
             python3 tools/make_usb_boot_image.py
             python3 tools/make_physical_preview_image.py
             python3 tools/verify_physical_preview_image.py
@@ -698,13 +700,39 @@ jobs:
 
           [[ -f build/SDK-TOOLING-EVIDENCE.json ]] && cp build/SDK-TOOLING-EVIDENCE.json "$EVIDENCE/"
           {
-            sha256sum sdk/SDK-MANIFEST.json sdk/examples/hello/main.nx
+            sha256sum sdk/SDK-MANIFEST.json sdk/examples/hello/main.nx sdk/fapp_tool.py
             [[ -f build/HelloFrames-SDK.fex ]] && sha256sum build/HelloFrames-SDK.fex
+            [[ -f build/HelloFrames.fapp ]] && sha256sum build/HelloFrames.fapp
           } > "$EVIDENCE/SDK-TOOLING-DEFINING-SHA256.txt"
 
           exit "$sdk_rc"
 
-      - name: Nexus SDK Developer Tooling Phase 1 runtime certification
+      - name: FAPP application packaging certification
+        id: app_packaging
+        shell: bash
+        run: |
+          set -uo pipefail
+          cd "$FRAMES_DIR"
+          export NEXUS="$NEXUS_EXE"
+          chmod +x "$NEXUS_EXE" tools/*.sh tools/*.py sdk/*.sh sdk/*.py
+          EVIDENCE="$GITHUB_WORKSPACE/runtime-evidence"
+          mkdir -p "$EVIDENCE"
+          CONSOLE="$EVIDENCE/APP-PACKAGING-CERTIFICATION-CONSOLE.log"
+
+          set +e
+          python3 tools/app_packaging_evidence.py             --package build/HelloFrames.fapp             --image build/Frames-${FRAMES_VERSION}-Developer-Preview.img             --require-pass 2>&1 | tee "$CONSOLE"
+          app_rc=${PIPESTATUS[0]}
+          set -e
+          echo "$app_rc" > "$EVIDENCE/APP-PACKAGING-CERTIFY-EXIT-CODE.txt"
+
+          [[ -f build/APP-PACKAGING-EVIDENCE.json ]] && cp build/APP-PACKAGING-EVIDENCE.json "$EVIDENCE/"
+          {
+            sha256sum sdk/SDK-MANIFEST.json sdk/fapp_tool.py build/HelloFrames-SDK.fex build/HelloFrames.fapp build/Frames-${FRAMES_VERSION}-Developer-Preview.img
+          } > "$EVIDENCE/APP-PACKAGING-DEFINING-SHA256.txt"
+
+          exit "$app_rc"
+
+      - name: Nexus SDK Developer Tooling Phase 2 runtime certification
         id: developer_preview
         shell: bash
         run: |
@@ -885,7 +913,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frames-0.9.44-nexus-sdk-developer-tooling-evidence-v53
+          name: frames-0.9.45-nexus-sdk-app-packaging-evidence-v54
           path: ${{ github.workspace }}/runtime-evidence
           if-no-files-found: error
           retention-days: 14
