@@ -1,16 +1,16 @@
-name: Frames 0.9.46 FAPP Native Application Loader Parallel Incremental Certification v56 r4
+name: Frames 0.9.46 FAPP Native Application Loader Parallel Incremental Certification v56 r6
 'on':
   workflow_dispatch: {}
   push:
     branches:
     - main
     paths:
-    - Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r5.zip
-    - '**/Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r5.zip'
+    - Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r6.zip
+    - '**/Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r6.zip'
 permissions:
   contents: read
 concurrency:
-  group: frames-0.9.46-v56-parallel-r5-${{ github.ref }}
+  group: frames-0.9.46-v56-parallel-r6-${{ github.ref }}
   cancel-in-progress: false
 env:
   EXPECTED_FRAMES_VERSION: 0.9.46
@@ -18,28 +18,30 @@ env:
   CERTIFIED_BASELINE_VERSION: 0.9.45
   CERTIFIED_BASELINE_SOURCE_SHA256: f79e43eac7d2047bde1fb20cb7ade9f1ce09bbabffa9acc95d62acf9ca574199
   CERTIFIED_BASELINE_EVIDENCE_SHA256: 054590dd2a76a216f8b0639b8cb419c2ca3bf06d45ae64cda965adf8209065a5
-  EXPECTED_WORKFLOW_REVISION: v56-parallel-r5
-  EXPECTED_TRIGGER_KIT: Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r5.zip
+  EXPECTED_WORKFLOW_REVISION: v56-parallel-r6
+  EXPECTED_TRIGGER_KIT: Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r6.zip
 jobs:
   prepare:
     name: Build once + seal certification inputs
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
+    - name: Checkout repository
+      id: checkout
+      uses: actions/checkout@v5
+      continue-on-error: true
     - name: Initialize preparation evidence
       shell: bash
       run: 'mkdir -p "$GITHUB_WORKSPACE/prep-evidence" "$GITHUB_WORKSPACE/sealed-inputs" "$GITHUB_WORKSPACE/prepared-source"
 
         printf ''workflow_revision=%s\nutc=%s\n'' "$EXPECTED_WORKFLOW_REVISION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$GITHUB_WORKSPACE/prep-evidence/PREP-RUN-IDENTITY.txt"'
-    - name: Checkout repository
-      id: checkout
-      uses: actions/checkout@v5
-      continue-on-error: true
     - name: Install build tools
       id: install
       shell: bash
       continue-on-error: true
       run: 'set -uo pipefail
+
+        mkdir -p "$GITHUB_WORKSPACE/prep-evidence"
 
         { sudo apt-get update && sudo apt-get install -y qemu-system-x86 ovmf clang lld python3 unzip; } 2>&1 | tee "$GITHUB_WORKSPACE/prep-evidence/INSTALL-CONSOLE.log"'
     - name: Locate exact runtime kit and sealed sources
@@ -171,7 +173,7 @@ jobs:
 
         p=pathlib.Path(sys.argv[1]); count=sum(bool(x.strip()) for x in p.read_text().splitlines())
 
-        (p.parent/''PREPARED-SOURCE-IDENTITY.json'').write_text(json.dumps({''status'':''PASS'',''frames_version'':''0.9.46'',''candidate_source_sha256'':''ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7'',''prepared_file_count'':count,''workflow_revision'':''v56-parallel-r5''},indent=2)+''\n'')
+        (p.parent/''PREPARED-SOURCE-IDENTITY.json'').write_text(json.dumps({''status'':''PASS'',''frames_version'':''0.9.46'',''candidate_source_sha256'':''ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7'',''prepared_file_count'':count,''workflow_revision'':''v56-parallel-r6''},indent=2)+''\n'')
 
         print(''Prepared source files:'',count)
 
@@ -195,7 +197,7 @@ jobs:
       uses: actions/upload-artifact@v7
       if: always()
       with:
-        name: frames-v56-parallel-r5-prepared-source
+        name: frames-v56-parallel-r6-prepared-source
         path: ${{ github.workspace }}/prepared-source
         if-no-files-found: warn
         retention-days: 2
@@ -204,7 +206,7 @@ jobs:
       uses: actions/upload-artifact@v7
       if: always()
       with:
-        name: frames-v56-parallel-r5-prep-evidence
+        name: frames-v56-parallel-r6-prep-evidence
         path: ${{ github.workspace }}/prep-evidence
         if-no-files-found: error
         retention-days: 14
@@ -259,14 +261,14 @@ jobs:
       uses: actions/download-artifact@v8
       continue-on-error: true
       with:
-        name: frames-v56-parallel-r5-prepared-source
+        name: frames-v56-parallel-r6-prepared-source
         path: ${{ github.workspace }}/prepared-source
     - name: Download preparation evidence
       id: download_prep
       uses: actions/download-artifact@v8
       continue-on-error: true
       with:
-        name: frames-v56-parallel-r5-prep-evidence
+        name: frames-v56-parallel-r6-prep-evidence
         path: ${{ github.workspace }}/prep-evidence
     - name: Verify prepared source identity
       id: verify
@@ -313,7 +315,7 @@ jobs:
       uses: actions/upload-artifact@v7
       if: always()
       with:
-        name: frames-v56-parallel-r5-lane-${{ matrix.lane }}
+        name: frames-v56-parallel-r6-lane-${{ matrix.lane }}
         path: ${{ github.workspace }}/lane-evidence
         if-no-files-found: error
         retention-days: 14
@@ -352,14 +354,14 @@ jobs:
       uses: actions/download-artifact@v8
       continue-on-error: true
       with:
-        name: frames-v56-parallel-r5-prep-evidence
+        name: frames-v56-parallel-r6-prep-evidence
         path: ${{ github.workspace }}/runtime-evidence
     - name: Download all lane evidence
       id: dllanes
       uses: actions/download-artifact@v8
       continue-on-error: true
       with:
-        pattern: frames-v56-parallel-r5-lane-*
+        pattern: frames-v56-parallel-r6-lane-*
         path: ${{ github.workspace }}/runtime-evidence
         merge-multiple: true
     - name: Record artifact download outcomes
@@ -372,7 +374,7 @@ jobs:
       shell: bash
       continue-on-error: true
       run: "set -euo pipefail\nEVIDENCE=\"$GITHUB_WORKSPACE/runtime-evidence\"; mkdir -p \"$EVIDENCE\"\npython3 - \"$EVIDENCE\" \"${{ needs.prepare.result }}\" \"${{ needs.certify.result }}\" <<'PYAGG'\nimport sys,pathlib,json,hashlib\np=pathlib.Path(sys.argv[1]); prep=sys.argv[2]; cert=sys.argv[3]\nrequired=['KERNEL-BOOT-SMOKE-CERTIFY-EXIT-CODE.txt','PHYSICAL-PREVIEW-CERTIFY-EXIT-CODE.txt','HWCOMPAT-CERTIFY-EXIT-CODE.txt','SDK-TOOLING-CERTIFY-EXIT-CODE.txt','APP-PACKAGING-CERTIFY-EXIT-CODE.txt','DEVELOPER-PREVIEW-CERTIFY-EXIT-CODE.txt','APP-LOADER-CERTIFY-EXIT-CODE.txt']\nmissing=[]; nonzero={}\nfor n in required:\n f=p/n\n if not f.exists(): missing.append(n); continue\n try:v=int(f.read_text().strip())\n except:v=-999\n if v!=0: nonzero[n]=v\nrequired_json={'CHANGE-IMPACT-EVIDENCE.json':'PASS','KERNEL-BOOT-SMOKE-EVIDENCE.json':'PASS','SDK-TOOLING-EVIDENCE.json':'PASS','APP-PACKAGING-EVIDENCE.json':'PASS','DEVELOPER-PREVIEW-EVIDENCE.json':'PASS','APP-LOADER-EVIDENCE.json':'PASS'}\njson_bad={}\n\
-        for n,want in required_json.items():\n f=p/n\n if not f.exists(): json_bad[n]='MISSING'; continue\n try: got=json.loads(f.read_text()).get('status')\n except Exception: got='UNREADABLE'\n if got!=want: json_bad[n]=got\nstatus='PASS' if prep=='success' and cert=='success' and not missing and not nonzero and not json_bad else 'FAIL'\nout={'status':status,'profile':'frames-0.9.46-v56-parallel-incremental-r4','workflow_revision':'v56-parallel-r5','prepare_job_result':prep,'certify_job_result':cert,'missing':missing,'nonzero':nonzero,'json_status_issues':json_bad,'candidate_source_sha256':'ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7','certified_baseline_source_sha256':'f79e43eac7d2047bde1fb20cb7ade9f1ce09bbabffa9acc95d62acf9ca574199','certified_baseline_evidence_sha256':'054590dd2a76a216f8b0639b8cb419c2ca3bf06d45ae64cda965adf8209065a5'}\n(p/'PARALLEL-INCREMENTAL-CERTIFICATION.json').write_text(json.dumps(out,indent=2)+'\\n')\nfiles=[hashlib.sha256(f.read_bytes()).hexdigest()+'\
+        for n,want in required_json.items():\n f=p/n\n if not f.exists(): json_bad[n]='MISSING'; continue\n try: got=json.loads(f.read_text()).get('status')\n except Exception: got='UNREADABLE'\n if got!=want: json_bad[n]=got\nstatus='PASS' if prep=='success' and cert=='success' and not missing and not nonzero and not json_bad else 'FAIL'\nout={'status':status,'profile':'frames-0.9.46-v56-parallel-incremental-r4','workflow_revision':'v56-parallel-r6','prepare_job_result':prep,'certify_job_result':cert,'missing':missing,'nonzero':nonzero,'json_status_issues':json_bad,'candidate_source_sha256':'ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7','certified_baseline_source_sha256':'f79e43eac7d2047bde1fb20cb7ade9f1ce09bbabffa9acc95d62acf9ca574199','certified_baseline_evidence_sha256':'054590dd2a76a216f8b0639b8cb419c2ca3bf06d45ae64cda965adf8209065a5'}\n(p/'PARALLEL-INCREMENTAL-CERTIFICATION.json').write_text(json.dumps(out,indent=2)+'\\n')\nfiles=[hashlib.sha256(f.read_bytes()).hexdigest()+'\
         \  '+f.name for f in sorted(p.iterdir()) if f.is_file() and f.name!='EVIDENCE-FILES-SHA256.txt']\n(p/'EVIDENCE-FILES-SHA256.txt').write_text('\\n'.join(files)+'\\n'); print(json.dumps(out,indent=2))\nPYAGG"
     - name: Upload final parallel evidence
       uses: actions/upload-artifact@v7
