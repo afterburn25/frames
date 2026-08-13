@@ -1,4 +1,4 @@
-name: Frames 0.9.41 Native USB Mass-Storage Runtime Certification v47
+name: Frames 0.9.41 Native USB Mass-Storage Runtime Certification v48
 
 on:
   workflow_dispatch:
@@ -14,8 +14,8 @@ jobs:
     timeout-minutes: 720
     env:
       EXPECTED_FRAMES_VERSION: '0.9.41'
-      EXPECTED_SOURCE_SHA256: '18e05ff200afdb5c3ef1e8e0d13c61a8f01179c5f0103707876c93a63aa111a2'
-      EXPECTED_WORKFLOW_REVISION: 'v47'
+      EXPECTED_SOURCE_SHA256: 'b144c93f25f720eb358a943aabb881c56393442b2e74fd4d870b0f96d49af913'
+      EXPECTED_WORKFLOW_REVISION: 'v48'
 
     steps:
       - uses: actions/checkout@v4
@@ -816,7 +816,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frames-0.9.41-native-usb-storage-evidence-v47
+          name: frames-0.9.41-native-usb-storage-evidence-v48
           path: ${{ github.workspace }}/runtime-evidence
           if-no-files-found: error
           retention-days: 14
