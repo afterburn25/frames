@@ -5,12 +5,12 @@ name: Frames 0.9.46 FAPP Native Application Loader Parallel Incremental Certific
     branches:
     - main
     paths:
-    - Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r4.zip
-    - '**/Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r4.zip'
+    - Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r5.zip
+    - '**/Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r5.zip'
 permissions:
   contents: read
 concurrency:
-  group: frames-0.9.46-v56-parallel-r4-${{ github.ref }}
+  group: frames-0.9.46-v56-parallel-r5-${{ github.ref }}
   cancel-in-progress: false
 env:
   EXPECTED_FRAMES_VERSION: 0.9.46
@@ -18,8 +18,8 @@ env:
   CERTIFIED_BASELINE_VERSION: 0.9.45
   CERTIFIED_BASELINE_SOURCE_SHA256: f79e43eac7d2047bde1fb20cb7ade9f1ce09bbabffa9acc95d62acf9ca574199
   CERTIFIED_BASELINE_EVIDENCE_SHA256: 054590dd2a76a216f8b0639b8cb419c2ca3bf06d45ae64cda965adf8209065a5
-  EXPECTED_WORKFLOW_REVISION: v56-parallel-r4
-  EXPECTED_TRIGGER_KIT: Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r4.zip
+  EXPECTED_WORKFLOW_REVISION: v56-parallel-r5
+  EXPECTED_TRIGGER_KIT: Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r5.zip
 jobs:
   prepare:
     name: Build once + seal certification inputs
@@ -60,13 +60,13 @@ jobs:
 
         [[ -n "$kit_zip" ]] || { echo "FAIL: required runtime kit missing: $EXPECTED_TRIGGER_KIT" | tee "$EVIDENCE/KIT-MISSING.txt"; exit 1; }
 
-        rm -rf "$RUNNER_TEMP/v56-r4-kit"; mkdir -p "$RUNNER_TEMP/v56-r4-kit"
+        rm -rf "$RUNNER_TEMP/v56-r5-kit"; mkdir -p "$RUNNER_TEMP/v56-r5-kit"
 
-        unzip -q "$kit_zip" -d "$RUNNER_TEMP/v56-r4-kit"
+        unzip -q "$kit_zip" -d "$RUNNER_TEMP/v56-r5-kit"
 
-        candidate="$(find "$RUNNER_TEMP/v56-r4-kit" -type f -name ''Frames-0.9.46-Source-v56.zip'' -print | sort | head -n1 || true)"
+        candidate="$(find "$RUNNER_TEMP/v56-r5-kit" -type f -name ''Frames-0.9.46-Source-v56.zip'' -print | sort | head -n1 || true)"
 
-        baseline="$(find "$RUNNER_TEMP/v56-r4-kit" -type f -name ''Frames-0.9.45-Source-v55.zip'' -print | sort | head -n1 || true)"
+        baseline="$(find "$RUNNER_TEMP/v56-r5-kit" -type f -name ''Frames-0.9.45-Source-v55.zip'' -print | sort | head -n1 || true)"
 
         [[ -n "$candidate" && -n "$baseline" ]] || { echo ''FAIL: candidate/baseline source missing from kit'' | tee "$EVIDENCE/SOURCE-DISCOVERY-FAILURE.txt"; exit 1; }
 
@@ -103,6 +103,48 @@ jobs:
         n')\nexecuted=['source_identity','change_impact','build_release','kernel_boot_smoke','physical_preview','hardware_compat','sdk_tooling','app_packaging','developer_preview','app_loader','safety_locks']\ninherited={'smp_scale':'No SMP/scheduler/AP/interrupt functions or SMP harness files changed.','storage_runtime':'No NVMe/block/storage/DMA source or storage harness files changed.','storage_write':'No storage write-path source or write certification harness files changed.','filesystem':'No filesystem/FAT allocation/crash-recovery source or harness files changed.','fat_lifecycle':'No FAT lifecycle source or harness files changed.','system_volume':'No system-volume write source or harness files changed.','lifecycle':'No reboot/shutdown/power lifecycle source or harness files changed.','usb_boot':'No USB boot/xHCI/HID source or USB boot harness files changed.','usb_msc':'No xHCI/BOT/SCSI/USB-MSC source or harness files changed.','stress':'No stress/fault subsystem source or stress harness\
         \ files changed.'}\nimpact={'status':'PASS','profile':'frames-incremental-certification-v1','parallel_execution':True,'certified_baseline':{'frames_version':'0.9.45','source_sha256':'f79e43eac7d2047bde1fb20cb7ade9f1ce09bbabffa9acc95d62acf9ca574199','evidence_sha256':'054590dd2a76a216f8b0639b8cb419c2ca3bf06d45ae64cda965adf8209065a5'},'candidate':{'frames_version':'0.9.46','source_sha256':'ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7'},'changed_files':changed,'changed_kernel_functions':sorted(funcs),'executed_groups':executed,'inherited_groups':inherited}\n(ev/'CHANGE-IMPACT-EVIDENCE.json').write_text(json.dumps(impact,indent=2)+'\\n')\n(ev/'EXECUTED-CERTIFICATION-GROUPS.json').write_text(json.dumps({'status':'READY','groups':executed},indent=2)+'\\n')\n(ev/'INHERITED-CERTIFICATION-GROUPS.json').write_text(json.dumps({'status':'READY','baseline_evidence_sha256':impact['certified_baseline']['evidence_sha256'],'groups':inherited},indent=2)+'\\n')\n(ev/'CERTIFIED-BASELINE.json').write_text(json.dumps(impact['certified_baseline'],indent=2)+'\\\
         n')\nprint('Incremental impact analysis: PASS',len(changed),len(funcs))\nPYIMPACT"
+
+    - name: Discover preparation OVMF firmware
+      id: ovmf_prep
+      shell: bash
+      continue-on-error: true
+      run: |
+        set -euo pipefail
+        EVIDENCE="$GITHUB_WORKSPACE/prep-evidence"
+        mkdir -p "$EVIDENCE"
+        code=""
+        vars=""
+        for dir in /usr/share/OVMF /usr/share/edk2/ovmf /usr/share/edk2/x64; do
+          if [[ -f "$dir/OVMF_CODE_4M.fd" && -f "$dir/OVMF_VARS_4M.fd" ]]; then
+            code="$dir/OVMF_CODE_4M.fd"
+            vars="$dir/OVMF_VARS_4M.fd"
+            break
+          fi
+        done
+        if [[ -z "$code" ]]; then
+          for dir in /usr/share/OVMF /usr/share/edk2/ovmf /usr/share/edk2/x64; do
+            if [[ -f "$dir/OVMF_CODE.fd" && -f "$dir/OVMF_VARS.fd" ]]; then
+              code="$dir/OVMF_CODE.fd"
+              vars="$dir/OVMF_VARS.fd"
+              break
+            fi
+          done
+        fi
+        if [[ -z "$code" || -z "$vars" ]]; then
+          {
+            echo "FAIL: no matching OVMF CODE/VARS pair found during preparation"
+            find /usr/share/OVMF /usr/share/edk2 -maxdepth 4 -type f -name 'OVMF_*.fd' -print 2>/dev/null | sort
+          } | tee "$EVIDENCE/PREP-OVMF-DISCOVERY-FAILURE.txt"
+          exit 1
+        fi
+        {
+          echo "OVMF_CODE=$code"
+          echo "OVMF_VARS=$vars"
+          sha256sum "$code" "$vars"
+        } | tee "$EVIDENCE/PREP-OVMF-IDENTITY.txt"
+        echo "OVMF_CODE=$code" >> "$GITHUB_ENV"
+        echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"
+
     - name: Build once and preflight exact source
       id: build
       shell: bash
@@ -129,16 +171,31 @@ jobs:
 
         p=pathlib.Path(sys.argv[1]); count=sum(bool(x.strip()) for x in p.read_text().splitlines())
 
-        (p.parent/''PREPARED-SOURCE-IDENTITY.json'').write_text(json.dumps({''status'':''PASS'',''frames_version'':''0.9.46'',''candidate_source_sha256'':''ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7'',''prepared_file_count'':count,''workflow_revision'':''v56-parallel-r4''},indent=2)+''\n'')
+        (p.parent/''PREPARED-SOURCE-IDENTITY.json'').write_text(json.dumps({''status'':''PASS'',''frames_version'':''0.9.46'',''candidate_source_sha256'':''ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7'',''prepared_file_count'':count,''workflow_revision'':''v56-parallel-r5''},indent=2)+''\n'')
 
         print(''Prepared source files:'',count)
 
         PYSEAL'
+
+    - name: Record preparation step outcomes
+      if: always()
+      shell: bash
+      run: |
+        cat > "$GITHUB_WORKSPACE/prep-evidence/PREP-STEP-OUTCOMES.txt" <<EOF
+        checkout=${{ steps.checkout.outcome }}
+        install=${{ steps.install.outcome }}
+        locate=${{ steps.locate.outcome }}
+        impact=${{ steps.impact.outcome }}
+        ovmf_prep=${{ steps.ovmf_prep.outcome }}
+        build=${{ steps.build.outcome }}
+        seal=${{ steps.seal.outcome }}
+        EOF
+
     - name: Upload prepared source
       uses: actions/upload-artifact@v7
       if: always()
       with:
-        name: frames-v56-parallel-r4-prepared-source
+        name: frames-v56-parallel-r5-prepared-source
         path: ${{ github.workspace }}/prepared-source
         if-no-files-found: warn
         retention-days: 2
@@ -147,36 +204,27 @@ jobs:
       uses: actions/upload-artifact@v7
       if: always()
       with:
-        name: frames-v56-parallel-r4-prep-evidence
+        name: frames-v56-parallel-r5-prep-evidence
         path: ${{ github.workspace }}/prep-evidence
         if-no-files-found: error
         retention-days: 14
     - name: Preparation verdict
       if: always()
       shell: bash
-      run: 'set -euo pipefail
-
-        cat > "$GITHUB_WORKSPACE/prep-evidence/PREP-STEP-OUTCOMES.txt" <<EOF
-
-        checkout=${{ steps.checkout.outcome }}
-
-        install=${{ steps.install.outcome }}
-
-        locate=${{ steps.locate.outcome }}
-
-        impact=${{ steps.impact.outcome }}
-
-        build=${{ steps.build.outcome }}
-
-        seal=${{ steps.seal.outcome }}
-
-        EOF
-
+      run: |
+        set -euo pipefail
         bad=0
-
-        for v in "${{ steps.checkout.outcome }}" "${{ steps.install.outcome }}" "${{ steps.locate.outcome }}" "${{ steps.impact.outcome }}" "${{ steps.build.outcome }}" "${{ steps.seal.outcome }}"; do [[ "$v" == success ]] || bad=1; done
-
-        exit "$bad"'
+        for v in \
+          "${{ steps.checkout.outcome }}" \
+          "${{ steps.install.outcome }}" \
+          "${{ steps.locate.outcome }}" \
+          "${{ steps.impact.outcome }}" \
+          "${{ steps.ovmf_prep.outcome }}" \
+          "${{ steps.build.outcome }}" \
+          "${{ steps.seal.outcome }}"; do
+          [[ "$v" == success ]] || bad=1
+        done
+        exit "$bad"
   certify:
     name: Certify ${{ matrix.lane }}
     needs: prepare
@@ -211,14 +259,14 @@ jobs:
       uses: actions/download-artifact@v8
       continue-on-error: true
       with:
-        name: frames-v56-parallel-r4-prepared-source
+        name: frames-v56-parallel-r5-prepared-source
         path: ${{ github.workspace }}/prepared-source
     - name: Download preparation evidence
       id: download_prep
       uses: actions/download-artifact@v8
       continue-on-error: true
       with:
-        name: frames-v56-parallel-r4-prep-evidence
+        name: frames-v56-parallel-r5-prep-evidence
         path: ${{ github.workspace }}/prep-evidence
     - name: Verify prepared source identity
       id: verify
@@ -265,7 +313,7 @@ jobs:
       uses: actions/upload-artifact@v7
       if: always()
       with:
-        name: frames-v56-parallel-r4-lane-${{ matrix.lane }}
+        name: frames-v56-parallel-r5-lane-${{ matrix.lane }}
         path: ${{ github.workspace }}/lane-evidence
         if-no-files-found: error
         retention-days: 14
@@ -304,14 +352,14 @@ jobs:
       uses: actions/download-artifact@v8
       continue-on-error: true
       with:
-        name: frames-v56-parallel-r4-prep-evidence
+        name: frames-v56-parallel-r5-prep-evidence
         path: ${{ github.workspace }}/runtime-evidence
     - name: Download all lane evidence
       id: dllanes
       uses: actions/download-artifact@v8
       continue-on-error: true
       with:
-        pattern: frames-v56-parallel-r4-lane-*
+        pattern: frames-v56-parallel-r5-lane-*
         path: ${{ github.workspace }}/runtime-evidence
         merge-multiple: true
     - name: Record artifact download outcomes
@@ -324,7 +372,7 @@ jobs:
       shell: bash
       continue-on-error: true
       run: "set -euo pipefail\nEVIDENCE=\"$GITHUB_WORKSPACE/runtime-evidence\"; mkdir -p \"$EVIDENCE\"\npython3 - \"$EVIDENCE\" \"${{ needs.prepare.result }}\" \"${{ needs.certify.result }}\" <<'PYAGG'\nimport sys,pathlib,json,hashlib\np=pathlib.Path(sys.argv[1]); prep=sys.argv[2]; cert=sys.argv[3]\nrequired=['KERNEL-BOOT-SMOKE-CERTIFY-EXIT-CODE.txt','PHYSICAL-PREVIEW-CERTIFY-EXIT-CODE.txt','HWCOMPAT-CERTIFY-EXIT-CODE.txt','SDK-TOOLING-CERTIFY-EXIT-CODE.txt','APP-PACKAGING-CERTIFY-EXIT-CODE.txt','DEVELOPER-PREVIEW-CERTIFY-EXIT-CODE.txt','APP-LOADER-CERTIFY-EXIT-CODE.txt']\nmissing=[]; nonzero={}\nfor n in required:\n f=p/n\n if not f.exists(): missing.append(n); continue\n try:v=int(f.read_text().strip())\n except:v=-999\n if v!=0: nonzero[n]=v\nrequired_json={'CHANGE-IMPACT-EVIDENCE.json':'PASS','KERNEL-BOOT-SMOKE-EVIDENCE.json':'PASS','SDK-TOOLING-EVIDENCE.json':'PASS','APP-PACKAGING-EVIDENCE.json':'PASS','DEVELOPER-PREVIEW-EVIDENCE.json':'PASS','APP-LOADER-EVIDENCE.json':'PASS'}\njson_bad={}\n\
-        for n,want in required_json.items():\n f=p/n\n if not f.exists(): json_bad[n]='MISSING'; continue\n try: got=json.loads(f.read_text()).get('status')\n except Exception: got='UNREADABLE'\n if got!=want: json_bad[n]=got\nstatus='PASS' if prep=='success' and cert=='success' and not missing and not nonzero and not json_bad else 'FAIL'\nout={'status':status,'profile':'frames-0.9.46-v56-parallel-incremental-r4','workflow_revision':'v56-parallel-r4','prepare_job_result':prep,'certify_job_result':cert,'missing':missing,'nonzero':nonzero,'json_status_issues':json_bad,'candidate_source_sha256':'ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7','certified_baseline_source_sha256':'f79e43eac7d2047bde1fb20cb7ade9f1ce09bbabffa9acc95d62acf9ca574199','certified_baseline_evidence_sha256':'054590dd2a76a216f8b0639b8cb419c2ca3bf06d45ae64cda965adf8209065a5'}\n(p/'PARALLEL-INCREMENTAL-CERTIFICATION.json').write_text(json.dumps(out,indent=2)+'\\n')\nfiles=[hashlib.sha256(f.read_bytes()).hexdigest()+'\
+        for n,want in required_json.items():\n f=p/n\n if not f.exists(): json_bad[n]='MISSING'; continue\n try: got=json.loads(f.read_text()).get('status')\n except Exception: got='UNREADABLE'\n if got!=want: json_bad[n]=got\nstatus='PASS' if prep=='success' and cert=='success' and not missing and not nonzero and not json_bad else 'FAIL'\nout={'status':status,'profile':'frames-0.9.46-v56-parallel-incremental-r4','workflow_revision':'v56-parallel-r5','prepare_job_result':prep,'certify_job_result':cert,'missing':missing,'nonzero':nonzero,'json_status_issues':json_bad,'candidate_source_sha256':'ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7','certified_baseline_source_sha256':'f79e43eac7d2047bde1fb20cb7ade9f1ce09bbabffa9acc95d62acf9ca574199','certified_baseline_evidence_sha256':'054590dd2a76a216f8b0639b8cb419c2ca3bf06d45ae64cda965adf8209065a5'}\n(p/'PARALLEL-INCREMENTAL-CERTIFICATION.json').write_text(json.dumps(out,indent=2)+'\\n')\nfiles=[hashlib.sha256(f.read_bytes()).hexdigest()+'\
         \  '+f.name for f in sorted(p.iterdir()) if f.is_file() and f.name!='EVIDENCE-FILES-SHA256.txt']\n(p/'EVIDENCE-FILES-SHA256.txt').write_text('\\n'.join(files)+'\\n'); print(json.dumps(out,indent=2))\nPYAGG"
     - name: Upload final parallel evidence
       uses: actions/upload-artifact@v7
