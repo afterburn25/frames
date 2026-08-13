@@ -1,4 +1,4 @@
-name: Frames 0.9.41 Native USB Mass-Storage Auto-Repair Certification v43
+name: Frames 0.9.41 Native USB Mass-Storage Auto-Repair Certification v44
 
 on:
   workflow_dispatch:
@@ -15,8 +15,8 @@ jobs:
     env:
       EXPECTED_FRAMES_VERSION: '0.9.41'
       EXPECTED_V42_SOURCE_SHA256: '054c8477a79720c731025bde2407e4d073a12408a458809c135fbc16b518d50c'
-      EXPECTED_WORKFLOW_REVISION: 'v43'
-      REPAIR_DIR: '${{ github.workspace }}/v43-repair'
+      EXPECTED_WORKFLOW_REVISION: 'v44'
+      REPAIR_DIR: '${{ github.workspace }}/v44-repair'
       EVIDENCE_DIR: '${{ github.workspace }}/runtime-evidence'
       REPAIRED_SOURCE_DIR: '${{ github.workspace }}/repaired-source'
 
@@ -36,18 +36,18 @@ jobs:
           command -v unzip
           mkdir -p "$EVIDENCE_DIR" "$REPAIRED_SOURCE_DIR"
 
-          # The workflow works either from an extracted v43 overlay or from the
-          # v43 kit ZIP sitting beside this workflow in the repository.
-          repair_dir="$GITHUB_WORKSPACE/v43-repair"
-          if [[ ! -f "$repair_dir/tools/apply_usb_msc_v43_repair.py" ]]; then
-            kit="$(find "$GITHUB_WORKSPACE" -maxdepth 3 -type f -name 'Frames-0.9.41-Native-USB-MSC-Auto-Repair-Kit-v43*.zip' -print 2>/dev/null | sort | head -n1 || true)"
-            [[ -n "$kit" ]] || { echo "FAIL: v43 repair tools are neither extracted nor present in a v43 kit ZIP"; exit 1; }
-            rm -rf "$RUNNER_TEMP/frames-v43-overlay"
-            mkdir -p "$RUNNER_TEMP/frames-v43-overlay"
-            unzip -q "$kit" -d "$RUNNER_TEMP/frames-v43-overlay"
-            repair_dir="$(find "$RUNNER_TEMP/frames-v43-overlay" -maxdepth 4 -type d -name v43-repair -print | head -n1 || true)"
+          # The workflow works either from an extracted v44 overlay or from the
+          # v44 kit ZIP sitting beside this workflow in the repository.
+          repair_dir="$GITHUB_WORKSPACE/v44-repair"
+          if [[ ! -f "$repair_dir/tools/apply_usb_msc_v44_repair.py" ]]; then
+            kit="$(find "$GITHUB_WORKSPACE" -maxdepth 3 -type f -name 'Frames-0.9.41-Native-USB-MSC-Auto-Repair-Kit-v44*.zip' -print 2>/dev/null | sort | head -n1 || true)"
+            [[ -n "$kit" ]] || { echo "FAIL: v44 repair tools are neither extracted nor present in a v44 kit ZIP"; exit 1; }
+            rm -rf "$RUNNER_TEMP/frames-v44-overlay"
+            mkdir -p "$RUNNER_TEMP/frames-v44-overlay"
+            unzip -q "$kit" -d "$RUNNER_TEMP/frames-v44-overlay"
+            repair_dir="$(find "$RUNNER_TEMP/frames-v44-overlay" -maxdepth 4 -type d -name v44-repair -print | head -n1 || true)"
           fi
-          [[ -f "$repair_dir/tools/apply_usb_msc_v43_repair.py" ]] || { echo "FAIL: v43 repair tool missing"; exit 1; }
+          [[ -f "$repair_dir/tools/apply_usb_msc_v44_repair.py" ]] || { echo "FAIL: v44 repair tool missing"; exit 1; }
           echo "REPAIR_DIR=$repair_dir" >> "$GITHUB_ENV"
           python3 -m py_compile "$repair_dir"/tools/*.py
 
@@ -101,16 +101,16 @@ jobs:
             exit 1
           fi
 
-          rm -rf "$RUNNER_TEMP/frames-v43-source"
-          mkdir -p "$RUNNER_TEMP/frames-v43-source"
-          unzip -q "$source_zip" -d "$RUNNER_TEMP/frames-v43-source"
+          rm -rf "$RUNNER_TEMP/frames-v44-source"
+          mkdir -p "$RUNNER_TEMP/frames-v44-source"
+          unzip -q "$source_zip" -d "$RUNNER_TEMP/frames-v44-source"
           while IFS= read -r vf; do
             candidate="${vf%/VERSION}"
             [[ -f "$candidate/tools/qemu_certify.sh" ]] || continue
             [[ "$(tr -d '\r\n' < "$vf")" == "$EXPECTED_FRAMES_VERSION" ]] || continue
             frames_dir="$candidate"
             break
-          done < <(find "$RUNNER_TEMP/frames-v43-source" -maxdepth 7 -type f -name VERSION -print | sort)
+          done < <(find "$RUNNER_TEMP/frames-v44-source" -maxdepth 7 -type f -name VERSION -print | sort)
           [[ -n "$frames_dir" ]] || { echo "FAIL: exact source ZIP lacks a valid 0.9.41 source tree" | tee "$EVIDENCE/SOURCE-DISCOVERY-FAILURE.txt"; exit 1; }
 
           nexus="$(find "$frames_dir/toolchain" -maxdepth 4 -type f -name nexus -path '*/Nexus-Language-*/nexus' -print | sort -V | tail -n1 || true)"
@@ -123,20 +123,20 @@ jobs:
           echo "Selected exact v42 source: $source_zip"
           echo "v42 source SHA-256: $(sha256sum "$source_zip" | awk '{print $1}')"
 
-      - name: Apply fail-closed v43 USB MSC control-transfer repair
+      - name: Apply fail-closed v44 USB MSC control-transfer repair
         shell: bash
         run: |
           set -euo pipefail
-          python3 "$REPAIR_DIR/tools/apply_usb_msc_v43_repair.py" \
+          python3 "$REPAIR_DIR/tools/apply_usb_msc_v44_repair.py" \
             --source "$FRAMES_DIR" \
-            --report "$EVIDENCE_DIR/V43-USB-MSC-REPAIR.json" \
-            --diff "$EVIDENCE_DIR/V43-USB-MSC-REPAIR.diff"
-          python3 "$REPAIR_DIR/tools/verify_usb_msc_v43_repair.py" \
+            --report "$EVIDENCE_DIR/V44-USB-MSC-REPAIR.json" \
+            --diff "$EVIDENCE_DIR/V44-USB-MSC-REPAIR.diff"
+          python3 "$REPAIR_DIR/tools/verify_usb_msc_v44_repair.py" \
             --source "$FRAMES_DIR" \
-            --repair-report "$EVIDENCE_DIR/V43-USB-MSC-REPAIR.json" \
-            --output "$EVIDENCE_DIR/V43-USB-MSC-REPAIR-VERIFY.json"
+            --repair-report "$EVIDENCE_DIR/V44-USB-MSC-REPAIR.json" \
+            --output "$EVIDENCE_DIR/V44-USB-MSC-REPAIR-VERIFY.json"
 
-          python3 - "$FRAMES_DIR" "$REPAIRED_SOURCE_DIR/Frames-0.9.41-Source-v43-repaired.zip" <<'PY'
+          python3 - "$FRAMES_DIR" "$REPAIRED_SOURCE_DIR/Frames-0.9.41-Source-v44-repaired.zip" <<'PY'
           import os, pathlib, stat, sys, zipfile
           root=pathlib.Path(sys.argv[1]).resolve(); out=pathlib.Path(sys.argv[2])
           out.parent.mkdir(parents=True,exist_ok=True)
@@ -150,7 +150,7 @@ jobs:
                   zi.compress_type=zipfile.ZIP_DEFLATED
                   z.writestr(zi,p.read_bytes())
           PY
-          sha256sum "$REPAIRED_SOURCE_DIR/Frames-0.9.41-Source-v43-repaired.zip" | tee "$EVIDENCE_DIR/V43-REPAIRED-SOURCE-SHA256.txt"
+          sha256sum "$REPAIRED_SOURCE_DIR/Frames-0.9.41-Source-v44-repaired.zip" | tee "$EVIDENCE_DIR/V44-REPAIRED-SOURCE-SHA256.txt"
 
       - name: Locate matching OVMF CODE and VARS pair
         shell: bash
@@ -177,7 +177,7 @@ jobs:
           export NEXUS="$NEXUS_EXE"
           chmod +x tools/*.sh tools/*.py "$NEXUS_EXE"
           {
-            echo "Frames 0.9.41 v43 repaired-source preflight"
+            echo "Frames 0.9.41 v44 repaired-source preflight"
             echo "Nexus: $($NEXUS_EXE --version)"
             echo "QEMU: $(qemu-system-x86_64 --version | head -n1)"
             echo "Clang: $(clang --version | head -n1)"
@@ -204,7 +204,7 @@ jobs:
             python3 tools/runtime_preflight.py --require-ready
           } 2>&1 | tee "$EVIDENCE_DIR/PREFLIGHT-CONSOLE.log"
 
-      - name: Execute inherited certification gates and v43 USB MSC lanes
+      - name: Execute inherited certification gates and v44 USB MSC lanes
         shell: bash
         run: |
           set -uo pipefail
@@ -269,58 +269,58 @@ jobs:
           normal="build/usb-msc-normal-serial.log"
           detach="build/usb-msc-detach-serial.log"
           if [[ -f "$normal" && -f "$detach" ]]; then
-            run_gate USB-MSC-V43-EVIDENCE python3 "$REPAIR_DIR/tools/usb_msc_v43_evidence.py" \
+            run_gate USB-MSC-V44-EVIDENCE python3 "$REPAIR_DIR/tools/usb_msc_v44_evidence.py" \
               --normal "$normal" --detach "$detach" \
-              --output "$E/V43-USB-MSC-EVIDENCE.json" --require-pass
+              --output "$E/V44-USB-MSC-EVIDENCE.json" --require-pass
           else
-            echo "USB MSC serial logs missing" | tee "$E/V43-USB-MSC-EVIDENCE-MISSING.txt"
+            echo "USB MSC serial logs missing" | tee "$E/V44-USB-MSC-EVIDENCE-MISSING.txt"
             overall=1
           fi
 
           find build -maxdepth 1 -type f \( -name '*.log' -o -name '*.json' -o -name '*.txt' \) -exec cp -f {} "$E/" \; 2>/dev/null || true
           {
-            echo "workflow_revision=v43"
+            echo "workflow_revision=v44"
             echo "source_v42_sha256=$EXPECTED_V42_SOURCE_SHA256"
             echo "qemu=$(qemu-system-x86_64 --version | head -n1)"
             echo "nexus=$($NEXUS_EXE --version)"
             echo "aggregate_exit=$overall"
-          } > "$E/V43-RUN-IDENTITY.txt"
-          echo "$overall" > "$E/V43-AGGREGATE-EXIT-CODE.txt"
+          } > "$E/V44-RUN-IDENTITY.txt"
+          echo "$overall" > "$E/V44-AGGREGATE-EXIT-CODE.txt"
           # Keep the step successful so evidence upload always occurs. Final gate below fails the job.
           exit 0
 
-      - name: Package v43 evidence metadata
+      - name: Package v44 evidence metadata
         if: always()
         shell: bash
         run: |
           set +e
           mkdir -p "$EVIDENCE_DIR"
-          cp -f "$REPAIR_DIR"/README-v43.md "$EVIDENCE_DIR/" 2>/dev/null || true
-          cp -f "$REPAIR_DIR"/REPAIR-ANALYSIS-v42-to-v43.md "$EVIDENCE_DIR/" 2>/dev/null || true
+          cp -f "$REPAIR_DIR"/README-v44.md "$EVIDENCE_DIR/" 2>/dev/null || true
+          cp -f "$REPAIR_DIR"/REPAIR-ANALYSIS-v43-to-v44.md "$EVIDENCE_DIR/" 2>/dev/null || true
           cp -f "$REPAIR_DIR"/tools/*.py "$EVIDENCE_DIR/" 2>/dev/null || true
           sha256sum "$EVIDENCE_DIR"/* 2>/dev/null | sort > "$EVIDENCE_DIR/EVIDENCE-FILES-SHA256.txt" || true
 
-      - name: Upload repaired source and v43 runtime evidence
+      - name: Upload repaired source and v44 runtime evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: frames-0.9.41-native-usb-storage-evidence-v43
+          name: frames-0.9.41-native-usb-storage-evidence-v44
           if-no-files-found: error
           retention-days: 30
           path: |
             runtime-evidence/
             repaired-source/
 
-      - name: Enforce v43 aggregate result
+      - name: Enforce v44 aggregate result
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          f="$EVIDENCE_DIR/V43-AGGREGATE-EXIT-CODE.txt"
-          [[ -f "$f" ]] || { echo "FAIL: v43 aggregate result was not produced"; exit 1; }
+          f="$EVIDENCE_DIR/V44-AGGREGATE-EXIT-CODE.txt"
+          [[ -f "$f" ]] || { echo "FAIL: v44 aggregate result was not produced"; exit 1; }
           rc="$(tr -d '\r\n ' < "$f")"
           if [[ "$rc" != "0" ]]; then
-            echo "FAIL: one or more v43 certification lanes failed. Evidence was uploaded."
+            echo "FAIL: one or more v44 certification lanes failed. Evidence was uploaded."
             exit 1
           fi
-          echo "PASS: Frames 0.9.41 v43 aggregate certification gates all passed."
+          echo "PASS: Frames 0.9.41 v44 aggregate certification gates all passed."
