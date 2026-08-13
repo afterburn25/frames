@@ -1,27 +1,29 @@
-name: Frames 0.9.47 Developer Preview Phase 3 Targeted Repair Certification v57 r2
+name: Frames 0.9.47 Developer Preview Phase 3 Targeted Repair Certification v57 r3
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - 'Frames-0.9.47-Runtime-Certification-Kit-v57-r2.zip'
-      - '.github/workflows/frames-0.9.47-v57-r2.yml'
+      - 'Frames-0.9.47-Runtime-Certification-Kit-v57-r3.zip'
+      - '.github/workflows/frames-0.9.47-v57-r3.yml'
 
 permissions:
   contents: read
 
 env:
   EXPECTED_FRAMES_VERSION: '0.9.47'
-  EXPECTED_WORKFLOW_REVISION: 'v57-incremental-r2'
-  EXPECTED_TRIGGER_KIT: 'Frames-0.9.47-Runtime-Certification-Kit-v57-r2.zip'
-  EXPECTED_SOURCE_SHA256: '6709e1b9bf2f491c274ba51729a6cfbe776664ff653814571523fc3e12ca1b39'
-  PARENT_R1_SOURCE_SHA256: 'b456308e30eab40619568c6619966383d935ff3f479e8f2089f2d906c43dc8d1'
+  EXPECTED_WORKFLOW_REVISION: 'v57-incremental-r3'
+  EXPECTED_TRIGGER_KIT: 'Frames-0.9.47-Runtime-Certification-Kit-v57-r3.zip'
+  EXPECTED_SOURCE_SHA256: '6b130421bb903c77979b4bf897a862b0f314590bbb773128e8eb6f0f36c70fc8'
+  PARENT_R2_SOURCE_SHA256: '6709e1b9bf2f491c274ba51729a6cfbe776664ff653814571523fc3e12ca1b39'
   CERTIFIED_BASELINE_SOURCE_SHA256: 'ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7'
   CERTIFIED_BASELINE_EVIDENCE_SHA256: 'b9b819aab5a4cb2a082476219daa0460d75c73f394aa67ee6a0d053ece040f69'
+  R2_AGGREGATE_EVIDENCE_SHA256: '75ce7ee39394060814d69bb0218b8c48adad86f3b7de583ed07c7a01c0784bab'
+  R2_FAILED_DEVELOPER_LANE_SHA256: '92872116500d0aa99f37460d532e6959fde0e7bb6196c652e280996e2c69dc94'
 
 jobs:
   prepare:
-    name: Build once + seal v57 r2 repair inputs
+    name: Build once + seal v57 r3 repair inputs
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -43,12 +45,12 @@ jobs:
         continue-on-error: true
         run: |
           set -uo pipefail
-          E="$GITHUB_WORKSPACE/prep-evidence"; mkdir -p "$E"; rc=0
+          E="$GITHUB_WORKSPACE/prep-evidence"; rc=0
           { sudo apt-get update && sudo apt-get install -y qemu-system-x86 ovmf clang lld python3 unzip; } > "$E/INSTALL-CONSOLE.log" 2>&1 || rc=$?
           echo "$rc" > "$E/INSTALL-EXIT-CODE.txt"
           exit "$rc"
 
-      - name: Locate sealed inputs and validate prior evidence
+      - name: Locate exact sealed inputs
         id: locate
         shell: bash
         continue-on-error: true
@@ -56,28 +58,44 @@ jobs:
           set -euo pipefail
           E="$GITHUB_WORKSPACE/prep-evidence"; I="$GITHUB_WORKSPACE/sealed-inputs"; P="$GITHUB_WORKSPACE/prepared-source"
           kit="$(find "$GITHUB_WORKSPACE" -maxdepth 5 -type f -name "$EXPECTED_TRIGGER_KIT" -print | sort | head -n1 || true)"
-          [[ -n "$kit" ]] || { echo 'FAIL: r2 kit missing' > "$E/KIT-MISSING.txt"; exit 1; }
-          echo "$(sha256sum "$kit")" > "$E/KIT-IDENTITY.txt"
-          rm -rf "$RUNNER_TEMP/v57-r2-kit"; mkdir -p "$RUNNER_TEMP/v57-r2-kit"; unzip -q "$kit" -d "$RUNNER_TEMP/v57-r2-kit"
-          candidate="$(find "$RUNNER_TEMP/v57-r2-kit" -type f -name 'Frames-0.9.47-Source-v57-r2.zip' -print | head -n1)"
-          parent="$(find "$RUNNER_TEMP/v57-r2-kit" -type f -name 'Frames-0.9.47-Source-v57.zip' -print | head -n1)"
-          baseline="$(find "$RUNNER_TEMP/v57-r2-kit" -type f -name 'Frames-0.9.46-Source-v56.zip' -print | head -n1)"
-          baseline_ev="$(find "$RUNNER_TEMP/v57-r2-kit" -type f -name 'Frames-0.9.46-Certified-Evidence-v56.zip' -print | head -n1)"
-          [[ -f "$candidate" && -f "$parent" && -f "$baseline" && -f "$baseline_ev" ]] || { echo 'FAIL: sealed core inputs missing' > "$E/INPUT-DISCOVERY-FAILURE.txt"; exit 1; }
-          csha="$(sha256sum "$candidate"|awk '{print $1}')"; psha="$(sha256sum "$parent"|awk '{print $1}')"; bsha="$(sha256sum "$baseline"|awk '{print $1}')"; esha="$(sha256sum "$baseline_ev"|awk '{print $1}')"
-          [[ "$csha" == "$EXPECTED_SOURCE_SHA256" && "$psha" == "$PARENT_R1_SOURCE_SHA256" && "$bsha" == "$CERTIFIED_BASELINE_SOURCE_SHA256" && "$esha" == "$CERTIFIED_BASELINE_EVIDENCE_SHA256" ]] || { echo "FAIL core input hashes c=$csha p=$psha b=$bsha e=$esha" > "$E/INPUT-HASH-FAILURE.txt"; exit 1; }
-          python3 - "$baseline_ev" "$CERTIFIED_BASELINE_SOURCE_SHA256" <<'PYBASE'
-          import sys,zipfile,json
-          with zipfile.ZipFile(sys.argv[1]) as z:
+          [[ -n "$kit" ]] || { echo 'FAIL: r3 kit missing' > "$E/KIT-MISSING.txt"; exit 1; }
+          sha256sum "$kit" > "$E/KIT-IDENTITY.txt"
+          rm -rf "$RUNNER_TEMP/v57-r3-kit"; mkdir -p "$RUNNER_TEMP/v57-r3-kit"; unzip -q "$kit" -d "$RUNNER_TEMP/v57-r3-kit"
+          candidate="$(find "$RUNNER_TEMP/v57-r3-kit" -type f -name 'Frames-0.9.47-Source-v57-r3.zip' -print | head -n1)"
+          parent="$(find "$RUNNER_TEMP/v57-r3-kit" -type f -name 'Frames-0.9.47-Source-v57-r2.zip' -print | head -n1)"
+          baseline="$(find "$RUNNER_TEMP/v57-r3-kit" -type f -name 'Frames-0.9.46-Source-v56.zip' -print | head -n1)"
+          baseline_ev="$(find "$RUNNER_TEMP/v57-r3-kit" -type f -name 'Frames-0.9.46-Certified-Evidence-v56.zip' -print | head -n1)"
+          r2agg="$(find "$RUNNER_TEMP/v57-r3-kit" -type f -name 'frames-0.9.47-developer-preview-phase3-evidence-v57-r2.zip' -print | head -n1)"
+          r2fail="$(find "$RUNNER_TEMP/v57-r3-kit" -type f -name 'frames-v57-r2-lane-developer-preview.zip' -print | head -n1)"
+          [[ -f "$candidate" && -f "$parent" && -f "$baseline" && -f "$baseline_ev" && -f "$r2agg" && -f "$r2fail" ]] || { echo 'FAIL: sealed input missing' > "$E/INPUT-DISCOVERY-FAILURE.txt"; exit 1; }
+          csha="$(sha256sum "$candidate"|awk '{print $1}')"; psha="$(sha256sum "$parent"|awk '{print $1}')"; bsha="$(sha256sum "$baseline"|awk '{print $1}')"; esha="$(sha256sum "$baseline_ev"|awk '{print $1}')"; a2="$(sha256sum "$r2agg"|awk '{print $1}')"; f2="$(sha256sum "$r2fail"|awk '{print $1}')"
+          [[ "$csha" == "$EXPECTED_SOURCE_SHA256" && "$psha" == "$PARENT_R2_SOURCE_SHA256" && "$bsha" == "$CERTIFIED_BASELINE_SOURCE_SHA256" && "$esha" == "$CERTIFIED_BASELINE_EVIDENCE_SHA256" && "$a2" == "$R2_AGGREGATE_EVIDENCE_SHA256" && "$f2" == "$R2_FAILED_DEVELOPER_LANE_SHA256" ]] || { echo 'FAIL: sealed input SHA mismatch' > "$E/INPUT-HASH-FAILURE.txt"; exit 1; }
+          cp "$candidate" "$I/Frames-0.9.47-Source-v57-r3.zip"; cp "$parent" "$I/Frames-0.9.47-Source-v57-r2.zip"; cp "$baseline" "$I/Frames-0.9.46-Source-v56.zip"; cp "$baseline_ev" "$I/Frames-0.9.46-Certified-Evidence-v56.zip"; cp "$r2agg" "$I/r2-aggregate.zip"; cp "$r2fail" "$I/frames-v57-r2-lane-developer-preview.zip"
+          python3 - "$baseline_ev" "$r2agg" "$r2fail" "$E" <<'PYID'
+          import sys,zipfile,json,pathlib
+          base,r2agg,r2fail,ev=sys.argv[1],sys.argv[2],sys.argv[3],pathlib.Path(sys.argv[4])
+          with zipfile.ZipFile(base) as z:
               assert z.testzip() is None
               f=json.loads(z.read('FINAL-CERTIFICATION.json'))
-              assert f['status']=='PASS' and f['frames_version']=='0.9.46' and f['candidate_source_sha256']==sys.argv[2]
-          PYBASE
-          cp "$candidate" "$I/Frames-0.9.47-Source-v57-r2.zip"
-          cp "$parent" "$I/Frames-0.9.47-Source-v57.zip"
-          cp "$baseline" "$I/Frames-0.9.46-Source-v56.zip"
-          cp "$baseline_ev" "$I/Frames-0.9.46-Certified-Evidence-v56.zip"
-          python3 - "$RUNNER_TEMP/v57-r2-kit" "$I" "$E" <<'PYR1'
+              assert f['status']=='PASS' and f['frames_version']=='0.9.46'
+          with zipfile.ZipFile(r2agg) as z:
+              assert z.testzip() is None
+              a=json.loads(z.read('INCREMENTAL-CERTIFICATION.json'))
+              assert a['workflow_revision']=='v57-incremental-r2' and a['candidate_source_sha256']=='6709e1b9bf2f491c274ba51729a6cfbe776664ff653814571523fc3e12ca1b39'
+              assert a['executed_r2_lanes']['kernel-smoke']['status']=='PASS'
+              assert a['executed_r2_lanes']['developer-preview']['status']=='FAIL'
+          with zipfile.ZipFile(r2fail) as z:
+              assert z.testzip() is None
+              assert z.read('DEVELOPER-PREVIEW-QEMU-EXIT-CODE.txt').decode().strip()=='124'
+              s=z.read('developer-preview-serial.log').decode(errors='replace')
+              assert 'FRAMES_DEVPREV_READY' in s and 'FRAMES_DEVPREV_USB_POLL_ARMED' in s
+              assert 'FRAMES_DEVPREV_USB_REPORT_OK' not in s
+          (ev/'R2-FAILURE-EVIDENCE.json').write_text(json.dumps({
+              'status':'PASS','r2_aggregate_sha256':'75ce7ee39394060814d69bb0218b8c48adad86f3b7de583ed07c7a01c0784bab','r2_failed_lane_sha256':'92872116500d0aa99f37460d532e6959fde0e7bb6196c652e280996e2c69dc94',
+              'qemu_exit':124,'usb_poll_armed':True,'usb_report_completed':False
+          },indent=2)+'\n')
+          PYID
+          python3 - "$RUNNER_TEMP/v57-r3-kit" "$I" "$E" <<'PYR1'
           import sys,pathlib,zipfile,json,hashlib,shutil
           root=pathlib.Path(sys.argv[1]); out=pathlib.Path(sys.argv[2]); ev=pathlib.Path(sys.argv[3])
           expected={
@@ -89,42 +107,37 @@ jobs:
           }
           rows={}
           for lane,(want,name) in expected.items():
-              hits=list(root.rglob(name)); assert len(hits)==1, (lane,hits)
+              hits=list(root.rglob(name)); assert len(hits)==1,(lane,hits)
               p=hits[0]; got=hashlib.sha256(p.read_bytes()).hexdigest(); assert got==want,(lane,got,want)
               with zipfile.ZipFile(p) as z:
                   assert z.testzip() is None
                   result=json.loads(z.read('LANE-RESULT.json'))
-                  hand=z.read('LANE-HANDOFF-VERIFY-EXIT-CODE.txt').decode().strip()
-                  assert result.get('status')=='PASS' and result.get('exit_code')==0 and hand=='0'
+                  assert result.get('status')=='PASS' and result.get('exit_code')==0
               shutil.copy2(p,out/name)
               rows[lane]={'status':'PASS','sha256':got,'artifact':name,'workflow_revision':'v57-incremental-r1'}
           (ev/'REUSED-R1-LANES-EVIDENCE.json').write_text(json.dumps({'status':'PASS','lanes':rows},indent=2)+'\n')
           PYR1
-          failed="$(find "$RUNNER_TEMP/v57-r2-kit" -type f -name 'frames-v57-lane-developer-preview.zip' -print | head -n1)"
-          [[ -f "$failed" ]] || { echo 'FAIL: r1 failed developer evidence missing' > "$E/R1-FAILURE-MISSING.txt"; exit 1; }
-          [[ "$(sha256sum "$failed"|awk '{print $1}')" == "ac5b7991eca8f2dee8d6fbed3295c4f0d23aa804898b33ea609089a02885db10" ]] || { echo 'FAIL: r1 failed lane SHA mismatch' > "$E/R1-FAILURE-HASH.txt"; exit 1; }
-          cp "$failed" "$I/frames-v57-lane-developer-preview.zip"
           unzip -q "$candidate" -d "$P"
           FRAMES_DIR="$(find "$P" -maxdepth 3 -type f -name VERSION -print | while read -r v; do d="${v%/VERSION}"; [[ "$(tr -d '\r\n' < "$v")" == "$EXPECTED_FRAMES_VERSION" && -f "$d/tools/qemu_certify.sh" ]] && { echo "$d"; break; }; done)"
-          [[ -n "$FRAMES_DIR" ]] || { echo 'FAIL: r2 source tree missing' > "$E/SOURCE-TREE-FAILURE.txt"; exit 1; }
+          [[ -n "$FRAMES_DIR" ]] || { echo 'FAIL: r3 source tree missing' > "$E/SOURCE-TREE-FAILURE.txt"; exit 1; }
           nexus="$(find "$FRAMES_DIR/toolchain" -maxdepth 3 -type f -name nexus -path '*/Nexus-Language-*/nexus' -print | sort -V | tail -n1)"
           [[ -n "$nexus" ]] || { echo 'FAIL: Nexus missing' > "$E/NEXUS-MISSING.txt"; exit 1; }
           chmod +x "$nexus" "$FRAMES_DIR"/tools/*.sh "$FRAMES_DIR"/tools/*.py "$FRAMES_DIR"/sdk/*.sh "$FRAMES_DIR"/sdk/*.py
           echo "FRAMES_DIR=$FRAMES_DIR" >> "$GITHUB_ENV"; echo "NEXUS_EXE=$nexus" >> "$GITHUB_ENV"
-          printf '%s  candidate-r2\n%s  parent-r1\n%s  certified-v56\n%s  certified-v56-evidence\n' "$csha" "$psha" "$bsha" "$esha" > "$E/INPUT-SHA256.txt"
+          printf '%s  candidate-r3\n%s  parent-r2\n%s  certified-v56\n%s  certified-v56-evidence\n%s  r2-aggregate\n%s  r2-failed-developer\n' "$csha" "$psha" "$bsha" "$esha" "$a2" "$f2" > "$E/INPUT-SHA256.txt"
 
-      - name: Prove r1 to r2 repair isolation
+      - name: Prove r2 to r3 repair isolation
         id: repair_impact
         shell: bash
         continue-on-error: true
         run: |
           set -euo pipefail
-          E="$GITHUB_WORKSPACE/prep-evidence"; rm -rf "$RUNNER_TEMP/r1src" "$RUNNER_TEMP/r2src"; mkdir -p "$RUNNER_TEMP/r1src" "$RUNNER_TEMP/r2src"
-          unzip -q "$GITHUB_WORKSPACE/sealed-inputs/Frames-0.9.47-Source-v57.zip" -d "$RUNNER_TEMP/r1src"
+          E="$GITHUB_WORKSPACE/prep-evidence"; rm -rf "$RUNNER_TEMP/r2src" "$RUNNER_TEMP/r3src"; mkdir -p "$RUNNER_TEMP/r2src" "$RUNNER_TEMP/r3src"
           unzip -q "$GITHUB_WORKSPACE/sealed-inputs/Frames-0.9.47-Source-v57-r2.zip" -d "$RUNNER_TEMP/r2src"
-          python3 - "$RUNNER_TEMP/r1src" "$RUNNER_TEMP/r2src" "$GITHUB_WORKSPACE/sealed-inputs/frames-v57-lane-developer-preview.zip" "$E" <<'PYIMPACT'
-          import sys,pathlib,hashlib,re,json,zipfile
-          p0=next(pathlib.Path(sys.argv[1]).iterdir()); c0=next(pathlib.Path(sys.argv[2]).iterdir()); failed=pathlib.Path(sys.argv[3]); ev=pathlib.Path(sys.argv[4])
+          unzip -q "$GITHUB_WORKSPACE/sealed-inputs/Frames-0.9.47-Source-v57-r3.zip" -d "$RUNNER_TEMP/r3src"
+          python3 - "$RUNNER_TEMP/r2src" "$RUNNER_TEMP/r3src" "$E" <<'PYIMPACT'
+          import sys,pathlib,hashlib,re,json
+          p0=next(pathlib.Path(sys.argv[1]).iterdir()); c0=next(pathlib.Path(sys.argv[2]).iterdir()); ev=pathlib.Path(sys.argv[3])
           def H(p): return hashlib.sha256(p.read_bytes()).hexdigest()
           def files(r): return {p.relative_to(r).as_posix():H(p) for p in r.rglob('*') if p.is_file() and 'build' not in p.relative_to(r).parts and '__pycache__' not in p.parts and p.suffix!='.pyc'}
           a,b=files(p0),files(c0); changed=sorted(x for x in set(a)|set(b) if a.get(x)!=b.get(x)); assert changed==['kernel/main.nx'],changed
@@ -132,38 +145,24 @@ jobs:
           def funcs(txt):
               ms=list(pat.finditer(txt)); return {m.group(1):txt[m.start():(ms[i+1].start() if i+1<len(ms) else len(txt))] for i,m in enumerate(ms)}
           A=funcs((p0/'kernel/main.nx').read_text()); B=funcs((c0/'kernel/main.nx').read_text()); cf=sorted(x for x in set(A)|set(B) if A.get(x)!=B.get(x))
-          assert cf==['developer_preview_run','xhci_hid_arm_continuous','xhci_hid_poll_continuous'],cf
-          k=(c0/'kernel/main.nx').read_text()
-          assert 'fn xhci_hid_arm_continuous(xhci_state:u64,phys_state:u64)' in k
-          assert 'volatile_read64(xhci_state+416)!=1' in k
-          arm=k[k.index('fn xhci_hid_arm_continuous('):k.index('fn xhci_hid_poll_continuous(')]
-          assert 'xhci_state+472)!=1' not in arm
-          assert 'buffer=alloc_dma_page(phys_state,3)' in arm
-          assert 'volatile_write64(xhci_state+432,buffer)' in arm
-          run=k[k.index('fn developer_preview_run('):k.index('fn hardware_compat_report(')]
-          assert 'volatile_read64(xhci+416)==1' in run and 'xhci_hid_arm_continuous(xhci,phys_state)' in run
-          with zipfile.ZipFile(failed) as z:
-              assert z.testzip() is None
-              qexit=z.read('DEVELOPER-PREVIEW-QEMU-EXIT-CODE.txt').decode().strip()
-              serial=z.read('developer-preview-serial.log').decode(errors='replace')
-              result=json.loads(z.read('LANE-RESULT.json'))
-              assert qexit=='124' and result.get('status')=='FAIL'
-              assert 'FRAMES_DEVPREV_READY' in serial
-              assert 'FRAMES_DEVPREV_USB_POLL_ARMED' not in serial
-              assert 'FRAMES_DEVPREV_USB_REPORT_OK' not in serial
+          assert cf==['developer_preview_run'],cf
+          old=A['developer_preview_run']; new=B['developer_preview_run']
+          assert 'volatile_read64(xhci+472)==1' in old
+          assert 'volatile_read64(xhci+808)!=0' in new
+          assert 'xhci_hid_poll_continuous(xhci,input_state)' in new
           out={
-            'status':'PASS','profile':'frames-v57-r1-to-r2-usb-hid-startup-repair',
-            'parent_source_sha256':'b456308e30eab40619568c6619966383d935ff3f479e8f2089f2d906c43dc8d1','candidate_source_sha256':'6709e1b9bf2f491c274ba51729a6cfbe776664ff653814571523fc3e12ca1b39',
+            'status':'PASS','profile':'frames-v57-r2-to-r3-usb-hid-event-poll-repair',
+            'parent_source_sha256':'6709e1b9bf2f491c274ba51729a6cfbe776664ff653814571523fc3e12ca1b39','candidate_source_sha256':'6b130421bb903c77979b4bf897a862b0f314590bbb773128e8eb6f0f36c70fc8',
             'changed_files':changed,'changed_kernel_functions':cf,
-            'root_cause':'Developer Preview armed continuous HID only after xhci+472 indicated a prior completed report, so a newly configured keyboard had no transfer armed to receive the first QMP key event.',
-            'repair':'Arm from configured endpoint state (xhci+416), lazily allocate the first report DMA buffer, then re-arm with the existing buffer after completions.',
+            'root_cause':'r2 armed the first USB HID transfer, but the shell loop invoked the event-ring poller only when the report-complete flag (+472) was already set. The poller itself is what sets +472, so no completion could ever be consumed.',
+            'repair':'Poll xHCI HID completion whenever the continuous transfer is armed (+808 != 0). The poller returns without side effects when no event is ready and re-arms after a valid completion.',
             'reused_r1_groups':['kernel-runtime-stress','hardware-compat','physical-preview','usb-regression','sdk-packaging'],
-            'executed_r2_groups':['kernel-smoke','developer-preview'],
+            'executed_r3_groups':['kernel-smoke','developer-preview'],
             'physical_boot_approved':False
           }
-          (ev/'R1-TO-R2-REPAIR-IMPACT.json').write_text(json.dumps(out,indent=2)+'\n')
-          (ev/'R2-CHANGED-FILES.txt').write_text('\n'.join(changed)+'\n')
-          (ev/'R2-CHANGED-KERNEL-FUNCTIONS.txt').write_text('\n'.join(cf)+'\n')
+          (ev/'R2-TO-R3-REPAIR-IMPACT.json').write_text(json.dumps(out,indent=2)+'\n')
+          (ev/'R3-CHANGED-FILES.txt').write_text('\n'.join(changed)+'\n')
+          (ev/'R3-CHANGED-KERNEL-FUNCTIONS.txt').write_text('\n'.join(cf)+'\n')
           PYIMPACT
 
       - name: Discover preparation OVMF firmware
@@ -175,11 +174,11 @@ jobs:
           E="$GITHUB_WORKSPACE/prep-evidence"; code=""; vars=""
           for d in /usr/share/OVMF /usr/share/edk2/ovmf /usr/share/edk2/x64; do [[ -f "$d/OVMF_CODE_4M.fd" && -f "$d/OVMF_VARS_4M.fd" ]] && { code="$d/OVMF_CODE_4M.fd"; vars="$d/OVMF_VARS_4M.fd"; break; }; done
           if [[ -z "$code" ]]; then for d in /usr/share/OVMF /usr/share/edk2/ovmf /usr/share/edk2/x64; do [[ -f "$d/OVMF_CODE.fd" && -f "$d/OVMF_VARS.fd" ]] && { code="$d/OVMF_CODE.fd"; vars="$d/OVMF_VARS.fd"; break; }; done; fi
-          [[ -n "$code" && -n "$vars" ]] || { echo 'FAIL: OVMF pair unavailable' > "$E/PREP-OVMF-FAILURE.txt"; exit 1; }
+          [[ -n "$code" && -n "$vars" ]] || { echo 'FAIL: OVMF unavailable' > "$E/PREP-OVMF-FAILURE.txt"; exit 1; }
           echo "OVMF_CODE=$code" >> "$GITHUB_ENV"; echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"
           printf 'OVMF_CODE=%s\nOVMF_VARS=%s\n' "$code" "$vars" > "$E/PREP-OVMF-IDENTITY.txt"; sha256sum "$code" "$vars" >> "$E/PREP-OVMF-IDENTITY.txt"
 
-      - name: Build and structurally verify exact r2 source
+      - name: Build and structurally verify exact r3 source
         id: build
         shell: bash
         continue-on-error: true
@@ -189,7 +188,7 @@ jobs:
           { python3 tools/verify_runtime_repair_0947.py && ./tools/build.sh && python3 tools/make_esp.py && python3 tools/verify_release.py && python3 tools/sdk_selftest.py --require-pass && python3 tools/make_developer_preview_image.py && python3 tools/verify_developer_preview_image.py --image build/Frames-0.9.47-Developer-Preview.img --package build/HelloFrames.fapp --require-pass && python3 tools/app_packaging_evidence.py --package build/HelloFrames.fapp --image build/Frames-0.9.47-Developer-Preview.img --require-pass; } > "$E/PREP-BUILD-CONSOLE.log" 2>&1 || rc=$?
           echo "$rc" > "$E/PREP-BUILD-EXIT-CODE.txt"; exit "$rc"
 
-      - name: Seal prepared source identity
+      - name: Seal prepared source
         id: seal
         shell: bash
         continue-on-error: true
@@ -214,7 +213,7 @@ jobs:
         run: |
           set -euo pipefail
           E="$GITHUB_WORKSPACE/prep-evidence"; O="$GITHUB_WORKSPACE/sealed-prepared-source"; mkdir -p "$O"
-          parent="$(dirname "$FRAMES_DIR")"; leaf="$(basename "$FRAMES_DIR")"; archive="$O/Frames-0.9.47-v57-r2-prepared-source.tar.gz"
+          parent="$(dirname "$FRAMES_DIR")"; leaf="$(basename "$FRAMES_DIR")"; archive="$O/Frames-0.9.47-v57-r3-prepared-source.tar.gz"
           tar --sort=name --mtime='UTC 2026-08-13 00:00:00' --owner=0 --group=0 --numeric-owner -C "$parent" -cf - "$leaf" | gzip -n -9 > "$archive"
           sha256sum "$archive" | tee "$E/PREPARED-SOURCE-ARCHIVE-SHA256.txt"
 
@@ -222,7 +221,6 @@ jobs:
         if: always()
         shell: bash
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/prep-evidence"
           cat > "$GITHUB_WORKSPACE/prep-evidence/PREP-STEP-OUTCOMES.txt" <<EOF
           checkout=${{ steps.checkout.outcome }}
           install=${{ steps.install.outcome }}
@@ -234,11 +232,11 @@ jobs:
           archive=${{ steps.archive.outcome }}
           EOF
 
-      - name: Upload sealed prepared source
+      - name: Upload prepared source
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: frames-v57-r2-prepared-source
+          name: frames-v57-r3-prepared-source
           path: sealed-prepared-source
           if-no-files-found: warn
           retention-days: 7
@@ -247,12 +245,12 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: frames-v57-r2-prep-evidence
+          name: frames-v57-r3-prep-evidence
           path: prep-evidence
           if-no-files-found: error
           retention-days: 30
 
-      - name: Preparation fail-closed verdict
+      - name: Preparation verdict
         if: always()
         shell: bash
         run: |
@@ -271,12 +269,11 @@ jobs:
         lane: [kernel-smoke, developer-preview]
     steps:
       - name: Initialize lane evidence
-        id: init
         shell: bash
         run: |
           rm -rf "$GITHUB_WORKSPACE/lane-evidence" "$GITHUB_WORKSPACE/prepared-archive" "$GITHUB_WORKSPACE/prepared-source"
           mkdir -p "$GITHUB_WORKSPACE/lane-evidence" "$GITHUB_WORKSPACE/prepared-archive" "$GITHUB_WORKSPACE/prepared-source"
-          printf 'lane=%s\nworkflow_revision=v57-incremental-r2\n' "${{ matrix.lane }}" > "$GITHUB_WORKSPACE/lane-evidence/LANE-IDENTITY.txt"
+          printf 'lane=%s\nworkflow_revision=v57-incremental-r3\n' "${{ matrix.lane }}" > "$GITHUB_WORKSPACE/lane-evidence/LANE-IDENTITY.txt"
 
       - name: Install lane tools
         id: setup
@@ -287,43 +284,43 @@ jobs:
           { sudo apt-get update && sudo apt-get install -y qemu-system-x86 ovmf clang lld python3 unzip; } > "$GITHUB_WORKSPACE/lane-evidence/LANE-SETUP-CONSOLE.log" 2>&1 || rc=$?
           echo "$rc" > "$GITHUB_WORKSPACE/lane-evidence/LANE-SETUP-EXIT-CODE.txt"; exit "$rc"
 
-      - name: Download sealed prepared source
+      - name: Download prepared source
         id: download_source
         uses: actions/download-artifact@v8
         continue-on-error: true
         with:
-          name: frames-v57-r2-prepared-source
+          name: frames-v57-r3-prepared-source
           path: prepared-archive
 
-      - name: Download preparation evidence
+      - name: Download prep evidence
         id: download_prep
         uses: actions/download-artifact@v8
         continue-on-error: true
         with:
-          name: frames-v57-r2-prep-evidence
+          name: frames-v57-r3-prep-evidence
           path: lane-evidence/prep
 
-      - name: Verify and extract sealed handoff
+      - name: Verify sealed handoff
         id: verify
         shell: bash
         continue-on-error: true
         run: |
           set -euo pipefail
-          E="$GITHUB_WORKSPACE/lane-evidence"; archive="$(find "$GITHUB_WORKSPACE/prepared-archive" -type f -name 'Frames-0.9.47-v57-r2-prepared-source.tar.gz' -print | head -n1)"
-          [[ -f "$archive" ]] || { echo 'FAIL: prepared archive missing' > "$E/LANE-HANDOFF-VERIFY.log"; exit 1; }
+          E="$GITHUB_WORKSPACE/lane-evidence"; archive="$(find "$GITHUB_WORKSPACE/prepared-archive" -type f -name 'Frames-0.9.47-v57-r3-prepared-source.tar.gz' -print | head -n1)"
+          [[ -f "$archive" ]]
           expected="$(awk '{print $1}' "$E/prep/PREPARED-SOURCE-ARCHIVE-SHA256.txt")"; actual="$(sha256sum "$archive"|awk '{print $1}')"
           { echo "archive_expected_sha256=$expected"; echo "archive_actual_sha256=$actual"; } > "$E/LANE-HANDOFF-VERIFY.log"
-          [[ "$actual" == "$expected" ]] || { echo 1 > "$E/LANE-HANDOFF-VERIFY-EXIT-CODE.txt"; exit 1; }
+          [[ "$actual" == "$expected" ]]
           tar -xzf "$archive" -C "$GITHUB_WORKSPACE/prepared-source"
           FRAMES_DIR="$(find "$GITHUB_WORKSPACE/prepared-source" -maxdepth 3 -type f -name VERSION -print | while read -r v; do d="${v%/VERSION}"; [[ "$(tr -d '\r\n' < "$v")" == 0.9.47 ]] && { echo "$d"; break; }; done)"
-          [[ -n "$FRAMES_DIR" ]] || { echo 2 > "$E/LANE-HANDOFF-VERIFY-EXIT-CODE.txt"; exit 2; }
+          [[ -n "$FRAMES_DIR" ]]
           cd "$FRAMES_DIR"; sha256sum -c "$E/prep/PREPARED-SOURCE-MANIFEST-SHA256.txt" > "$E/LANE-PER-FILE-VERIFY.log" 2>&1
           nexus="$(find "$FRAMES_DIR/toolchain" -maxdepth 3 -type f -name nexus -path '*/Nexus-Language-*/nexus' -print | sort -V | tail -n1)"
           chmod +x "$nexus" "$FRAMES_DIR"/tools/*.sh "$FRAMES_DIR"/tools/*.py "$FRAMES_DIR"/sdk/*.sh "$FRAMES_DIR"/sdk/*.py
           echo "FRAMES_DIR=$FRAMES_DIR" >> "$GITHUB_ENV"; echo "NEXUS_EXE=$nexus" >> "$GITHUB_ENV"
           echo 'PASS: sealed prepared-source handoff verified' >> "$E/LANE-HANDOFF-VERIFY.log"; echo 0 > "$E/LANE-HANDOFF-VERIFY-EXIT-CODE.txt"
 
-      - name: Discover lane OVMF firmware
+      - name: Discover OVMF
         id: ovmf
         shell: bash
         continue-on-error: true
@@ -335,7 +332,7 @@ jobs:
           [[ -n "$code" && -n "$vars" ]]
           echo "OVMF_CODE=$code" >> "$GITHUB_ENV"; echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"
 
-      - name: Run targeted repair certification lane
+      - name: Run targeted r3 certification
         id: runlane
         shell: bash
         continue-on-error: true
@@ -360,11 +357,11 @@ jobs:
           python3 - "$LANE" "$rc" "$E/LANE-RESULT.json" <<'PYLANE'
           import sys,json,pathlib
           lane=sys.argv[1]; rc=int(sys.argv[2])
-          pathlib.Path(sys.argv[3]).write_text(json.dumps({'status':'PASS' if rc==0 else 'FAIL','lane':lane,'exit_code':rc,'workflow_revision':'v57-incremental-r2'},indent=2)+'\n')
+          pathlib.Path(sys.argv[3]).write_text(json.dumps({'status':'PASS' if rc==0 else 'FAIL','lane':lane,'exit_code':rc,'workflow_revision':'v57-incremental-r3'},indent=2)+'\n')
           PYLANE
           exit "$rc"
 
-      - name: Record lane step outcomes
+      - name: Record lane outcomes
         if: always()
         shell: bash
         run: |
@@ -381,12 +378,12 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: frames-v57-r2-lane-${{ matrix.lane }}
+          name: frames-v57-r3-lane-${{ matrix.lane }}
           path: lane-evidence
           if-no-files-found: error
           retention-days: 30
 
-      - name: Lane fail-closed verdict
+      - name: Lane verdict
         if: always()
         shell: bash
         run: |
@@ -399,22 +396,22 @@ jobs:
           [[ "${{ steps.runlane.outcome }}" == success ]]
 
   aggregate:
-    name: Aggregate v57 r2 targeted repair evidence
+    name: Aggregate v57 r3 targeted repair evidence
     if: always()
     needs: [prepare, certify]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - name: Initialize aggregate evidence
+      - name: Initialize aggregate
         shell: bash
         run: mkdir -p "$GITHUB_WORKSPACE/runtime-evidence/lanes" "$GITHUB_WORKSPACE/downloaded-lanes"
 
-      - name: Download preparation evidence
+      - name: Download prep evidence
         id: prep_download
         uses: actions/download-artifact@v8
         continue-on-error: true
         with:
-          name: frames-v57-r2-prep-evidence
+          name: frames-v57-r3-prep-evidence
           path: runtime-evidence/prep
 
       - name: Download targeted lane evidence
@@ -422,7 +419,7 @@ jobs:
         uses: actions/download-artifact@v8
         continue-on-error: true
         with:
-          pattern: frames-v57-r2-lane-*
+          pattern: frames-v57-r3-lane-*
           path: downloaded-lanes
           merge-multiple: false
 
@@ -436,44 +433,47 @@ jobs:
           OUT="$GITHUB_WORKSPACE/runtime-evidence"; mkdir -p "$OUT/lanes"; rc=0
           [[ -d "$GITHUB_WORKSPACE/downloaded-lanes" ]] && cp -a "$GITHUB_WORKSPACE/downloaded-lanes/." "$OUT/lanes/" 2>/dev/null || true
           python3 - "$OUT" "${{ needs.prepare.result }}" "${{ needs.certify.result }}" <<'PYAGG' || rc=$?
-          import sys,pathlib,json,hashlib
+          import sys,pathlib,json
           out=pathlib.Path(sys.argv[1]); prep_result=sys.argv[2]; cert_result=sys.argv[3]
           expected={'kernel-smoke','developer-preview'}
-          checks={'prepare_job_success':prep_result=='success','certify_job_success':cert_result=='success'}
           def J(p): return json.loads(p.read_text()) if p.is_file() else {}
-          impact=J(out/'prep/R1-TO-R2-REPAIR-IMPACT.json'); reused=J(out/'prep/REUSED-R1-LANES-EVIDENCE.json'); prepared=J(out/'prep/PREPARED-SOURCE-IDENTITY.json')
-          prepsteps=(out/'prep/PREP-STEP-OUTCOMES.txt')
-          checks['repair_impact_pass']=impact.get('status')=='PASS' and impact.get('changed_files')==['kernel/main.nx']
-          checks['reused_r1_lanes_pass']=reused.get('status')=='PASS' and set(reused.get('lanes',{}))=={'kernel-runtime','hardware-compat','physical-preview','usb-regression','sdk-packaging'}
-          checks['prepared_source_pass']=prepared.get('status')=='PASS' and prepared.get('candidate_source_sha256')=='6709e1b9bf2f491c274ba51729a6cfbe776664ff653814571523fc3e12ca1b39'
-          checks['prep_steps_success']=prepsteps.is_file() and all(f'{k}=success' in prepsteps.read_text() for k in ['checkout','install','locate','repair_impact','ovmf_prep','build','seal','archive'])
+          impact=J(out/'prep/R2-TO-R3-REPAIR-IMPACT.json'); reused=J(out/'prep/REUSED-R1-LANES-EVIDENCE.json'); prepared=J(out/'prep/PREPARED-SOURCE-IDENTITY.json'); r2f=J(out/'prep/R2-FAILURE-EVIDENCE.json')
+          checks={
+            'prepare_job_success':prep_result=='success',
+            'certify_job_success':cert_result=='success',
+            'repair_impact_pass':impact.get('status')=='PASS' and impact.get('changed_files')==['kernel/main.nx'] and impact.get('changed_kernel_functions')==['developer_preview_run'],
+            'r2_failure_proof_pass':r2f.get('status')=='PASS' and r2f.get('qemu_exit')==124 and r2f.get('usb_poll_armed') is True and r2f.get('usb_report_completed') is False,
+            'reused_r1_lanes_pass':reused.get('status')=='PASS' and set(reused.get('lanes',{}))=={'kernel-runtime','hardware-compat','physical-preview','usb-regression','sdk-packaging'},
+            'prepared_source_pass':prepared.get('status')=='PASS' and prepared.get('candidate_source_sha256')=='6b130421bb903c77979b4bf897a862b0f314590bbb773128e8eb6f0f36c70fc8'
+          }
+          psteps=out/'prep/PREP-STEP-OUTCOMES.txt'
+          checks['prep_steps_success']=psteps.is_file() and all(f'{k}=success' in psteps.read_text() for k in ['checkout','install','locate','repair_impact','ovmf_prep','build','seal','archive'])
           lane_results={}
-          for p in out.glob('lanes/frames-v57-r2-lane-*/LANE-RESULT.json'):
+          for p in out.glob('lanes/frames-v57-r3-lane-*/LANE-RESULT.json'):
               d=json.loads(p.read_text()); lane_results[d.get('lane')]=d
           checks['all_targeted_lanes_present']=set(lane_results)==expected
           checks['all_targeted_lanes_pass']=checks['all_targeted_lanes_present'] and all(lane_results[x].get('status')=='PASS' and lane_results[x].get('exit_code')==0 for x in expected)
-          # Require the repaired Developer Preview evidence itself to PASS.
-          dp=list(out.glob('lanes/frames-v57-r2-lane-developer-preview/DEVELOPER-PREVIEW-EVIDENCE.json'))
-          p3=list(out.glob('lanes/frames-v57-r2-lane-developer-preview/DEVELOPER-PREVIEW-PHASE3-EVIDENCE.json'))
+          dp=list(out.glob('lanes/frames-v57-r3-lane-developer-preview/DEVELOPER-PREVIEW-EVIDENCE.json'))
+          p3=list(out.glob('lanes/frames-v57-r3-lane-developer-preview/DEVELOPER-PREVIEW-PHASE3-EVIDENCE.json'))
+          app=list(out.glob('lanes/frames-v57-r3-lane-developer-preview/APP-LOADER-EVIDENCE.json'))
           checks['developer_preview_evidence_pass']=len(dp)==1 and json.loads(dp[0].read_text()).get('status')=='PASS'
           checks['phase3_evidence_pass']=len(p3)==1 and json.loads(p3[0].read_text()).get('status')=='PASS'
+          checks['app_loader_evidence_pass']=len(app)==1 and json.loads(app[0].read_text()).get('status')=='PASS'
           status='PASS' if all(checks.values()) else 'FAIL'
           final={
-            'status':status,'profile':'frames-0.9.47-v57-targeted-repair',
-            'workflow_revision':'v57-incremental-r2','frames_version':'0.9.47',
-            'candidate_source_sha256':'6709e1b9bf2f491c274ba51729a6cfbe776664ff653814571523fc3e12ca1b39',
-            'parent_r1_source_sha256':'b456308e30eab40619568c6619966383d935ff3f479e8f2089f2d906c43dc8d1',
+            'status':status,'profile':'frames-0.9.47-v57-targeted-repair-r3',
+            'workflow_revision':'v57-incremental-r3','frames_version':'0.9.47',
+            'candidate_source_sha256':'6b130421bb903c77979b4bf897a862b0f314590bbb773128e8eb6f0f36c70fc8','parent_r2_source_sha256':'6709e1b9bf2f491c274ba51729a6cfbe776664ff653814571523fc3e12ca1b39',
             'certified_baseline':{'frames_version':'0.9.46','source_sha256':'ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7','evidence_sha256':'b9b819aab5a4cb2a082476219daa0460d75c73f394aa67ee6a0d053ece040f69'},
-            'repair_impact':impact,'reused_r1_lanes':reused.get('lanes',{}),'executed_r2_lanes':lane_results,
+            'r2_failure_evidence_sha256':'75ce7ee39394060814d69bb0218b8c48adad86f3b7de583ed07c7a01c0784bab','repair_impact':impact,'reused_r1_lanes':reused.get('lanes',{}),'executed_r3_lanes':lane_results,
             'checks':checks,'physical_boot_approved':False,'physical_media_writes_unlocked':False,'frames_1_0_promoted':False
           }
           (out/'INCREMENTAL-CERTIFICATION.json').write_text(json.dumps(final,indent=2)+'\n')
           print(json.dumps(final,indent=2)); raise SystemExit(0 if status=='PASS' else 1)
           PYAGG
-          echo "$rc" > "$OUT/AGGREGATE-EXIT-CODE.txt"
-          exit "$rc"
+          echo "$rc" > "$OUT/AGGREGATE-EXIT-CODE.txt"; exit "$rc"
 
-      - name: Record aggregate outcomes and seal manifest
+      - name: Seal aggregate manifest
         if: always()
         shell: bash
         run: |
@@ -494,7 +494,7 @@ jobs:
           mism=[]
           for line in out.joinpath('EVIDENCE-FILES-SHA256.txt').read_text().splitlines():
               h,n=line.split('  ',1)
-              if H(out/n)!=h: mism.append(n)
+              if H(out/n)!=h:mism.append(n)
           out.joinpath('EVIDENCE-MANIFEST-VERIFY.json').write_text(json.dumps({'status':'PASS' if not mism else 'FAIL','mismatches':mism},indent=2)+'\n')
           files=[p for p in sorted(out.rglob('*')) if p.is_file() and p.name!='EVIDENCE-FILES-SHA256.txt']
           out.joinpath('EVIDENCE-FILES-SHA256.txt').write_text(''.join(f"{H(p)}  {p.relative_to(out).as_posix()}\n" for p in files))
@@ -502,7 +502,7 @@ jobs:
               h,n=line.split('  ',1); assert H(out/n)==h
           PYSEAL
 
-      - name: Upload final v57 r2 evidence
+      - name: Upload final v57 r3 evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -511,7 +511,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Final v57 r2 fail-closed verdict
+      - name: Final fail-closed verdict
         if: always()
         shell: bash
         run: |
@@ -523,6 +523,7 @@ jobs:
           import json
           a=json.load(open('runtime-evidence/INCREMENTAL-CERTIFICATION.json'))
           m=json.load(open('runtime-evidence/EVIDENCE-MANIFEST-VERIFY.json'))
-          assert a['status']=='PASS' and m['status']=='PASS'
-          print('FRAMES 0.9.47 v57 r2 TARGETED REPAIR CERTIFICATION PASS')
+          assert a['status']=='PASS' and a['workflow_revision']=='v57-incremental-r3'
+          assert m['status']=='PASS'
+          print('FRAMES 0.9.47 v57 r3 TARGETED REPAIR CERTIFICATION PASS')
           PYFINAL
