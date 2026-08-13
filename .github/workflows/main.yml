@@ -1,157 +1,491 @@
-name: Frames 0.9.46 v56 Parallel r10 Final Evidence Seal
+name: Frames 0.9.47 Developer Preview Phase 3 Incremental Certification v57
 
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     paths:
-      - 'Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r10-Final-Evidence-Seal.zip'
-      - '.github/workflows/frames-0.9.46-v56-parallel-r10-final-evidence-seal.yml'
+      - 'Frames-0.9.47-Runtime-Certification-Kit-v57.zip'
+      - '**/Frames-0.9.47-Runtime-Certification-Kit-v57.zip'
 
 permissions:
   contents: read
 
+concurrency:
+  group: frames-0.9.47-v57-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  EXPECTED_FRAMES_VERSION: '0.9.47'
+  EXPECTED_SOURCE_SHA256: 'b456308e30eab40619568c6619966383d935ff3f479e8f2089f2d906c43dc8d1'
+  CERTIFIED_BASELINE_VERSION: '0.9.46'
+  CERTIFIED_BASELINE_SOURCE_SHA256: 'ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7'
+  CERTIFIED_BASELINE_EVIDENCE_SHA256: 'b9b819aab5a4cb2a082476219daa0460d75c73f394aa67ee6a0d053ece040f69'
+  EXPECTED_WORKFLOW_REVISION: 'v57-incremental-r1'
+  EXPECTED_TRIGGER_KIT: 'Frames-0.9.47-Runtime-Certification-Kit-v57.zip'
+
 jobs:
-  seal-final-evidence:
+  prepare:
+    name: Build once + seal v57 inputs
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 60
     steps:
       - name: Checkout repository
+        id: checkout
         uses: actions/checkout@v5
+        continue-on-error: true
 
-      - name: Initialize final evidence
+      - name: Initialize preparation evidence
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf "$GITHUB_WORKSPACE/runtime-evidence"
-          mkdir -p "$GITHUB_WORKSPACE/runtime-evidence"
-          echo "v56-parallel-r10" > "$GITHUB_WORKSPACE/runtime-evidence/R10-START.txt"
+          mkdir -p "$GITHUB_WORKSPACE/prep-evidence" "$GITHUB_WORKSPACE/sealed-inputs" "$GITHUB_WORKSPACE/prepared-source" "$GITHUB_WORKSPACE/sealed-prepared-source"
+          printf 'workflow_revision=%s\nutc=%s\n' "$EXPECTED_WORKFLOW_REVISION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$GITHUB_WORKSPACE/prep-evidence/PREP-RUN-IDENTITY.txt"
 
-      - name: Locate exact r10 kit
+      - name: Install build/runtime tools
+        id: install
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/prep-evidence"
+          { sudo apt-get update && sudo apt-get install -y qemu-system-x86 ovmf clang lld python3 unzip gzip; } 2>&1 | tee "$GITHUB_WORKSPACE/prep-evidence/INSTALL-CONSOLE.log"
+
+      - name: Locate exact kit and verify certified baseline
         id: locate
         shell: bash
         continue-on-error: true
         run: |
           set -euo pipefail
-          E="$GITHUB_WORKSPACE/runtime-evidence"
-          kit="$(find "$GITHUB_WORKSPACE" -type f -name 'Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r10-Final-Evidence-Seal.zip' -print | head -n1)"
-          if [[ -z "$kit" ]]; then
-            echo "r10 kit not found" > "$E/R10-LOCATE-FAILURE.txt"
-            exit 1
-          fi
-          rm -rf "$GITHUB_WORKSPACE/r10-kit"
-          mkdir -p "$GITHUB_WORKSPACE/r10-kit"
-          python3 - "$kit" "$GITHUB_WORKSPACE/r10-kit" <<'PY'
-          import zipfile,sys
-          with zipfile.ZipFile(sys.argv[1]) as z:
-              assert z.testzip() is None
-              z.extractall(sys.argv[2])
-          PY
-          root="$(find "$GITHUB_WORKSPACE/r10-kit" -maxdepth 2 -type d -name 'Frames-0.9.46-Runtime-Certification-Kit-v56-Parallel-r10-Final-Evidence-Seal' -print | head -n1)"
-          [[ -n "$root" ]] || { echo "r10 kit root missing" > "$E/R10-LOCATE-FAILURE.txt"; exit 2; }
-          echo "KIT_ROOT=$root" >> "$GITHUB_ENV"
-          sha256sum "$kit" > "$E/R10-KIT-SHA256.txt"
+          E="$GITHUB_WORKSPACE/prep-evidence"; I="$GITHUB_WORKSPACE/sealed-inputs"; P="$GITHUB_WORKSPACE/prepared-source"
+          kit_zip="$(find "$GITHUB_WORKSPACE" -maxdepth 5 -type f -name "$EXPECTED_TRIGGER_KIT" -print | sort | head -n1 || true)"
+          [[ -n "$kit_zip" ]] || { echo "FAIL: runtime kit missing" | tee "$E/KIT-MISSING.txt"; exit 1; }
+          rm -rf "$RUNNER_TEMP/v57-kit"; mkdir -p "$RUNNER_TEMP/v57-kit"
+          unzip -q "$kit_zip" -d "$RUNNER_TEMP/v57-kit"
+          candidate="$(find "$RUNNER_TEMP/v57-kit" -type f -name 'Frames-0.9.47-Source-v57.zip' -print | head -n1)"
+          baseline="$(find "$RUNNER_TEMP/v57-kit" -type f -name 'Frames-0.9.46-Source-v56.zip' -print | head -n1)"
+          baseline_ev="$(find "$RUNNER_TEMP/v57-kit" -type f -name 'Frames-0.9.46-Certified-Evidence-v56.zip' -print | head -n1)"
+          [[ -f "$candidate" && -f "$baseline" && -f "$baseline_ev" ]] || { echo "FAIL: sealed candidate/baseline inputs missing" | tee "$E/INPUT-DISCOVERY-FAILURE.txt"; exit 1; }
+          csha="$(sha256sum "$candidate"|awk '{print $1}')"; bsha="$(sha256sum "$baseline"|awk '{print $1}')"; esha="$(sha256sum "$baseline_ev"|awk '{print $1}')"
+          [[ "$csha" == "$EXPECTED_SOURCE_SHA256" ]] || { echo "FAIL candidate SHA=$csha" | tee "$E/INPUT-HASH-FAILURE.txt"; exit 1; }
+          [[ "$bsha" == "$CERTIFIED_BASELINE_SOURCE_SHA256" ]] || { echo "FAIL baseline SHA=$bsha" | tee "$E/INPUT-HASH-FAILURE.txt"; exit 1; }
+          [[ "$esha" == "$CERTIFIED_BASELINE_EVIDENCE_SHA256" ]] || { echo "FAIL baseline evidence SHA=$esha" | tee "$E/INPUT-HASH-FAILURE.txt"; exit 1; }
+          python3 - "$baseline_ev" "$CERTIFIED_BASELINE_SOURCE_SHA256" <<'PYBASE'
+          import sys,zipfile,json
+          z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None
+          f=json.loads(z.read('FINAL-CERTIFICATION.json'))
+          assert f['status']=='PASS' and f['frames_version']=='0.9.46' and f['candidate_source_sha256']==sys.argv[2]
+          PYBASE
+          cp "$candidate" "$I/Frames-0.9.47-Source-v57.zip"; cp "$baseline" "$I/Frames-0.9.46-Source-v56.zip"; cp "$baseline_ev" "$I/Frames-0.9.46-Certified-Evidence-v56.zip"
+          printf '%s  Frames-0.9.47-Source-v57.zip\n%s  Frames-0.9.46-Source-v56.zip\n%s  Frames-0.9.46-Certified-Evidence-v56.zip\n' "$csha" "$bsha" "$esha" > "$E/INPUT-SHA256.txt"
+          unzip -q "$candidate" -d "$P"
+          FRAMES_DIR="$(find "$P" -maxdepth 3 -type f -name VERSION -print | while read -r v; do d="${v%/VERSION}"; [[ "$(tr -d '\r\n' < "$v")" == "$EXPECTED_FRAMES_VERSION" && -f "$d/tools/qemu_certify.sh" ]] && { echo "$d"; break; }; done)"
+          [[ -n "$FRAMES_DIR" ]] || { echo "FAIL: source tree missing" | tee "$E/SOURCE-TREE-FAILURE.txt"; exit 1; }
+          nexus="$(find "$FRAMES_DIR/toolchain" -maxdepth 3 -type f -name nexus -path '*/Nexus-Language-*/nexus' -print | sort -V | tail -n1)"
+          [[ -n "$nexus" ]] || { echo "FAIL: Nexus missing" | tee "$E/NEXUS-MISSING.txt"; exit 1; }
+          chmod +x "$nexus" "$FRAMES_DIR"/tools/*.sh "$FRAMES_DIR"/tools/*.py "$FRAMES_DIR"/sdk/*.sh "$FRAMES_DIR"/sdk/*.py
+          echo "FRAMES_DIR=$FRAMES_DIR" >> "$GITHUB_ENV"; echo "NEXUS_EXE=$nexus" >> "$GITHUB_ENV"
 
-      - name: Verify and canonically seal final evidence
+      - name: Compute sealed v56 to v57 change impact
+        id: impact
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/prep-evidence"
+          rm -rf "$RUNNER_TEMP/base-src" "$RUNNER_TEMP/cand-src"; mkdir -p "$RUNNER_TEMP/base-src" "$RUNNER_TEMP/cand-src"
+          unzip -q "$GITHUB_WORKSPACE/sealed-inputs/Frames-0.9.46-Source-v56.zip" -d "$RUNNER_TEMP/base-src"
+          unzip -q "$GITHUB_WORKSPACE/sealed-inputs/Frames-0.9.47-Source-v57.zip" -d "$RUNNER_TEMP/cand-src"
+          python3 - "$RUNNER_TEMP/base-src" "$RUNNER_TEMP/cand-src" "$E" <<'PYIMPACT'
+          import sys,pathlib,hashlib,re,json
+          b0=next(pathlib.Path(sys.argv[1]).iterdir()); c0=next(pathlib.Path(sys.argv[2]).iterdir()); ev=pathlib.Path(sys.argv[3])
+          def H(p): return hashlib.sha256(p.read_bytes()).hexdigest()
+          def files(r): return {p.relative_to(r).as_posix():H(p) for p in r.rglob('*') if p.is_file() and 'build' not in p.relative_to(r).parts and '__pycache__' not in p.parts and p.suffix!='.pyc'}
+          a,b=files(b0),files(c0); changed=sorted(x for x in set(a)|set(b) if a.get(x)!=b.get(x))
+          expected=set(['README.md', 'VERSION', 'boot/uefi/frames_boot.c', 'docs/HARDWARE-MATRIX.json', 'docs/NEXT.md', 'docs/PHYSICAL-BOOT-GATE.md', 'docs/RELEASE-NOTES-0.9.47.md', 'kernel/main.nx', 'media/EFI/BOOT/BOOTX64.EFI', 'media/Frames/FramesKernel.fkrn', 'sdk/SDK-MANIFEST.json', 'sdk/fapp_tool.py', 'sdk/frames-sdk.sh', 'tools/developer_preview_evidence.py', 'tools/developer_preview_phase3_evidence.py', 'tools/qemu_developer_preview_certify.sh', 'tools/qmp_developer_preview_input.py', 'tools/verify_runtime_repair_0947.py'])
+          if set(changed)!=expected:
+              print('unexpected changed-file set',changed); raise SystemExit(1)
+          pat=re.compile(r'(?m)^fn\s+([A-Za-z0-9_]+)\(')
+          def funcs(txt):
+              ms=list(pat.finditer(txt)); return {m.group(1):txt[m.start():(ms[i+1].start() if i+1<len(ms) else len(txt))] for i,m in enumerate(ms)}
+          A=funcs((b0/'kernel/main.nx').read_text()); B=funcs((c0/'kernel/main.nx').read_text()); cf=sorted(x for x in set(A)|set(B) if A.get(x)!=B.get(x))
+          expected_fn=set(['dev_hid_ascii', 'dev_text_app', 'dev_text_filesystems', 'dev_text_help', 'dev_text_processes', 'dev_text_title', 'dev_text_version', 'developer_preview_execute', 'developer_preview_filesystem_snapshot', 'developer_preview_process_snapshot', 'developer_preview_result_pair', 'developer_preview_run', 'kernel_main', 'serial_hwcompat_diag', 'serial_marker_devprev_cmd_filesystems_ok', 'serial_marker_devprev_cmd_processes_ok', 'serial_marker_devprev_usb_poll_armed', 'serial_marker_devprev_usb_report_ok', 'xhci_configure_boot_hid', 'xhci_hid_arm_continuous', 'xhci_hid_poll_continuous', 'xhci_read_first_hid_report'])
+          if set(cf)!=expected_fn:
+              print('unexpected changed kernel functions',cf); raise SystemExit(1)
+          executed=['source_identity','change_impact','build_release','kernel_runtime_and_stress','developer_preview_phase3','hardware_compat','physical_preview','usb_boot','usb_msc','sdk_tooling','app_packaging','safety_locks']
+          inherited={
+            'smp_scale':'Scheduler/AP/interrupt/SMP implementation unchanged; kernel_main delta is limited to Developer Preview xHCI pointer handoff.',
+            'storage_runtime':'NVMe/block/storage/DMA implementation unchanged.',
+            'storage_write':'Persistent/disposable storage write implementation unchanged.',
+            'filesystem_crash_recovery':'Filesystem/FAT crash-recovery implementation unchanged.',
+            'fat_lifecycle':'FAT lifecycle implementation unchanged.',
+            'system_volume':'System-volume mutation implementation unchanged.',
+            'destructive_lifecycle':'Reboot/shutdown lifecycle implementation unchanged and remains blocked in Developer Preview.',
+            'network_display_audio_driver_security_recovery':'Unchanged platform subsystems inherited from certified 0.9.46.'}
+          out={'status':'PASS','profile':'frames-v57-change-impact','certified_baseline':{'frames_version':'0.9.46','source_sha256':'ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7','evidence_sha256':'b9b819aab5a4cb2a082476219daa0460d75c73f394aa67ee6a0d053ece040f69'},'candidate':{'frames_version':'0.9.47','source_sha256':'b456308e30eab40619568c6619966383d935ff3f479e8f2089f2d906c43dc8d1'},'changed_files':changed,'changed_kernel_functions':cf,'executed_groups':executed,'inherited_groups':inherited}
+          (ev/'CHANGED-FILES.txt').write_text('\n'.join(changed)+'\n'); (ev/'CHANGED-KERNEL-FUNCTIONS.txt').write_text('\n'.join(cf)+'\n'); (ev/'CHANGE-IMPACT-EVIDENCE.json').write_text(json.dumps(out,indent=2)+'\n'); (ev/'INHERITED-CERTIFICATION-GROUPS.json').write_text(json.dumps({'status':'READY','groups':inherited},indent=2)+'\n')
+          PYIMPACT
+
+      - name: Discover preparation OVMF firmware
+        id: ovmf_prep
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/prep-evidence"; code=""; vars=""
+          for d in /usr/share/OVMF /usr/share/edk2/ovmf /usr/share/edk2/x64; do [[ -f "$d/OVMF_CODE_4M.fd" && -f "$d/OVMF_VARS_4M.fd" ]] && { code="$d/OVMF_CODE_4M.fd"; vars="$d/OVMF_VARS_4M.fd"; break; }; done
+          if [[ -z "$code" ]]; then for d in /usr/share/OVMF /usr/share/edk2/ovmf /usr/share/edk2/x64; do [[ -f "$d/OVMF_CODE.fd" && -f "$d/OVMF_VARS.fd" ]] && { code="$d/OVMF_CODE.fd"; vars="$d/OVMF_VARS.fd"; break; }; done; fi
+          [[ -n "$code" && -n "$vars" ]] || { echo 'FAIL: OVMF pair unavailable' | tee "$E/PREP-OVMF-FAILURE.txt"; exit 1; }
+          echo "OVMF_CODE=$code" >> "$GITHUB_ENV"; echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"; printf 'OVMF_CODE=%s\nOVMF_VARS=%s\n' "$code" "$vars" > "$E/PREP-OVMF-IDENTITY.txt"; sha256sum "$code" "$vars" >> "$E/PREP-OVMF-IDENTITY.txt"
+
+      - name: Build and structurally verify exact v57 source
+        id: build
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          E="$GITHUB_WORKSPACE/prep-evidence"; cd "$FRAMES_DIR"; export NEXUS="$NEXUS_EXE"
+          rc=0
+          { python3 tools/verify_runtime_repair_0947.py && ./tools/build.sh && python3 tools/make_esp.py && python3 tools/verify_release.py && python3 tools/sdk_selftest.py --require-pass && python3 tools/make_developer_preview_image.py && python3 tools/verify_developer_preview_image.py --image "build/Frames-0.9.47-Developer-Preview.img" --package build/HelloFrames.fapp --require-pass && python3 tools/app_packaging_evidence.py --package build/HelloFrames.fapp --image "build/Frames-0.9.47-Developer-Preview.img" --require-pass; } 2>&1 | tee "$E/PREP-BUILD-CONSOLE.log" || rc=${PIPESTATUS[0]}
+          echo "$rc" > "$E/PREP-BUILD-EXIT-CODE.txt"
+          exit "$rc"
+
+      - name: Seal prepared source identity
         id: seal
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/prep-evidence"; cd "$FRAMES_DIR"
+          find . -type f ! -path './.git/*' -print0 | sort -z | xargs -0 sha256sum > "$E/PREPARED-SOURCE-MANIFEST-SHA256.txt"
+          python3 - "$FRAMES_DIR" "$E" "$EXPECTED_SOURCE_SHA256" <<'PYSEAL'
+          import sys,pathlib,json,hashlib
+          r=pathlib.Path(sys.argv[1]); e=pathlib.Path(sys.argv[2])
+          def H(p): return hashlib.sha256(p.read_bytes()).hexdigest()
+          req=['build/FramesKernel.fkrn','build/System.fex','build/BOOTX64.EFI','build/Frames-0.9.47-ESP.img','build/Frames-0.9.47-Developer-Preview.img','build/HelloFrames.fapp']
+          assert all((r/x).is_file() for x in req)
+          d={'status':'PASS','frames_version':(r/'VERSION').read_text().strip(),'candidate_source_sha256':sys.argv[3],'artifacts':{x:{'sha256':H(r/x),'bytes':(r/x).stat().st_size} for x in req},'physical_boot_approved':False}
+          assert d['frames_version']=='0.9.47'
+          (e/'PREPARED-SOURCE-IDENTITY.json').write_text(json.dumps(d,indent=2)+'\n')
+          PYSEAL
+
+      - name: Archive sealed prepared source
+        id: archive
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/prep-evidence"; O="$GITHUB_WORKSPACE/sealed-prepared-source"; mkdir -p "$O"
+          parent="$(dirname "$FRAMES_DIR")"; leaf="$(basename "$FRAMES_DIR")"; archive="$O/Frames-0.9.47-v57-prepared-source.tar.gz"
+          tar --sort=name --mtime='UTC 2026-08-13 00:00:00' --owner=0 --group=0 --numeric-owner -C "$parent" -cf - "$leaf" | gzip -n -9 > "$archive"
+          sha256sum "$archive" | tee "$E/PREPARED-SOURCE-ARCHIVE-SHA256.txt"
+
+      - name: Record preparation outcomes
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/prep-evidence"
+          cat > "$GITHUB_WORKSPACE/prep-evidence/PREP-STEP-OUTCOMES.txt" <<EOF
+          checkout=${{ steps.checkout.outcome }}
+          install=${{ steps.install.outcome }}
+          locate=${{ steps.locate.outcome }}
+          impact=${{ steps.impact.outcome }}
+          ovmf_prep=${{ steps.ovmf_prep.outcome }}
+          build=${{ steps.build.outcome }}
+          seal=${{ steps.seal.outcome }}
+          archive=${{ steps.archive.outcome }}
+          EOF
+
+      - name: Upload sealed prepared source
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frames-v57-prepared-source
+          path: sealed-prepared-source
+          if-no-files-found: warn
+          retention-days: 2
+          compression-level: 1
+
+      - name: Upload preparation evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frames-v57-prep-evidence
+          path: prep-evidence
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Preparation fail-closed verdict
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          bad=0
+          for v in "${{ steps.checkout.outcome }}" "${{ steps.install.outcome }}" "${{ steps.locate.outcome }}" "${{ steps.impact.outcome }}" "${{ steps.ovmf_prep.outcome }}" "${{ steps.build.outcome }}" "${{ steps.seal.outcome }}" "${{ steps.archive.outcome }}"; do [[ "$v" == success ]] || bad=1; done
+          exit "$bad"
+
+  certify:
+    name: Certify ${{ matrix.lane }}
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        lane: [kernel-runtime, developer-preview, hardware-compat, physical-preview, usb-regression, sdk-packaging]
+    steps:
+      - name: Initialize lane evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/lane-evidence"
+          printf 'lane=%s\nworkflow_revision=%s\n' "${{ matrix.lane }}" "$EXPECTED_WORKFLOW_REVISION" > "$GITHUB_WORKSPACE/lane-evidence/LANE-IDENTITY.txt"
+
+      - name: Install lane tools
+        id: setup
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/lane-evidence"
+          { sudo apt-get update && sudo apt-get install -y qemu-system-x86 ovmf clang lld python3 unzip gzip; } 2>&1 | tee "$GITHUB_WORKSPACE/lane-evidence/LANE-SETUP-CONSOLE.log"
+
+      - name: Download sealed prepared source
+        id: download_source
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: frames-v57-prepared-source
+          path: sealed-prepared-source
+
+      - name: Download preparation evidence
+        id: download_prep
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: frames-v57-prep-evidence
+          path: prep-evidence
+
+      - name: Verify and extract sealed handoff
+        id: verify
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          E="$GITHUB_WORKSPACE/lane-evidence"; LOG="$E/LANE-HANDOFF-VERIFY.log"; set +e
+          {
+            set -euo pipefail
+            archive="$GITHUB_WORKSPACE/sealed-prepared-source/Frames-0.9.47-v57-prepared-source.tar.gz"; expected="$GITHUB_WORKSPACE/prep-evidence/PREPARED-SOURCE-ARCHIVE-SHA256.txt"; manifest="$GITHUB_WORKSPACE/prep-evidence/PREPARED-SOURCE-MANIFEST-SHA256.txt"
+            [[ -f "$archive" && -f "$expected" && -f "$manifest" ]] || exit 31
+            esha="$(awk 'NR==1{print $1}' "$expected")"; asha="$(sha256sum "$archive"|awk '{print $1}')"; echo "archive_expected_sha256=$esha"; echo "archive_actual_sha256=$asha"; [[ "$esha" == "$asha" ]] || exit 32
+            rm -rf "$GITHUB_WORKSPACE/prepared-source"; mkdir -p "$GITHUB_WORKSPACE/prepared-source"; tar -xzf "$archive" -C "$GITHUB_WORKSPACE/prepared-source"
+            FRAMES_DIR="$(find "$GITHUB_WORKSPACE/prepared-source" -maxdepth 3 -type f -name VERSION -print | while read -r v; do d="${v%/VERSION}"; [[ "$(tr -d '\r\n' < "$v")" == '0.9.47' ]] && { echo "$d"; break; }; done)"; [[ -n "$FRAMES_DIR" ]] || exit 33
+            cd "$FRAMES_DIR"; sha256sum -c "$manifest" >/dev/null
+            nexus="$(find "$FRAMES_DIR/toolchain" -maxdepth 3 -type f -name nexus -path '*/Nexus-Language-*/nexus' -print | sort -V | tail -n1)"; [[ -n "$nexus" ]] || exit 34; chmod +x "$nexus" tools/*.sh tools/*.py sdk/*.sh sdk/*.py
+            echo "FRAMES_DIR=$FRAMES_DIR" >> "$GITHUB_ENV"; echo "NEXUS_EXE=$nexus" >> "$GITHUB_ENV"; echo 'PASS: sealed prepared-source handoff verified'
+          } 2>&1 | tee "$LOG"; rc=${PIPESTATUS[0]}; set -e; echo "$rc" > "$E/LANE-HANDOFF-VERIFY-EXIT-CODE.txt"; exit "$rc"
+
+      - name: Discover lane OVMF firmware
+        id: ovmf
+        if: ${{ matrix.lane != 'sdk-packaging' }}
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/lane-evidence"; code=""; vars=""
+          for d in /usr/share/OVMF /usr/share/edk2/ovmf /usr/share/edk2/x64; do [[ -f "$d/OVMF_CODE_4M.fd" && -f "$d/OVMF_VARS_4M.fd" ]] && { code="$d/OVMF_CODE_4M.fd"; vars="$d/OVMF_VARS_4M.fd"; break; }; done
+          if [[ -z "$code" ]]; then for d in /usr/share/OVMF /usr/share/edk2/ovmf /usr/share/edk2/x64; do [[ -f "$d/OVMF_CODE.fd" && -f "$d/OVMF_VARS.fd" ]] && { code="$d/OVMF_CODE.fd"; vars="$d/OVMF_VARS.fd"; break; }; done; fi
+          [[ -n "$code" && -n "$vars" ]] || { echo 'FAIL OVMF' > "$E/LANE-OVMF-FAILURE.txt"; exit 1; }
+          echo "OVMF_CODE=$code" >> "$GITHUB_ENV"; echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"; sha256sum "$code" "$vars" > "$E/LANE-OVMF-SHA256.txt"
+
+      - name: Run isolated v57 certification lane
+        id: runlane
+        shell: bash
+        continue-on-error: true
+        env:
+          LANE: ${{ matrix.lane }}
+          FRAMES_BOOT_TIMEOUT: '240'
+          FILESYSTEM_QEMU_WATCHDOG_TIMEOUT: '300'
+        run: |
+          set -uo pipefail
+          E="$GITHUB_WORKSPACE/lane-evidence"; cd "$FRAMES_DIR"; export NEXUS="$NEXUS_EXE"; rc=0
+          case "$LANE" in
+            kernel-runtime)
+              ./tools/qemu_certify.sh > "$E/KERNEL-RUNTIME-CONSOLE.log" 2>&1 || rc=$?
+              if [[ "$rc" -eq 0 ]]; then python3 tools/runtime_evidence.py --serial build/serial.log --require-pass > "$E/RUNTIME-EVIDENCE-CONSOLE.log" 2>&1 || rc=$?; fi
+              if [[ "$rc" -eq 0 ]]; then python3 tools/stress_evidence.py --serial build/serial.log --require-power-pass > "$E/STRESS-EVIDENCE-CONSOLE.log" 2>&1 || rc=$?; fi
+              ;;
+            developer-preview)
+              ./tools/qemu_developer_preview_certify.sh > "$E/DEVELOPER-PREVIEW-CONSOLE.log" 2>&1 || rc=$?
+              ;;
+            hardware-compat)
+              ./tools/qemu_hardware_compat_matrix_certify.sh > "$E/HARDWARE-COMPAT-CONSOLE.log" 2>&1 || rc=$?
+              ;;
+            physical-preview)
+              ./tools/qemu_physical_preview_matrix_certify.sh > "$E/PHYSICAL-PREVIEW-CONSOLE.log" 2>&1 || rc=$?
+              ;;
+            usb-regression)
+              ./tools/qemu_usb_boot_matrix_certify.sh > "$E/USB-BOOT-CONSOLE.log" 2>&1 || rc=$?
+              if [[ "$rc" -eq 0 ]]; then ./tools/qemu_usb_msc_matrix_certify.sh > "$E/USB-MSC-CONSOLE.log" 2>&1 || rc=$?; fi
+              ;;
+            sdk-packaging)
+              python3 tools/sdk_selftest.py --require-pass > "$E/SDK-SELFTEST-CONSOLE.log" 2>&1 || rc=$?
+              if [[ "$rc" -eq 0 ]]; then python3 tools/make_developer_preview_image.py > "$E/SDK-IMAGE-CONSOLE.log" 2>&1 || rc=$?; fi
+              if [[ "$rc" -eq 0 ]]; then python3 tools/app_packaging_evidence.py --package build/HelloFrames.fapp --image build/Frames-0.9.47-Developer-Preview.img --require-pass > "$E/APP-PACKAGING-CONSOLE.log" 2>&1 || rc=$?; fi
+              ;;
+            *) rc=90;;
+          esac
+          echo "$rc" > "$E/LANE-CERTIFY-EXIT-CODE.txt"
+          find build -maxdepth 1 -type f \( -name '*.json' -o -name '*EXIT-CODE.txt' -o -name '*.log' \) -print0 2>/dev/null | while IFS= read -r -d '' f; do cp "$f" "$E/$(basename "$f")" || true; done
+          python3 - "$LANE" "$rc" "$E/LANE-RESULT.json" <<'PYLANE'
+          import sys,json,pathlib
+          lane=sys.argv[1]; rc=int(sys.argv[2]); pathlib.Path(sys.argv[3]).write_text(json.dumps({'status':'PASS' if rc==0 else 'FAIL','lane':lane,'exit_code':rc,'workflow_revision':'v57-incremental-r1'},indent=2)+'\n')
+          PYLANE
+          exit "$rc"
+
+      - name: Record lane step outcomes
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/lane-evidence"
+          cat > "$GITHUB_WORKSPACE/lane-evidence/LANE-STEP-OUTCOMES.txt" <<EOF
+          setup=${{ steps.setup.outcome }}
+          download_source=${{ steps.download_source.outcome }}
+          download_prep=${{ steps.download_prep.outcome }}
+          verify=${{ steps.verify.outcome }}
+          ovmf=${{ steps.ovmf.outcome }}
+          runlane=${{ steps.runlane.outcome }}
+          EOF
+
+      - name: Upload lane evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frames-v57-lane-${{ matrix.lane }}
+          path: lane-evidence
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Lane fail-closed verdict
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ steps.setup.outcome }}" == success ]]
+          [[ "${{ steps.download_source.outcome }}" == success ]]
+          [[ "${{ steps.download_prep.outcome }}" == success ]]
+          [[ "${{ steps.verify.outcome }}" == success ]]
+          if [[ "${{ matrix.lane }}" != sdk-packaging ]]; then [[ "${{ steps.ovmf.outcome }}" == success ]]; fi
+          [[ "${{ steps.runlane.outcome }}" == success ]]
+
+  aggregate:
+    name: Aggregate v57 incremental evidence
+    if: always()
+    needs: [prepare, certify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Initialize aggregate evidence
+        shell: bash
+        run: mkdir -p "$GITHUB_WORKSPACE/runtime-evidence/lanes" "$GITHUB_WORKSPACE/downloaded-lanes"
+
+      - name: Download preparation evidence
+        id: prep_download
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: frames-v57-prep-evidence
+          path: runtime-evidence/prep
+
+      - name: Download all lane evidence
+        id: lane_download
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          pattern: frames-v57-lane-*
+          path: downloaded-lanes
+          merge-multiple: false
+
+      - name: Build final aggregate
+        id: aggregate
         if: always()
         shell: bash
         continue-on-error: true
         run: |
           set -uo pipefail
-          E="$GITHUB_WORKSPACE/runtime-evidence"
-          mkdir -p "$E"
-          rc=0
-          if [[ -z "${KIT_ROOT:-}" ]]; then
-            echo "KIT_ROOT unavailable" > "$E/R10-SEAL-CONSOLE.log"
-            rc=2
-          else
-            export EVIDENCE="$E"
-            python3 "$KIT_ROOT/verify-and-seal-v56-r10.py" > "$E/R10-SEAL-CONSOLE.log" 2>&1 || rc=$?
-          fi
-          echo "$rc" > "$E/R10-SEAL-EXIT-CODE.txt"
+          OUT="$GITHUB_WORKSPACE/runtime-evidence"; mkdir -p "$OUT/lanes"; rc=0
+          [[ -d "$GITHUB_WORKSPACE/downloaded-lanes" ]] && cp -a "$GITHUB_WORKSPACE/downloaded-lanes/." "$OUT/lanes/" 2>/dev/null || true
+          python3 - "$OUT" "${{ needs.prepare.result }}" "${{ needs.certify.result }}" <<'PYAGG' || rc=$?
+          import sys,pathlib,json,hashlib
+          out=pathlib.Path(sys.argv[1]); prep_result=sys.argv[2]; cert_result=sys.argv[3]
+          expected={'kernel-runtime','developer-preview','hardware-compat','physical-preview','usb-regression','sdk-packaging'}
+          checks={'prepare_job_success':prep_result=='success','certify_job_success':cert_result=='success'}
+          impact=out/'prep/CHANGE-IMPACT-EVIDENCE.json'; prepsteps=out/'prep/PREP-STEP-OUTCOMES.txt'; prepared=out/'prep/PREPARED-SOURCE-IDENTITY.json'
+          checks['impact_pass']=impact.is_file() and json.loads(impact.read_text()).get('status')=='PASS'
+          checks['prepared_source_pass']=prepared.is_file() and json.loads(prepared.read_text()).get('status')=='PASS'
+          checks['prep_steps_success']=prepsteps.is_file() and all(f'{k}=success' in prepsteps.read_text() for k in ['checkout','install','locate','impact','ovmf_prep','build','seal','archive'])
+          lane_results={}
+          for p in out.glob('lanes/frames-v57-lane-*/LANE-RESULT.json'):
+              d=json.loads(p.read_text()); lane_results[d.get('lane')]=d
+          checks['all_lanes_present']=set(lane_results)==expected
+          checks['all_lanes_pass']=checks['all_lanes_present'] and all(lane_results[x].get('status')=='PASS' and lane_results[x].get('exit_code')==0 for x in expected)
+          status='PASS' if all(checks.values()) else 'FAIL'
+          final={'status':status,'profile':'frames-0.9.47-v57-incremental','workflow_revision':'v57-incremental-r1','frames_version':'0.9.47','candidate_source_sha256':'b456308e30eab40619568c6619966383d935ff3f479e8f2089f2d906c43dc8d1','certified_baseline':{'frames_version':'0.9.46','source_sha256':'ed823f9d449e53913a018d754cfc90f5369ff2a729afe7c3eda73d404cf430a7','evidence_sha256':'b9b819aab5a4cb2a082476219daa0460d75c73f394aa67ee6a0d053ece040f69'},'checks':checks,'lanes':lane_results,'physical_boot_approved':False,'frames_1_0_promoted':False}
+          (out/'INCREMENTAL-CERTIFICATION.json').write_text(json.dumps(final,indent=2)+'\n')
+          files=[p for p in sorted(out.rglob('*')) if p.is_file() and p.name!='EVIDENCE-FILES-SHA256.txt']
+          (out/'EVIDENCE-FILES-SHA256.txt').write_text(''.join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(out).as_posix()}\n" for p in files))
+          print(json.dumps(final,indent=2)); raise SystemExit(0 if status=='PASS' else 1)
+          PYAGG
+          echo "$rc" > "$OUT/AGGREGATE-EXIT-CODE.txt"
           exit "$rc"
 
-      - name: Regenerate manifest after workflow diagnostics
+      - name: Record aggregate outcomes and reseal manifest
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          E="$GITHUB_WORKSPACE/runtime-evidence"
-          python3 - "$E" <<'PY'
+          OUT="$GITHUB_WORKSPACE/runtime-evidence"
+          cat > "$OUT/AGGREGATE-STEP-OUTCOMES.txt" <<EOF
+          prep_download=${{ steps.prep_download.outcome }}
+          lane_download=${{ steps.lane_download.outcome }}
+          aggregate=${{ steps.aggregate.outcome }}
+          EOF
+          python3 - "$OUT" <<'PYSEAL'
           from pathlib import Path
           import hashlib,sys,json
-          root=Path(sys.argv[1])
-          def sha(p):
-              h=hashlib.sha256()
-              with open(p,"rb") as f:
-                  for c in iter(lambda:f.read(1024*1024),b""): h.update(c)
-              return h.hexdigest()
-          files=[p for p in sorted(root.iterdir()) if p.is_file() and p.name!="EVIDENCE-FILES-SHA256.txt"]
-          root.joinpath("EVIDENCE-FILES-SHA256.txt").write_text("".join(f"{sha(p)}  {p.name}\n" for p in files))
+          out=Path(sys.argv[1])
+          files=[p for p in sorted(out.rglob('*')) if p.is_file() and p.name!='EVIDENCE-FILES-SHA256.txt']
+          out.joinpath('EVIDENCE-FILES-SHA256.txt').write_text(''.join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(out).as_posix()}\n" for p in files))
           mism=[]
-          for line in root.joinpath("EVIDENCE-FILES-SHA256.txt").read_text().splitlines():
-              h,n=line.split("  ",1)
-              if sha(root/n)!=h: mism.append(n)
-          root.joinpath("R10-FINAL-MANIFEST-VERIFY.json").write_text(json.dumps({
-              "status":"PASS" if not mism else "FAIL","mismatches":mism
-          },indent=2)+"\n")
-          # Manifest one final time to cover R10-FINAL-MANIFEST-VERIFY.json.
-          files=[p for p in sorted(root.iterdir()) if p.is_file() and p.name!="EVIDENCE-FILES-SHA256.txt"]
-          root.joinpath("EVIDENCE-FILES-SHA256.txt").write_text("".join(f"{sha(p)}  {p.name}\n" for p in files))
-          for line in root.joinpath("EVIDENCE-FILES-SHA256.txt").read_text().splitlines():
-              h,n=line.split("  ",1)
-              assert sha(root/n)==h
-          PY
+          for line in out.joinpath('EVIDENCE-FILES-SHA256.txt').read_text().splitlines():
+              h,n=line.split('  ',1); p=out/n
+              if hashlib.sha256(p.read_bytes()).hexdigest()!=h: mism.append(n)
+          out.joinpath('EVIDENCE-MANIFEST-VERIFY.json').write_text(json.dumps({'status':'PASS' if not mism else 'FAIL','mismatches':mism},indent=2)+'\n')
+          files=[p for p in sorted(out.rglob('*')) if p.is_file() and p.name!='EVIDENCE-FILES-SHA256.txt']
+          out.joinpath('EVIDENCE-FILES-SHA256.txt').write_text(''.join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(out).as_posix()}\n" for p in files))
+          PYSEAL
 
-      - name: Record r10 outcomes
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          cat > "$GITHUB_WORKSPACE/runtime-evidence/R10-STEP-OUTCOMES.txt" <<EOF
-          locate=${{ steps.locate.outcome }}
-          seal=${{ steps.seal.outcome }}
-          EOF
-          # Re-seal manifest after outcomes file is complete.
-          python3 - "$GITHUB_WORKSPACE/runtime-evidence" <<'PY'
-          from pathlib import Path
-          import hashlib,sys
-          root=Path(sys.argv[1])
-          def sha(p):
-              h=hashlib.sha256()
-              with open(p,"rb") as f:
-                  for c in iter(lambda:f.read(1024*1024),b""): h.update(c)
-              return h.hexdigest()
-          files=[p for p in sorted(root.iterdir()) if p.is_file() and p.name!="EVIDENCE-FILES-SHA256.txt"]
-          root.joinpath("EVIDENCE-FILES-SHA256.txt").write_text("".join(f"{sha(p)}  {p.name}\n" for p in files))
-          for line in root.joinpath("EVIDENCE-FILES-SHA256.txt").read_text().splitlines():
-              h,n=line.split("  ",1)
-              assert sha(root/n)==h
-          PY
-
-      - name: Upload final canonical evidence
+      - name: Upload final v57 evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: frames-0.9.46-fapp-native-application-loader-parallel-evidence-v56
+          name: frames-0.9.47-developer-preview-phase3-evidence-v57
           path: runtime-evidence
           if-no-files-found: error
           retention-days: 30
 
-      - name: Final fail-closed verdict
+      - name: Final v57 fail-closed verdict
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          [[ "${{ steps.locate.outcome }}" == success ]]
-          [[ "${{ steps.seal.outcome }}" == success ]]
-          [[ "$(cat runtime-evidence/R10-SEAL-EXIT-CODE.txt)" == 0 ]]
-          python3 - <<'PY'
+          [[ "${{ steps.prep_download.outcome }}" == success ]]
+          [[ "${{ steps.lane_download.outcome }}" == success ]]
+          [[ "${{ steps.aggregate.outcome }}" == success ]]
+          python3 - <<'PYFINAL'
           import json
-          final=json.load(open("runtime-evidence/FINAL-CERTIFICATION.json"))
-          manifest=json.load(open("runtime-evidence/R10-FINAL-MANIFEST-VERIFY.json"))
-          assert final["status"]=="PASS"
-          assert final["workflow_revision"]=="v56-parallel-r10"
-          assert manifest["status"]=="PASS"
-          print("FRAMES 0.9.46 v56 PARALLEL r10 FINAL EVIDENCE SEAL PASS")
-          PY
+          a=json.load(open('runtime-evidence/INCREMENTAL-CERTIFICATION.json')); m=json.load(open('runtime-evidence/EVIDENCE-MANIFEST-VERIFY.json'))
+          assert a['status']=='PASS' and m['status']=='PASS'
+          print('FRAMES 0.9.47 v57 DEVELOPER PREVIEW PHASE 3 INCREMENTAL CERTIFICATION PASS')
+          PYFINAL
