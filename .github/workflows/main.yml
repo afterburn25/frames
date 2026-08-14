@@ -1,9 +1,12 @@
-name: Frames 0.9.62 Integrated GUI Desktop Certification v72
+name: Frames 0.9.62 Integrated GUI Desktop Certification v72 Split Upload
 on:
   workflow_dispatch:
   push:
     paths:
-      - 'Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.zip'
+      - 'Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.part01'
+      - 'Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.part02'
+      - 'Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.part03'
+      - 'Frames-0.9.62-Integrated-GUI-Certification-Kit-v72-Split-Manifest.txt'
 permissions:
   contents: read
 jobs:
@@ -12,24 +15,36 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
-      - name: Locate certification kit
+      - name: Reassemble and locate certification kit
         id: locate
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf gui-kit runtime-evidence prepared && mkdir -p gui-kit runtime-evidence prepared
-          python3 - "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/gui-kit" <<'PY'
-          import pathlib,zipfile,json,sys
-          ws=pathlib.Path(sys.argv[1]); out=pathlib.Path(sys.argv[2]); marker='Frames-0.9.62-Integrated-GUI-Certification-Kit-v72/KIT-CONTRACT.json'; matches=[]
-          for p in ws.rglob('*.zip'):
-              try:
-                  with zipfile.ZipFile(p) as z:
-                      if marker in z.namelist():
-                          c=json.loads(z.read(marker))
-                          if c.get('workflow_revision')=='v72-integrated-gui-r1' and c.get('candidate_source_sha256')=='67a6876596c960ec06456328767d8ac1773185aa319c8d166890150b45044bab': matches.append(p)
-              except Exception: pass
-          assert len(matches)==1,matches
-          with zipfile.ZipFile(matches[0]) as z:z.extractall(out)
+          rm -rf gui-kit runtime-evidence prepared reconstructed
+          mkdir -p gui-kit runtime-evidence prepared reconstructed
+          p1="$GITHUB_WORKSPACE/Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.part01"
+          p2="$GITHUB_WORKSPACE/Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.part02"
+          p3="$GITHUB_WORKSPACE/Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.part03"
+          [[ -f "$p1" && -f "$p2" && -f "$p3" ]]
+          echo "f334b074358ff5549fffdc11b11603e62c3acc0f6a68044601de5cd82fd2a215  Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.part01" | sha256sum -c -
+          echo "0e647d23fdafc2e2376a21ad6e1690b000a71251827fb7b6df1dafa83d8853c2  Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.part02" | sha256sum -c -
+          echo "9458a128b6ce01d3063c6d1a2965100e8195c8d0f6b5e5671fc1e4733fe90737  Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.part03" | sha256sum -c -
+          cat "$p1" "$p2" "$p3" > "$GITHUB_WORKSPACE/reconstructed/Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.zip"
+          echo "f52057d6e532d2d3f83cd51847938b805ba883c0c7a1de5d344b1232b910c559  reconstructed/Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.zip" | sha256sum -c -
+          python3 - "$GITHUB_WORKSPACE/reconstructed/Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.zip" "$GITHUB_WORKSPACE/gui-kit" <<'PY'
+          import pathlib,zipfile,json,sys,hashlib
+          kit=pathlib.Path(sys.argv[1]); out=pathlib.Path(sys.argv[2])
+          expected='f52057d6e532d2d3f83cd51847938b805ba883c0c7a1de5d344b1232b910c559'
+          h=hashlib.sha256(kit.read_bytes()).hexdigest()
+          assert h==expected,(h,expected)
+          marker='Frames-0.9.62-Integrated-GUI-Certification-Kit-v72/KIT-CONTRACT.json'
+          with zipfile.ZipFile(kit) as z:
+              assert z.testzip() is None
+              assert marker in z.namelist()
+              c=json.loads(z.read(marker))
+              assert c.get('workflow_revision')=='v72-integrated-gui-r1',c
+              assert c.get('candidate_source_sha256')=='67a6876596c960ec06456328767d8ac1773185aa319c8d166890150b45044bab',c
+              z.extractall(out)
           PY
           echo "KIT_ROOT=$GITHUB_WORKSPACE/gui-kit/Frames-0.9.62-Integrated-GUI-Certification-Kit-v72" >> "$GITHUB_ENV"
       - name: Install QEMU build tools
