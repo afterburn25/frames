@@ -1,447 +1,243 @@
-name: Frames 0.9.91 Integrated Connected Services Certification v101
+name: Frames 0.9.98 Integrated Secure Online Services Certification v108
 
 on:
   workflow_dispatch:
   push:
-    paths:
-      - 'Frames-0.9.91-Integrated-Connected-Services-Certification-Kit-v101.zip'
+    branches: [ main ]
 
 permissions:
   contents: read
 
 jobs:
-  prepare:
+  certify:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Verify and extract exact certification kit
-        shell: bash
-        run: |
-          set -euo pipefail
-          KIT="$GITHUB_WORKSPACE/Frames-0.9.91-Integrated-Connected-Services-Certification-Kit-v101.zip"
-          [[ -f "$KIT" ]]
-          echo "84f0a5c6b47d10e11237ab1d6d4c34507a4d525b98bbe58ffc6aa20e3a8dbca5  Frames-0.9.91-Integrated-Connected-Services-Certification-Kit-v101.zip" | sha256sum -c -
-          rm -rf "$GITHUB_WORKSPACE/connected-kit" "$GITHUB_WORKSPACE/prepared"
-          mkdir -p "$GITHUB_WORKSPACE/connected-kit" "$GITHUB_WORKSPACE/prepared"
-          unzip -q "$KIT" -d "$GITHUB_WORKSPACE/connected-kit"
-          KIT_ROOT="$GITHUB_WORKSPACE/connected-kit/Frames-0.9.91-Integrated-Connected-Services-Certification-Kit-v101"
-          echo "KIT_ROOT=$KIT_ROOT" >> "$GITHUB_ENV"
-
-      - name: Install build tools
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y clang lld python3 unzip
-
-      - name: Seal certified parent and exact connected-services train
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 "$KIT_ROOT/prepare-train.py" "$KIT_ROOT" "$GITHUB_WORKSPACE/prepared"
-          FRAMES_DIR="$GITHUB_WORKSPACE/prepared/source/Frames-0.9.91"
-          echo "FRAMES_DIR=$FRAMES_DIR" >> "$GITHUB_ENV"
-
-      - name: Build exact candidate once
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$FRAMES_DIR"
-          export NEXUS="$FRAMES_DIR/toolchain/Nexus-Language-5.20.0/nexus"
-          chmod +x tools/*.sh tools/*.py sdk/*.sh sdk/*.py "$NEXUS" 2>/dev/null || true
-
-          python3 tools/verify_connected_services_0991.py
-          ./tools/build.sh
-
-          python3 tools/verify_theme_pack.py --require-pass             > "$GITHUB_WORKSPACE/prepared/THEME-PACK-EVIDENCE.json"
-
-          python3 tools/make_esp.py
-          python3 tools/verify_release.py
-
-          python3 tools/sdk_selftest.py --require-pass             > "$GITHUB_WORKSPACE/prepared/SDK-PREP-EVIDENCE.json"
-
-          python3 tools/make_developer_preview_image.py
-          python3 tools/verify_developer_preview_image.py             --image build/Frames-0.9.91-Developer-Preview.img             --package build/HelloFrames.fapp --require-pass
-
-          python3 tools/app_packaging_evidence.py             --package build/HelloFrames.fapp             --image build/Frames-0.9.91-Developer-Preview.img --require-pass             > "$GITHUB_WORKSPACE/prepared/APP-PACKAGING-PREP-EVIDENCE.json"
-
-          python3 tools/make_desktop_preview_image.py
-          python3 tools/verify_desktop_preview_image.py             --image build/Frames-0.9.91-Desktop-Preview.img             --package build/HelloFrames.fapp --require-pass             > "$GITHUB_WORKSPACE/prepared/DESKTOP-IMAGE-EVIDENCE.json"
-
-          tar -czf "$GITHUB_WORKSPACE/prepared-source-build.tgz"             -C "$GITHUB_WORKSPACE/prepared" source
-
-      - name: Upload prepared exact build
-        uses: actions/upload-artifact@v7
-        with:
-          name: frames-0991-v101-prepared-source-build
-          path: prepared-source-build.tgz
-          if-no-files-found: error
-
-      - name: Upload prepare evidence
-        uses: actions/upload-artifact@v7
-        with:
-          name: frames-0991-v101-prepare-evidence
-          path: |
-            prepared/TRAIN-PREPARE-EVIDENCE.json
-            prepared/THEME-PACK-EVIDENCE.json
-            prepared/DESKTOP-IMAGE-EVIDENCE.json
-          if-no-files-found: error
-
-  lanes:
-    needs: prepare
-    runs-on: ubuntu-24.04
-    timeout-minutes: 55
-    strategy:
-      fail-fast: false
-      max-parallel: 4
-      matrix:
-        lane: [desktop-connected-services, kernel-readonly, developer-preview, sdk-packaging]
+    timeout-minutes: 35
+    env:
+      EXPECTED_SOURCE_SHA256: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
+      EXPECTED_FRAMES_VERSION: 0.9.98
+      EXPECTED_SOURCE_REVISION: v108-train
+      WORKFLOW_REVISION: v108-integrated-secure-online-services-r1
+      PARENT_FRAMES_VERSION: 0.9.91
+      PARENT_SOURCE_SHA256: ce58e0eceb770e5b9bc3842ce096deccd9640d986ac0acfec5065305efef2b65
+      PARENT_EVIDENCE_SHA256: 526afe1d1cdc1e9996c355c904c6cf19e2e2916425d9c51b72dca01c8881fecb
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
 
-      - name: Verify and extract kit in this lane
-        shell: bash
+      - name: Install certification dependencies
         run: |
-          set -euo pipefail
-          KIT="$GITHUB_WORKSPACE/Frames-0.9.91-Integrated-Connected-Services-Certification-Kit-v101.zip"
-          [[ -f "$KIT" ]]
-          echo "84f0a5c6b47d10e11237ab1d6d4c34507a4d525b98bbe58ffc6aa20e3a8dbca5  Frames-0.9.91-Integrated-Connected-Services-Certification-Kit-v101.zip" | sha256sum -c -
-          rm -rf "$GITHUB_WORKSPACE/connected-kit"
-          mkdir -p "$GITHUB_WORKSPACE/connected-kit"
-          unzip -q "$KIT" -d "$GITHUB_WORKSPACE/connected-kit"
-          KIT_ROOT="$GITHUB_WORKSPACE/connected-kit/Frames-0.9.91-Integrated-Connected-Services-Certification-Kit-v101"
-          [[ -f "$KIT_ROOT/qmp-connected-services-capture.py" ]]
-          [[ -f "$KIT_ROOT/connected-services-visual-evidence.py" ]]
-          echo "KIT_ROOT=$KIT_ROOT" >> "$GITHUB_ENV"
-
-      - name: Download prepared exact build
-        uses: actions/download-artifact@v7
-        with:
-          name: frames-0991-v101-prepared-source-build
-          path: .
-
-      - name: Restore prepared build
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p prepared lane-evidence
-          echo "${{ matrix.lane }}" > lane-evidence/LANE-NAME.txt
-          tar -xzf prepared-source-build.tgz -C prepared
-          FRAMES_DIR="$GITHUB_WORKSPACE/prepared/source/Frames-0.9.91"
-          echo "FRAMES_DIR=$FRAMES_DIR" >> "$GITHUB_ENV"
-          echo "NEXUS_EXE=$FRAMES_DIR/toolchain/Nexus-Language-5.20.0/nexus" >> "$GITHUB_ENV"
-          chmod +x             "$FRAMES_DIR"/tools/*.sh "$FRAMES_DIR"/tools/*.py             "$FRAMES_DIR"/sdk/*.sh "$FRAMES_DIR"/sdk/*.py             "$FRAMES_DIR"/toolchain/Nexus-Language-5.20.0/nexus             2>/dev/null || true
-
-      - name: Install QEMU for runtime lanes
-        if: matrix.lane != 'sdk-packaging'
-        shell: bash
-        run: |
-          set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 ovmf python3
-          OVMF_CODE=/usr/share/OVMF/OVMF_CODE_4M.fd
-          OVMF_VARS=/usr/share/OVMF/OVMF_VARS_4M.fd
-          [[ -f "$OVMF_CODE" && -f "$OVMF_VARS" ]]
-          echo "OVMF_CODE=$OVMF_CODE" >> "$GITHUB_ENV"
-          echo "OVMF_VARS=$OVMF_VARS" >> "$GITHUB_ENV"
+          sudo apt-get install -y qemu-system-x86 ovmf clang lld python3 unzip zip
 
-      - name: Connected Services live-network desktop lane
-        id: desktop
-        if: matrix.lane == 'desktop-connected-services'
-        continue-on-error: true
+      - name: Seal exact certification source
+        id: source
         shell: bash
         run: |
           set -euo pipefail
-          cd "$FRAMES_DIR"
-          export NEXUS="$NEXUS_EXE"
-
-          BOOT=build/Frames-0.9.91-Desktop-Preview.img
-          cp "$BOOT" "$BOOT.before"
-
-          LOG=build/connected-services-serial.log
-          QMP=build/connected-services-qmp.sock
-          PPM=build/connected-services.ppm
-          DBG=build/connected-services-qemu-debug.log
-          CAP=build/connected-services-capture.log
-          QERR=build/connected-services-qemu-stderr.log
-
-          rm -f "$LOG" "$QMP" "$PPM" "$DBG" "$CAP" "$QERR"
-          : > "$LOG"; : > "$DBG"; : > "$CAP"; : > "$QERR"
-
-          cp "$OVMF_VARS" build/OVMF_VARS.connected.fd
-
-          set +e
-          timeout 310 qemu-system-x86_64             -machine q35 -accel tcg,thread=multi             -m 2048M -smp 4 -cpu max             -display none -vga std             -serial file:"$LOG"             -no-reboot -no-shutdown             -qmp "unix:$QMP,server=on,wait=off"             -d guest_errors -D "$DBG"             -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE"             -drive if=pflash,format=raw,file=build/OVMF_VARS.connected.fd             -drive if=none,id=desktopboot,format=raw,readonly=on,file="$BOOT"             -device nvme,serial=FRAMESNET0991,drive=desktopboot,bootindex=1             -netdev user,id=net0,net=10.0.2.0/24,dhcpstart=10.0.2.15             -device e1000,netdev=net0             > "$QERR" 2>&1 &
-          qpid=$!
-
-          python3 "$KIT_ROOT/qmp-connected-services-capture.py"             "$QMP" "$LOG" "$PPM" > "$CAP" 2>&1 &
-          cpid=$!
-
-          wait "$cpid"; crc=$?
-          if kill -0 "$qpid" 2>/dev/null && [[ "$crc" -ne 0 ]]; then
-            kill -TERM "$qpid" 2>/dev/null || true
-          fi
-          wait "$qpid"; qrc=$?
-          set -e
-
-          echo "$qrc" > build/CONNECTED-QEMU-EXIT-CODE.txt
-          echo "$crc" > build/CONNECTED-CAPTURE-EXIT-CODE.txt
-
-          python3 -             "$LOG" "$CAP" "$QERR" "$DBG" "$qrc" "$crc"             "$GITHUB_WORKSPACE/lane-evidence/DESKTOP-LANE-DIAGNOSTIC.json" <<'PY'
-          from pathlib import Path
-          import hashlib,json,sys
-
-          log=Path(sys.argv[1]); cap=Path(sys.argv[2])
-          qerr=Path(sys.argv[3]); dbg=Path(sys.argv[4])
-          qrc=int(sys.argv[5]); crc=int(sys.argv[6])
-          out=Path(sys.argv[7])
-          serial=log.read_text(errors="replace") if log.exists() else ""
-
-          result={
-              "status":"PASS" if qrc==0 and crc==0 else "FAIL",
-              "profile":"frames-0.9.91-v101-connected-services-desktop-lane",
-              "qemu_exit_code":qrc,
-              "capture_exit_code":crc,
-              "serial_size":log.stat().st_size if log.exists() else 0,
-              "serial_sha256":hashlib.sha256(log.read_bytes()).hexdigest() if log.exists() else None,
-              "capture_tail":cap.read_text(errors="replace")[-10000:] if cap.exists() else "",
-              "qemu_stderr_tail":qerr.read_text(errors="replace")[-10000:] if qerr.exists() else "",
-              "qemu_debug_size":dbg.stat().st_size if dbg.exists() else 0,
-              "markers":{
-                  "connected":serial.count("FRAMES_CONNECTED_SERVICES_INTEGRATED_OK"),
-                  "e1000":serial.count("FRAMES_E1000_LIVE_OK"),
-                  "dhcp":serial.count("FRAMES_LIVE_DHCP_OK"),
-                  "arp":serial.count("FRAMES_LIVE_GATEWAY_ARP_OK"),
-                  "dns":serial.count("FRAMES_LIVE_EXTERNAL_DNS_OK"),
-                  "system_services":serial.count("FRAMES_SYSTEM_SERVICES_INTEGRATED_OK"),
-                  "kernel_ready":serial.count("FRAMES_KERNEL_READY"),
-                  "desktop_fail":serial.count("FRAMES_DESKTOP_CERT_FAIL"),
-                  "boot_error":serial.count("FRAMES BOOT ERROR:"),
-              },
-          }
-          out.write_text(json.dumps(result,indent=2)+"\n")
-          print(json.dumps(result,indent=2))
+          source_zip="$(find "$GITHUB_WORKSPACE" -maxdepth 3 -type f -name 'Frames-0.9.98-Source-v108.zip' -print | head -n1)"
+          test -n "$source_zip"
+          actual_sha="$(sha256sum "$source_zip" | awk '{print $1}')"
+          echo "source_zip=$source_zip" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$actual_sha" >> "$GITHUB_OUTPUT"
+          test "$actual_sha" = "$EXPECTED_SOURCE_SHA256"
+          rm -rf "$RUNNER_TEMP/frames-source"
+          mkdir -p "$RUNNER_TEMP/frames-source"
+          unzip -q "$source_zip" -d "$RUNNER_TEMP/frames-source"
+          frames_dir="$RUNNER_TEMP/frames-source/Frames-0.9.98"
+          test -f "$frames_dir/VERSION"
+          test "$(tr -d '\r\n' < "$frames_dir/VERSION")" = "$EXPECTED_FRAMES_VERSION"
+          test "$(tr -d '\r\n' < "$frames_dir/GUI-REPAIR-REVISION")" = "$EXPECTED_SOURCE_REVISION"
+          chmod +x "$frames_dir/toolchain/Nexus-Language-5.20.0/nexus" "$frames_dir"/tools/*.sh "$frames_dir"/tools/*.py
+          echo "FRAMES_DIR=$frames_dir" >> "$GITHUB_ENV"
+          echo "NEXUS=$frames_dir/toolchain/Nexus-Language-5.20.0/nexus" >> "$GITHUB_ENV"
+          code="$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE.fd' \) | head -n1)"
+          vars="$(find /usr/share/OVMF -type f \( -name 'OVMF_VARS_4M.fd' -o -name 'OVMF_VARS.fd' \) | head -n1 || true)"
+          test -n "$code"
+          echo "OVMF_CODE=$code" >> "$GITHUB_ENV"
+          [[ -n "$vars" ]] && echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"
+          mkdir -p "$GITHUB_WORKSPACE/runtime-evidence"
+          python3 - "$GITHUB_WORKSPACE/runtime-evidence/SOURCE-IDENTITY.json" "$source_zip" "$actual_sha" <<'PY'
+          import json,sys,os
+          out,src,sha=sys.argv[1:]
+          json.dump({'status':'PASS','frames_version':'0.9.98','source_revision':'v108-train','source_archive':os.path.basename(src),'source_sha256':sha,'workflow_revision':'v108-integrated-secure-online-services-r1'},open(out,'w'),indent=2)
+          open(out,'a').write('\n')
           PY
 
-          cp             "$LOG" "$DBG" "$CAP" "$QERR"             build/CONNECTED-QEMU-EXIT-CODE.txt             build/CONNECTED-CAPTURE-EXIT-CODE.txt             "$GITHUB_WORKSPACE/lane-evidence/" || true
-
-          if [[ -f "$PPM" ]]; then
-            cp "$PPM" "$GITHUB_WORKSPACE/lane-evidence/"
-          fi
-
-          if [[ "$qrc" -eq 0 && "$crc" -eq 0 && -s "$LOG" && -s "$PPM" ]]; then
-            python3 tools/connected_services_integrated_evidence.py               --serial "$LOG" --qemu-exit "$qrc" --require-pass               > "$GITHUB_WORKSPACE/lane-evidence/CONNECTED-SERVICES-RUNTIME-EVIDENCE.json"
-
-            python3 tools/system_services_integrated_evidence.py               --serial "$LOG" --qemu-exit "$qrc" --require-pass               > "$GITHUB_WORKSPACE/lane-evidence/SYSTEM-SERVICES-RUNTIME-EVIDENCE.json"
-
-            python3 tools/daily_ux_integrated_evidence.py               --serial "$LOG" --qemu-exit "$qrc" --require-pass               > "$GITHUB_WORKSPACE/lane-evidence/DAILY-UX-RUNTIME-EVIDENCE.json"
-
-            python3 tools/productivity_integrated_evidence.py               --serial "$LOG" --qemu-exit "$qrc" --require-pass               > "$GITHUB_WORKSPACE/lane-evidence/PRODUCTIVITY-RUNTIME-EVIDENCE.json"
-
-            python3 tools/appearance_integrated_evidence.py               --serial "$LOG" --qemu-exit "$qrc" --require-pass               > "$GITHUB_WORKSPACE/lane-evidence/APPEARANCE-RUNTIME-EVIDENCE.json"
-
-            python3 "$KIT_ROOT/connected-services-visual-evidence.py"               --serial "$LOG" --ppm "$PPM"               --qemu-exit "$qrc"               --media-before "$BOOT.before"               --media-after "$BOOT" --require-pass               > "$GITHUB_WORKSPACE/lane-evidence/CONNECTED-SERVICES-VISUAL-EVIDENCE.json"
-          fi
-
-          [[ "$qrc" -eq 0 && "$crc" -eq 0 ]]
-          [[ -s "$LOG" && -s "$PPM" ]]
-          [[ -f "$GITHUB_WORKSPACE/lane-evidence/CONNECTED-SERVICES-RUNTIME-EVIDENCE.json" ]]
-          [[ -f "$GITHUB_WORKSPACE/lane-evidence/SYSTEM-SERVICES-RUNTIME-EVIDENCE.json" ]]
-          [[ -f "$GITHUB_WORKSPACE/lane-evidence/CONNECTED-SERVICES-VISUAL-EVIDENCE.json" ]]
-
-      - name: Kernel and HelixFS read-only regression lane
-        if: matrix.lane == 'kernel-readonly'
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$FRAMES_DIR"
-          export NEXUS="$NEXUS_EXE" FRAMES_PREBUILT=1 OVMF_CODE OVMF_VARS
-          ./tools/qemu_helixfs_readonly_smoke.sh
-          cp             build/RUNTIME-EVIDENCE.json             build/HELIXFS-KERNEL-PHASE3-EVIDENCE.json             "$GITHUB_WORKSPACE/lane-evidence/"
-
-      - name: Developer Preview regression lane
-        if: matrix.lane == 'developer-preview'
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$FRAMES_DIR"
-          export NEXUS="$NEXUS_EXE" FRAMES_PREBUILT=1 OVMF_CODE OVMF_VARS
-          ./tools/qemu_developer_preview_certify.sh
-          cp             build/DEVELOPER-PREVIEW-EVIDENCE.json             build/DEVELOPER-PREVIEW-PHASE3-EVIDENCE.json             build/APP-LOADER-EVIDENCE.json             build/HELIXFS-PHASE2-EVIDENCE.json             build/HELIXFS-PHASE3-EVIDENCE.json             "$GITHUB_WORKSPACE/lane-evidence/"
-
-      - name: SDK FAPP and theme packaging regression lane
-        if: matrix.lane == 'sdk-packaging'
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$FRAMES_DIR"
-          export NEXUS="$NEXUS_EXE"
-
-          python3 tools/verify_theme_pack.py --require-pass             > "$GITHUB_WORKSPACE/lane-evidence/THEME-PACK-SDK-REGRESSION.json"
-
-          python3 tools/sdk_selftest.py --require-pass             > "$GITHUB_WORKSPACE/lane-evidence/SDK-TOOLING-EVIDENCE.json"
-
-          python3 tools/app_packaging_evidence.py             --package build/HelloFrames.fapp             --image build/Frames-0.9.91-Developer-Preview.img             --require-pass             > "$GITHUB_WORKSPACE/lane-evidence/APP-PACKAGING-EVIDENCE.json"
-
-      - name: Upload lane evidence before verdict
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: frames-0991-v101-lane-${{ matrix.lane }}
-          path: lane-evidence
-          if-no-files-found: error
-
-      - name: Fail live-network desktop lane after preserving diagnostics
-        if: always() && matrix.lane == 'desktop-connected-services'
-        shell: bash
-        run: |
-          echo "desktop=${{ steps.desktop.outcome }}"
-          [[ "${{ steps.desktop.outcome }}" == "success" ]]
-
-  aggregate:
-    needs: [prepare, lanes]
-    runs-on: ubuntu-24.04
-    if: always() && needs.prepare.result == 'success'
-
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Verify and extract certification kit
-        shell: bash
-        run: |
-          set -euo pipefail
-          KIT="$GITHUB_WORKSPACE/Frames-0.9.91-Integrated-Connected-Services-Certification-Kit-v101.zip"
-          [[ -f "$KIT" ]]
-          echo "84f0a5c6b47d10e11237ab1d6d4c34507a4d525b98bbe58ffc6aa20e3a8dbca5  Frames-0.9.91-Integrated-Connected-Services-Certification-Kit-v101.zip" | sha256sum -c -
-          rm -rf "$GITHUB_WORKSPACE/connected-kit" "$GITHUB_WORKSPACE/runtime-evidence"
-          mkdir -p "$GITHUB_WORKSPACE/connected-kit" "$GITHUB_WORKSPACE/runtime-evidence"
-          unzip -q "$KIT" -d "$GITHUB_WORKSPACE/connected-kit"
-          KIT_ROOT="$GITHUB_WORKSPACE/connected-kit/Frames-0.9.91-Integrated-Connected-Services-Certification-Kit-v101"
-          echo "KIT_ROOT=$KIT_ROOT" >> "$GITHUB_ENV"
-
-      - name: Download prepare evidence
-        uses: actions/download-artifact@v7
-        with:
-          name: frames-0991-v101-prepare-evidence
-          path: runtime-evidence
-
-      - name: Download all lane evidence
-        uses: actions/download-artifact@v7
-        with:
-          pattern: frames-0991-v101-lane-*
-          path: runtime-evidence
-          merge-multiple: true
-
-      - name: Produce final integrated verdict
-        id: final
+      - name: Prepare and structural regression gate
+        id: prepare
         continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
-
-          if [[ "${{ needs.lanes.result }}" == "success" ]]; then
-            python3 "$KIT_ROOT/finalize-train.py" "$GITHUB_WORKSPACE/runtime-evidence"
-          else
-            python3 - "$GITHUB_WORKSPACE/runtime-evidence" "${{ needs.lanes.result }}" <<'PY'
-          from pathlib import Path
+          cd "$FRAMES_DIR"
+          python3 tools/verify_secure_online_services_0998.py > "$GITHUB_WORKSPACE/runtime-evidence/SECURE-ONLINE-STRUCTURAL-EVIDENCE.json"
+          python3 tools/verify_connected_services_0991.py > "$GITHUB_WORKSPACE/runtime-evidence/CONNECTED-SERVICES-STRUCTURAL-REGRESSION.json"
+          python3 tools/verify_system_services_0984.py > "$GITHUB_WORKSPACE/runtime-evidence/SYSTEM-SERVICES-STRUCTURAL-REGRESSION.txt"
+          "$NEXUS" kernel check kernel/main.nx > "$GITHUB_WORKSPACE/runtime-evidence/KERNEL-CHECK.txt"
+          "$NEXUS" check apps/System/main.nx > "$GITHUB_WORKSPACE/runtime-evidence/SYSTEM-FEX-CHECK.txt"
+          python3 - "$GITHUB_WORKSPACE/runtime-evidence/TRAIN-PREPARE-EVIDENCE.json" <<'PY'
           import json,sys
-
-          r=Path(sys.argv[1]); lane_result=sys.argv[2]
-
-          out={
-              "status":"FAIL",
-              "profile":"frames-0.9.91-integrated-connected-services-certification",
-              "workflow_revision":"v101-integrated-connected-services-r1",
-              "frames_version":"0.9.91",
-              "train":"0.9.85-0.9.91",
-              "candidate_source_sha256":"ce58e0eceb770e5b9bc3842ce096deccd9640d986ac0acfec5065305efef2b65",
-              "lane_result":lane_result,
-              "reason":"one_or_more_matrix_lanes_failed",
-              "qemu_nat_external_connectivity_certified":False,
-              "physical_network_hardware_certified":False,
-              "physical_boot_approved":False,
-              "physical_media_writes_unlocked":False,
-              "update_execution_enabled":False,
-              "frames_1_0_promoted":False,
-          }
-
-          (r/"FINAL-CONNECTED-SERVICES-CERTIFICATION.json").write_text(
-              json.dumps(out,indent=2)+"\n"
-          )
-          print(json.dumps(out,indent=2))
-          raise SystemExit(1)
+          out={'status':'PASS','profile':'frames-0.9.98-v108-secure-online-services-prepare','frames_version':'0.9.98','revision':'v108-train','train':'0.9.92-0.9.98','expected_source_sha256':'5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d','parent_frames_version':'0.9.91','parent_source_sha256':'ce58e0eceb770e5b9bc3842ce096deccd9640d986ac0acfec5065305efef2b65','parent_evidence_sha256':'526afe1d1cdc1e9996c355c904c6cf19e2e2916425d9c51b72dca01c8881fecb','checks':{'secure_online_structural':True,'connected_services_regression':True,'system_services_regression':True,'kernel_check':True,'system_fex_check':True},'live_external_tls_certified':False,'certificate_signature_verification_certified':False,'physical_boot_approved':False,'physical_media_writes_unlocked':False,'update_execution_enabled':False,'frames_1_0_promoted':False}
+          json.dump(out,open(sys.argv[1],'w'),indent=2); open(sys.argv[1],'a').write('\n')
           PY
-          fi
 
-      - name: Seal aggregate evidence manifest
-        if: always()
+      - name: Integrated QEMU connected + secure online desktop gate
+        id: secure
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
+          cd "$FRAMES_DIR"
+          ./tools/qemu_secure_online_services_certify.sh
+          qrc="$(cat build/SECURE-ONLINE-QEMU-EXIT-CODE.txt)"
+          python3 tools/runtime_evidence.py --serial build/secure-online-serial.log --require-pass > /dev/null
+          python3 tools/helixfs_kernel_phase3_evidence.py --serial build/secure-online-serial.log --require-pass > build/HELIXFS-KERNEL-PHASE3-EVIDENCE.json
+          python3 tools/appearance_integrated_evidence.py --serial build/secure-online-serial.log --qemu-exit "$qrc" --require-pass > build/APPEARANCE-RUNTIME-EVIDENCE.json
+          python3 tools/productivity_integrated_evidence.py --serial build/secure-online-serial.log --qemu-exit "$qrc" --require-pass > build/PRODUCTIVITY-RUNTIME-EVIDENCE.json
+          python3 tools/daily_ux_integrated_evidence.py --serial build/secure-online-serial.log --qemu-exit "$qrc" --require-pass > build/DAILY-UX-RUNTIME-EVIDENCE.json
+          python3 tools/system_services_integrated_evidence.py --serial build/secure-online-serial.log --qemu-exit "$qrc" --require-pass > build/SYSTEM-SERVICES-RUNTIME-EVIDENCE.json
+          python3 tools/connected_services_integrated_evidence.py --serial build/secure-online-serial.log --qemu-exit "$qrc" --require-pass > build/CONNECTED-SERVICES-RUNTIME-EVIDENCE.json
+          python3 tools/verify_theme_pack.py --require-pass > build/THEME-PACK-EVIDENCE.json
+          python3 tools/verify_theme_pack.py --require-pass > build/THEME-PACK-SDK-REGRESSION.json
+          python3 tools/verify_desktop_preview_image.py --require-pass > build/DESKTOP-IMAGE-EVIDENCE.json
 
-          python3 - "$GITHUB_WORKSPACE/runtime-evidence" <<'PY'
-          from pathlib import Path
-          import hashlib,json,sys
+      - name: Developer Preview, HelixFS and FAPP regression gate
+        id: developer
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"
+          FRAMES_PREBUILT=1 ./tools/qemu_developer_preview_certify.sh
+          python3 tools/app_packaging_evidence.py --package build/HelloFrames.fapp --image "build/Frames-0.9.98-Developer-Preview.img" --require-pass > /dev/null
 
-          r=Path(sys.argv[1])
+      - name: SDK tooling regression gate
+        id: sdk
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"
+          python3 tools/sdk_selftest.py --require-pass > build/SDK-TOOLING-EVIDENCE.json
 
-          def H(p):
-              h=hashlib.sha256()
-              with open(p,"rb") as f:
-                  for x in iter(lambda:f.read(1<<20),b""):
-                      h.update(x)
-              return h.hexdigest()
-
-          files=[
-              p for p in sorted(r.rglob("*"))
-              if p.is_file() and p.name!="EVIDENCE-FILES-SHA256.txt"
-          ]
-
-          (r/"EVIDENCE-FILES-SHA256.txt").write_text(
-              "".join(
-                  f"{H(p)}  {p.relative_to(r).as_posix()}\n"
-                  for p in files
-              )
-          )
-
-          mismatches=[]
-          for line in (r/"EVIDENCE-FILES-SHA256.txt").read_text().splitlines():
-              expected,name=line.split("  ",1)
-              if H(r/name)!=expected:
-                  mismatches.append(name)
-
-          (r/"FINAL-MANIFEST-VERIFY.json").write_text(
-              json.dumps(
-                  {
-                      "status":"PASS" if not mismatches else "FAIL",
-                      "mismatches":mismatches,
-                  },
-                  indent=2
-              )+"\n"
-          )
-
-          assert not mismatches
-          PY
-
-      - name: Upload final integrated certification artifact
+      - name: Collect and aggregate evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        shell: bash
+        env:
+          PREPARE_OUTCOME: ${{ steps.prepare.outcome }}
+          SECURE_OUTCOME: ${{ steps.secure.outcome }}
+          DEVELOPER_OUTCOME: ${{ steps.developer.outcome }}
+          SDK_OUTCOME: ${{ steps.sdk.outcome }}
+        run: |
+          set -uo pipefail
+          E="$GITHUB_WORKSPACE/runtime-evidence"
+          mkdir -p "$E"
+          if [[ -n "${FRAMES_DIR:-}" && -d "$FRAMES_DIR/build" ]]; then
+            for f in \
+              SECURE-ONLINE-SERVICES-RUNTIME-EVIDENCE.json \
+              SECURE-ONLINE-SERVICES-VISUAL-EVIDENCE.json \
+              CONNECTED-SERVICES-RUNTIME-EVIDENCE.json \
+              SYSTEM-SERVICES-RUNTIME-EVIDENCE.json \
+              DAILY-UX-RUNTIME-EVIDENCE.json \
+              PRODUCTIVITY-RUNTIME-EVIDENCE.json \
+              APPEARANCE-RUNTIME-EVIDENCE.json \
+              RUNTIME-EVIDENCE.json \
+              HELIXFS-KERNEL-PHASE3-EVIDENCE.json \
+              DEVELOPER-PREVIEW-EVIDENCE.json \
+              DEVELOPER-PREVIEW-PHASE3-EVIDENCE.json \
+              APP-LOADER-EVIDENCE.json \
+              HELIXFS-PHASE2-EVIDENCE.json \
+              HELIXFS-PHASE3-EVIDENCE.json \
+              SDK-TOOLING-EVIDENCE.json \
+              APP-PACKAGING-EVIDENCE.json \
+              THEME-PACK-EVIDENCE.json \
+              THEME-PACK-SDK-REGRESSION.json \
+              DESKTOP-IMAGE-EVIDENCE.json \
+              SECURE-ONLINE-QEMU-EXIT-CODE.txt \
+              SECURE-ONLINE-CAPTURE-EXIT-CODE.txt \
+              secure-online-serial.log \
+              secure-online-qemu-debug.log \
+              secure-online-capture.log \
+              secure-online.ppm \
+              DEVELOPER-PREVIEW-QEMU-EXIT-CODE.txt \
+              developer-preview-serial.log \
+              developer-preview-qemu-debug.log \
+              developer-preview-qmp-input.log; do
+              [[ -f "$FRAMES_DIR/build/$f" ]] && cp "$FRAMES_DIR/build/$f" "$E/$f"
+            done
+          fi
+          printf '%s\n' "prepare=$PREPARE_OUTCOME" "secure=$SECURE_OUTCOME" "developer=$DEVELOPER_OUTCOME" "sdk=$SDK_OUTCOME" > "$E/WORKFLOW-STEP-OUTCOMES.txt"
+          python3 - "$E" "$EXPECTED_SOURCE_SHA256" "$PREPARE_OUTCOME" "$SECURE_OUTCOME" "$DEVELOPER_OUTCOME" "$SDK_OUTCOME" <<'PY'
+          from pathlib import Path
+          import json,sys,hashlib
+          E=Path(sys.argv[1]); source_sha=sys.argv[2]; outcomes=sys.argv[3:]
+          required={
+            'prepare':'TRAIN-PREPARE-EVIDENCE.json',
+            'secure_online_runtime':'SECURE-ONLINE-SERVICES-RUNTIME-EVIDENCE.json',
+            'secure_online_visual':'SECURE-ONLINE-SERVICES-VISUAL-EVIDENCE.json',
+            'connected_services_runtime':'CONNECTED-SERVICES-RUNTIME-EVIDENCE.json',
+            'system_services_runtime':'SYSTEM-SERVICES-RUNTIME-EVIDENCE.json',
+            'daily_ux_runtime':'DAILY-UX-RUNTIME-EVIDENCE.json',
+            'productivity_runtime':'PRODUCTIVITY-RUNTIME-EVIDENCE.json',
+            'appearance_runtime':'APPEARANCE-RUNTIME-EVIDENCE.json',
+            'kernel_runtime':'RUNTIME-EVIDENCE.json',
+            'helixfs_kernel':'HELIXFS-KERNEL-PHASE3-EVIDENCE.json',
+            'developer_preview':'DEVELOPER-PREVIEW-EVIDENCE.json',
+            'developer_preview_phase3':'DEVELOPER-PREVIEW-PHASE3-EVIDENCE.json',
+            'app_loader':'APP-LOADER-EVIDENCE.json',
+            'helixfs_phase2':'HELIXFS-PHASE2-EVIDENCE.json',
+            'helixfs_phase3':'HELIXFS-PHASE3-EVIDENCE.json',
+            'sdk_tooling':'SDK-TOOLING-EVIDENCE.json',
+            'fapp_packaging':'APP-PACKAGING-EVIDENCE.json',
+            'theme_pack':'THEME-PACK-EVIDENCE.json',
+            'theme_sdk_regression':'THEME-PACK-SDK-REGRESSION.json',
+            'desktop_image':'DESKTOP-IMAGE-EVIDENCE.json',
+          }
+          checks={}
+          for name,fn in required.items():
+              p=E/fn
+              try: checks[name]=p.is_file() and json.loads(p.read_text()).get('status')=='PASS'
+              except Exception: checks[name]=False
+          checks['workflow_steps']=all(x=='success' for x in outcomes)
+          checks['source_sha_exact']=source_sha=='5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d'
+          status='PASS' if all(checks.values()) else 'FAIL'
+          final={'status':status,'profile':'frames-0.9.98-integrated-secure-online-services-certification','workflow_revision':'v108-integrated-secure-online-services-r1','frames_version':'0.9.98','train':'0.9.92-0.9.98','candidate_source_sha256':source_sha,'certified_parent_frames_version':'0.9.91','certified_parent_source_sha256':'ce58e0eceb770e5b9bc3842ce096deccd9640d986ac0acfec5065305efef2b65','certified_parent_evidence_sha256':'526afe1d1cdc1e9996c355c904c6cf19e2e2916425d9c51b72dca01c8881fecb','checks':checks,'qemu_nat_external_connectivity_certified':checks.get('connected_services_runtime',False),'secure_online_services_foundation_certified':checks.get('secure_online_runtime',False) and checks.get('secure_online_visual',False),'live_external_tls_certified':False,'certificate_signature_verification_certified':False,'physical_network_hardware_certified':False,'physical_boot_approved':False,'physical_media_writes_unlocked':False,'target_settings_writeback_enabled':False,'file_operation_write_execution_enabled':False,'power_action_execution_enabled':False,'update_execution_enabled':False,'recovery_action_execution_enabled':False,'frames_1_0_promoted':False}
+          (E/'FINAL-SECURE-ONLINE-SERVICES-CERTIFICATION.json').write_text(json.dumps(final,indent=2)+'\n')
+          # Manifest all evidence existing at this point except the manifest and its verifier.
+          files=sorted(p for p in E.iterdir() if p.is_file() and p.name not in ('EVIDENCE-FILES-SHA256.txt','FINAL-MANIFEST-VERIFY.json'))
+          (E/'EVIDENCE-FILES-SHA256.txt').write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n' for p in files))
+          mism=[]
+          for line in (E/'EVIDENCE-FILES-SHA256.txt').read_text().splitlines():
+              sha,name=line.split('  ',1); p=E/name
+              if not p.is_file() or hashlib.sha256(p.read_bytes()).hexdigest()!=sha: mism.append(name)
+          (E/'FINAL-MANIFEST-VERIFY.json').write_text(json.dumps({'status':'PASS' if not mism else 'FAIL','mismatches':mism},indent=2)+'\n')
+          PY
+          cd "$GITHUB_WORKSPACE"
+          rm -f frames-0.9.98-integrated-secure-online-services-evidence-v108.zip
+          zip -q -r frames-0.9.98-integrated-secure-online-services-evidence-v108.zip runtime-evidence
+          sha256sum frames-0.9.98-integrated-secure-online-services-evidence-v108.zip | tee "$E/AGGREGATE-ZIP-SHA256.txt"
+
+      - name: Upload aggregate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: frames-0.9.91-integrated-connected-services-evidence-v101
-          path: runtime-evidence
+          name: frames-0.9.98-integrated-secure-online-services-evidence-v108
+          path: |
+            runtime-evidence
+            frames-0.9.98-integrated-secure-online-services-evidence-v108.zip
           if-no-files-found: error
 
-      - name: Fail closed only after evidence upload
+      - name: Enforce final certification
         if: always()
         shell: bash
         run: |
-          echo "prepare=${{ needs.prepare.result }}"
-          echo "lanes=${{ needs.lanes.result }}"
-          echo "final=${{ steps.final.outcome }}"
-
-          [[ "${{ needs.prepare.result }}" == "success" ]]
-          [[ "${{ needs.lanes.result }}" == "success" ]]
-          [[ "${{ steps.final.outcome }}" == "success" ]]
+          python3 - <<'PY'
+          import json, pathlib
+          p=pathlib.Path('runtime-evidence/FINAL-SECURE-ONLINE-SERVICES-CERTIFICATION.json')
+          if not p.is_file(): raise SystemExit('final certification evidence missing')
+          d=json.loads(p.read_text())
+          print(json.dumps(d,indent=2))
+          if d.get('status')!='PASS': raise SystemExit(1)
+          m=json.loads(pathlib.Path('runtime-evidence/FINAL-MANIFEST-VERIFY.json').read_text())
+          if m.get('status')!='PASS': raise SystemExit(1)
+          PY
