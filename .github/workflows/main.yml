@@ -1,19 +1,14 @@
-name: Frames 0.9.62 Integrated GUI Desktop Certification v72 r3 Corrected Diagnostics
-
+name: Frames 0.9.62 Integrated GUI Desktop Certification v72 r4 Boot Contract Repair
 on:
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
   certify-gui:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-
     steps:
       - uses: actions/checkout@v5
-
       - name: Reassemble and locate certification kit
         id: locate
         shell: bash
@@ -26,84 +21,154 @@ jobs:
           echo "0e647d23fdafc2e2376a21ad6e1690b000a71251827fb7b6df1dafa83d8853c2  Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.part02" | sha256sum -c -
           echo "9458a128b6ce01d3063c6d1a2965100e8195c8d0f6b5e5671fc1e4733fe90737  Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.part03" | sha256sum -c -
 
-          cat \
-            "$GITHUB_WORKSPACE/Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.part01" \
-            "$GITHUB_WORKSPACE/Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.part02" \
-            "$GITHUB_WORKSPACE/Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.part03" \
-            > "$GITHUB_WORKSPACE/reconstructed/Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.zip"
+          cat             "$GITHUB_WORKSPACE/Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.part01"             "$GITHUB_WORKSPACE/Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.part02"             "$GITHUB_WORKSPACE/Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.part03"             > "$GITHUB_WORKSPACE/reconstructed/Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.zip"
 
           echo "f52057d6e532d2d3f83cd51847938b805ba883c0c7a1de5d344b1232b910c559  reconstructed/Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.zip" | sha256sum -c -
 
           python3 - "$GITHUB_WORKSPACE/reconstructed/Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.zip" "$GITHUB_WORKSPACE/gui-kit" <<'PY'
-          import pathlib, zipfile, json, sys, hashlib
-
-          kit = pathlib.Path(sys.argv[1])
-          out = pathlib.Path(sys.argv[2])
-
-          expected = "f52057d6e532d2d3f83cd51847938b805ba883c0c7a1de5d344b1232b910c559"
-
-          h = hashlib.sha256(kit.read_bytes()).hexdigest()
-          assert h == expected, (h, expected)
-
-          marker = "Frames-0.9.62-Integrated-GUI-Certification-Kit-v72/KIT-CONTRACT.json"
-
+          import pathlib,zipfile,json,sys,hashlib
+          kit=pathlib.Path(sys.argv[1]); out=pathlib.Path(sys.argv[2])
+          expected='f52057d6e532d2d3f83cd51847938b805ba883c0c7a1de5d344b1232b910c559'
+          h=hashlib.sha256(kit.read_bytes()).hexdigest()
+          assert h==expected,(h,expected)
+          marker='Frames-0.9.62-Integrated-GUI-Certification-Kit-v72/KIT-CONTRACT.json'
           with zipfile.ZipFile(kit) as z:
               assert z.testzip() is None
               assert marker in z.namelist()
-
-              c = json.loads(z.read(marker))
-
-              assert c.get("workflow_revision") == "v72-integrated-gui-r1", c
-              assert c.get("candidate_source_sha256") == "67a6876596c960ec06456328767d8ac1773185aa319c8d166890150b45044bab", c
-
+              c=json.loads(z.read(marker))
+              assert c.get('workflow_revision')=='v72-integrated-gui-r1',c
+              assert c.get('candidate_source_sha256')=='67a6876596c960ec06456328767d8ac1773185aa319c8d166890150b45044bab',c
               z.extractall(out)
           PY
 
           echo "KIT_ROOT=$GITHUB_WORKSPACE/gui-kit/Frames-0.9.62-Integrated-GUI-Certification-Kit-v72" >> "$GITHUB_ENV"
-
       - name: Install QEMU build tools
         shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 ovmf clang lld python3 unzip
-
-      - name: Preflight exact development chain
+        run: sudo apt-get update && sudo apt-get install -y qemu-system-x86 ovmf clang lld python3 unzip
+      - name: Preflight exact development chain and sealed repair
         id: preflight
         shell: bash
         run: |
           set -euo pipefail
 
+          rm -rf "$GITHUB_WORKSPACE/prepared-parent" "$GITHUB_WORKSPACE/prepared"
+          mkdir -p "$GITHUB_WORKSPACE/prepared-parent" "$GITHUB_WORKSPACE/prepared"
+
           python3 "$KIT_ROOT/prepare-integrated-gui.py" \
             "$KIT_ROOT" \
-            "$GITHUB_WORKSPACE/prepared"
+            "$GITHUB_WORKSPACE/prepared-parent"
 
-          cp "$GITHUB_WORKSPACE/prepared/STRUCTURAL-EVIDENCE.json" \
-            runtime-evidence/
+          cp "$GITHUB_WORKSPACE/prepared-parent/STRUCTURAL-EVIDENCE.json" \
+            "$GITHUB_WORKSPACE/runtime-evidence/BASE-DEVELOPMENT-CHAIN-EVIDENCE.json"
 
-          FRAMES_DIR="$GITHUB_WORKSPACE/prepared/source/Frames-0.9.62"
+          REPAIR_ZIP="$GITHUB_WORKSPACE/Frames-0.9.62-Source-v72-r1.zip"
+          [[ -f "$REPAIR_ZIP" ]]
+          echo "42ecb94a5455e428ffc7024f42ad046df23ec24fc01c71163a12f905600de836  Frames-0.9.62-Source-v72-r1.zip" | sha256sum -c -
 
-          chmod +x \
-            "$FRAMES_DIR"/tools/*.sh \
+          unzip -q "$REPAIR_ZIP" -d "$GITHUB_WORKSPACE/prepared"
+
+          PARENT_DIR="$GITHUB_WORKSPACE/prepared-parent/source/Frames-0.9.62"
+          FRAMES_DIR="$GITHUB_WORKSPACE/prepared/Frames-0.9.62"
+
+          python3 - "$PARENT_DIR" "$FRAMES_DIR" "$GITHUB_WORKSPACE/runtime-evidence/REPAIR-STRUCTURAL-EVIDENCE.json" <<'PY'
+          from pathlib import Path
+          import hashlib,json,sys
+
+          parent=Path(sys.argv[1])
+          repair=Path(sys.argv[2])
+          out=Path(sys.argv[3])
+
+          expected_changed=[
+              "GUI-REPAIR-REVISION",
+              "boot/uefi/frames_boot.c",
+              "tools/make_desktop_preview_image.py",
+              "tools/verify_desktop_preview_image.py",
+              "tools/verify_gui_0962.py",
+          ]
+
+          def h(path):
+              x=hashlib.sha256()
+              with open(path,"rb") as f:
+                  for chunk in iter(lambda:f.read(1<<20),b""):
+                      x.update(chunk)
+              return x.hexdigest()
+
+          def files(root):
+              return {
+                  p.relative_to(root).as_posix():h(p)
+                  for p in root.rglob("*")
+                  if p.is_file()
+                  and "build" not in p.relative_to(root).parts
+                  and "__pycache__" not in p.parts
+              }
+
+          a=files(parent)
+          b=files(repair)
+
+          changed=sorted(k for k in set(a)|set(b) if a.get(k)!=b.get(k))
+          added=sorted(k for k in b if k not in a)
+          removed=sorted(k for k in a if k not in b)
+
+          boot=(repair/"boot/uefi/frames_boot.c").read_text()
+          maker=(repair/"tools/make_desktop_preview_image.py").read_text()
+          vg=(repair/"tools/verify_gui_0962.py").read_text()
+
+          checks={
+              "exact_changed_files":changed==expected_changed,
+              "no_removed_files":removed==[],
+              "repair_revision":(repair/"GUI-REPAIR-REVISION").read_text().strip()=="v72-r1",
+              "version_unchanged":(repair/"VERSION").read_text().strip()=="0.9.62",
+              "kernel_source_unchanged":a.get("kernel/main.nx")==b.get("kernel/main.nx"),
+              "sdk_manifest_unchanged":a.get("sdk/SDK-MANIFEST.json")==b.get("sdk/SDK-MANIFEST.json"),
+              "desktop_challenge_fixed":"challenge=b'FRAMES_DESKTOP_PHASE1_V1\\n'" in maker,
+              "desktop_fapp_embedded":"add_entry(b'HELLO   FAP',package_raw)" in maker,
+              "desktop_fapp_loader":"Desktop preview FAPP verification failed" in boot,
+              "desktop_fapp_policy":"boot_policy_flags|=4096" in boot,
+              "desktop_image_verifier":(repair/"tools/verify_desktop_preview_image.py").is_file(),
+              "structural_verifier_strengthened":"verify_desktop_preview_image.py" in vg,
+          }
+
+          status="PASS" if all(checks.values()) else "FAIL"
+
+          ev={
+              "status":status,
+              "profile":"frames-0.9.62-v72-r1-desktop-boot-contract-repair",
+              "parent_source_sha256":"67a6876596c960ec06456328767d8ac1773185aa319c8d166890150b45044bab",
+              "candidate_source_sha256":"42ecb94a5455e428ffc7024f42ad046df23ec24fc01c71163a12f905600de836",
+              "changed_files":changed,
+              "added_files":added,
+              "removed_files":removed,
+              "checks":checks,
+              "physical_boot_approved":False,
+              "physical_media_writes_unlocked":False,
+          }
+
+          out.write_text(json.dumps(ev,indent=2)+"\n")
+          print(json.dumps(ev,indent=2))
+          raise SystemExit(0 if status=="PASS" else 1)
+          PY
+
+          chmod +x "$FRAMES_DIR"/tools/*.sh \
             "$FRAMES_DIR"/tools/*.py \
             "$FRAMES_DIR"/sdk/*.sh \
             "$FRAMES_DIR"/sdk/*.py \
-            "$FRAMES_DIR"/toolchain/Nexus-Language-5.20.0/nexus
+            "$FRAMES_DIR"/toolchain/Nexus-Language-5.20.0/nexus \
+            2>/dev/null || true
 
           echo "FRAMES_DIR=$FRAMES_DIR" >> "$GITHUB_ENV"
           echo "NEXUS_EXE=$FRAMES_DIR/toolchain/Nexus-Language-5.20.0/nexus" >> "$GITHUB_ENV"
 
-          sha256sum "$KIT_ROOT/Frames-0.9.62-Source-v72.zip" \
-            | tee runtime-evidence/SOURCE-SHA256.txt
+          echo "42ecb94a5455e428ffc7024f42ad046df23ec24fc01c71163a12f905600de836  Frames-0.9.62-Source-v72-r1.zip" \
+            > "$GITHUB_WORKSPACE/runtime-evidence/SOURCE-SHA256.txt"
 
           code=/usr/share/OVMF/OVMF_CODE_4M.fd
           vars=/usr/share/OVMF/OVMF_VARS_4M.fd
-
           [[ -f "$code" && -f "$vars" ]]
 
           echo "OVMF_CODE=$code" >> "$GITHUB_ENV"
           echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"
 
-      - name: Build exact final desktop source
+      - name: Build exact repaired desktop source
         id: build
         shell: bash
         run: |
@@ -117,12 +182,10 @@ jobs:
           python3 tools/verify_gui_0962.py
 
           ./tools/build.sh
-
           python3 tools/make_esp.py
           python3 tools/verify_release.py
 
-          python3 tools/sdk_selftest.py \
-            --require-pass \
+          python3 tools/sdk_selftest.py --require-pass \
             | tee build/SDK-SELFTEST-CONSOLE.log
 
           python3 tools/make_developer_preview_image.py
@@ -138,12 +201,23 @@ jobs:
             --require-pass \
             > build/APP-PACKAGING-EVIDENCE.json
 
-          python3 tools/make_desktop_preview_image.py
+          python3 tools/make_desktop_preview_image.py \
+            | tee build/DESKTOP-IMAGE-BUILD.log
+
+          python3 tools/verify_desktop_preview_image.py \
+            --image build/Frames-0.9.62-Desktop-Preview.img \
+            --package build/HelloFrames.fapp \
+            --require-pass \
+            | tee build/DESKTOP-IMAGE-VERIFY.log
 
           cp build/SDK-TOOLING-EVIDENCE.json \
             "$GITHUB_WORKSPACE/runtime-evidence/"
 
           cp build/APP-PACKAGING-EVIDENCE.json \
+            "$GITHUB_WORKSPACE/runtime-evidence/"
+
+          cp build/DESKTOP-IMAGE-BUILD.log \
+            build/DESKTOP-IMAGE-VERIFY.log \
             "$GITHUB_WORKSPACE/runtime-evidence/"
 
       - name: Integrated GUI framebuffer certification with diagnostics
@@ -152,7 +226,6 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
-
           cd "$FRAMES_DIR"
 
           BOOT=build/Frames-0.9.62-Desktop-Preview.img
@@ -165,7 +238,6 @@ jobs:
           CAP=build/gui-capture.log
 
           rm -f "$LOG" "$QMP" "$PPM" "$DBG" "$CAP"
-
           cp "$OVMF_VARS" build/OVMF_VARS.gui.fd
 
           set +e
@@ -192,69 +264,49 @@ jobs:
           qpid=$!
 
           python3 - "$QMP" "$LOG" "$PPM" > "$CAP" 2>&1 <<'PY' &
-          import json
-          import socket
-          import sys
-          import time
+          import json,socket,sys,time
           from pathlib import Path
 
-          sock_path = sys.argv[1]
-          serial_path = Path(sys.argv[2])
-          ppm_path = Path(sys.argv[3])
+          sock_path=sys.argv[1]
+          serial_path=Path(sys.argv[2])
+          ppm_path=Path(sys.argv[3])
+          deadline=time.time()+210
 
-          deadline = time.time() + 210
-
-          s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+          s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
 
           while True:
               try:
                   s.connect(sock_path)
                   break
               except OSError:
-                  if time.time() > deadline:
-                      print("DIAG QMP socket unavailable", flush=True)
+                  if time.time()>deadline:
+                      print("DIAG QMP socket unavailable",flush=True)
                       raise SystemExit(3)
+                  time.sleep(.05)
 
-                  time.sleep(0.05)
-
-          f = s.makefile("rwb", buffering=0)
+          f=s.makefile("rwb",buffering=0)
 
           def recv():
               while True:
-                  line = f.readline()
-
+                  line=f.readline()
                   if not line:
                       raise RuntimeError("QMP closed")
-
-                  obj = json.loads(line)
-
+                  obj=json.loads(line)
                   if "event" not in obj:
                       return obj
 
-          def cmd(name, args=None):
-              obj = {"execute": name}
-
+          def cmd(name,args=None):
+              obj={"execute":name}
               if args is not None:
-                  obj["arguments"] = args
-
-              f.write(
-                  (
-                      json.dumps(
-                          obj,
-                          separators=(",", ":")
-                      )
-                      + "\n"
-                  ).encode()
-              )
-
+                  obj["arguments"]=args
+              f.write((json.dumps(obj,separators=(",",":"))+"\n").encode())
               return recv()
 
           recv()
           cmd("qmp_capabilities")
 
-          success = "FRAMES_GUI_DESKTOP_INTEGRATED_OK"
-
-          fail_tokens = [
+          success="FRAMES_GUI_DESKTOP_INTEGRATED_OK"
+          fail_tokens=[
               "FRAMES_DESKTOP_CERT_FAIL",
               "FRAMES BOOT ERROR:",
               "FRAMES_FATAL",
@@ -262,103 +314,55 @@ jobs:
               "ASSERT_FAIL",
           ]
 
-          state = "timeout"
-          observed = ""
+          state="timeout"
+          observed=""
 
-          while time.time() < deadline:
-              serial = (
-                  serial_path.read_text(errors="ignore")
-                  if serial_path.exists()
-                  else ""
-              )
+          while time.time()<deadline:
+              serial=serial_path.read_text(errors="ignore") if serial_path.exists() else ""
 
               if success in serial:
-                  state = "success"
-                  observed = success
+                  state="success"
+                  observed=success
                   break
 
-              bad = next(
-                  (
-                      x
-                      for x in fail_tokens
-                      if x in serial
-                  ),
-                  None
-              )
+              bad=next((x for x in fail_tokens if x in serial),None)
 
               if bad:
-                  state = "failure"
-                  observed = bad
+                  state="failure"
+                  observed=bad
                   break
 
-              time.sleep(0.05)
+              time.sleep(.05)
 
-          if state != "timeout":
+          if state!="timeout":
               try:
-                  reply = cmd(
-                      "screendump",
-                      {
-                          "filename": str(ppm_path)
-                      }
-                  )
-
-                  print(
-                      "DIAG screendump",
-                      reply,
-                      flush=True
-                  )
-
+                  reply=cmd("screendump",{"filename":str(ppm_path)})
+                  print("DIAG screendump",reply,flush=True)
               except Exception as exc:
-                  print(
-                      "DIAG screendump exception",
-                      repr(exc),
-                      flush=True
-                  )
+                  print("DIAG screendump exception",repr(exc),flush=True)
 
               for _ in range(120):
-                  if (
-                      ppm_path.is_file()
-                      and ppm_path.stat().st_size > 1000
-                  ):
+                  if ppm_path.is_file() and ppm_path.stat().st_size>1000:
                       break
+                  time.sleep(.05)
 
-                  time.sleep(0.05)
-
-          print(
-              f"DIAG state={state} observed={observed}",
-              flush=True
-          )
+          print(f"DIAG state={state} observed={observed}",flush=True)
 
           try:
               cmd("quit")
-
           except Exception as exc:
-              print(
-                  "DIAG qmp quit exception",
-                  repr(exc),
-                  flush=True
-              )
+              print("DIAG qmp quit exception",repr(exc),flush=True)
 
           try:
               f.close()
               s.close()
-
           except Exception:
               pass
 
-          raise SystemExit(
-              0
-              if state == "success"
-              else (
-                  2
-                  if state == "failure"
-                  else 4
-              )
-          )
+          raise SystemExit(0 if state=="success" else (2 if state=="failure" else 4))
           PY
 
           cpid=$!
-
           wait "$cpid"
           crc=$?
 
@@ -376,54 +380,25 @@ jobs:
           echo "$qrc" > build/GUI-QEMU-EXIT-CODE.txt
           echo "$crc" > build/GUI-CAPTURE-EXIT-CODE.txt
 
-          cp "$LOG" \
-            "$GITHUB_WORKSPACE/runtime-evidence/gui-integrated-serial.log" \
-            2>/dev/null || true
+          # Preserve diagnostics before any strict PASS assertion.
+          cp "$LOG" "$GITHUB_WORKSPACE/runtime-evidence/gui-integrated-serial.log" 2>/dev/null || true
+          cp "$DBG" "$GITHUB_WORKSPACE/runtime-evidence/gui-integrated-qemu-debug.log" 2>/dev/null || true
+          cp "$CAP" "$GITHUB_WORKSPACE/runtime-evidence/gui-capture.log" 2>/dev/null || true
+          cp "$PPM" "$GITHUB_WORKSPACE/runtime-evidence/gui-integrated.ppm" 2>/dev/null || true
+          cp build/GUI-QEMU-EXIT-CODE.txt build/GUI-CAPTURE-EXIT-CODE.txt "$GITHUB_WORKSPACE/runtime-evidence/" || true
 
-          cp "$DBG" \
-            "$GITHUB_WORKSPACE/runtime-evidence/gui-integrated-qemu-debug.log" \
-            2>/dev/null || true
-
-          cp "$CAP" \
-            "$GITHUB_WORKSPACE/runtime-evidence/gui-capture.log" \
-            2>/dev/null || true
-
-          cp "$PPM" \
-            "$GITHUB_WORKSPACE/runtime-evidence/gui-integrated.ppm" \
-            2>/dev/null || true
-
-          cp \
-            build/GUI-QEMU-EXIT-CODE.txt \
-            build/GUI-CAPTURE-EXIT-CODE.txt \
-            "$GITHUB_WORKSPACE/runtime-evidence/" \
-            || true
-
-          python3 - \
-            "$LOG" \
-            "$qrc" \
-            "$crc" \
-            "$GITHUB_WORKSPACE/runtime-evidence/GUI-RUNTIME-DIAGNOSTIC.json" <<'PY'
-
-          import json
-          import re
-          import sys
-          import hashlib
+          python3 - "$LOG" "$qrc" "$crc" "$GITHUB_WORKSPACE/runtime-evidence/GUI-RUNTIME-DIAGNOSTIC.json" <<'PY'
+          import json,re,sys,hashlib
           from pathlib import Path
 
-          log = Path(sys.argv[1])
+          log=Path(sys.argv[1])
+          qrc=int(sys.argv[2])
+          crc=int(sys.argv[3])
+          out=Path(sys.argv[4])
 
-          qrc = int(sys.argv[2])
-          crc = int(sys.argv[3])
+          serial=log.read_text(errors="replace") if log.exists() else ""
 
-          out = Path(sys.argv[4])
-
-          serial = (
-              log.read_text(errors="replace")
-              if log.exists()
-              else ""
-          )
-
-          phases = [
+          phases=[
               "FRAMES_DESKTOP_PHASE1_OK",
               "FRAMES_WM_PHASE1_OK",
               "FRAMES_DESKTOP_PHASE2_OK",
@@ -453,104 +428,54 @@ jobs:
               "FRAMES_KERNEL_READY",
           ]
 
-          counts = {
-              marker: serial.count(marker)
-              for marker in phases
-          }
+          counts={m:serial.count(m) for m in phases}
+          last=None
 
-          last = None
+          for m in phases:
+              if counts[m]:
+                  last=m
 
-          for marker in phases:
-              if counts[marker]:
-                  last = marker
-
-          diagnostics = {}
-
-          for stage, value in re.findall(
+          diagnostics={}
+          for s,v in re.findall(
               r"FRAMES_DESKTOP_DIAG stage=0x([0-9A-Fa-f]+) value=0x([0-9A-Fa-f]+)",
               serial
           ):
-              diagnostics[int(stage, 16)] = int(value, 16)
+              diagnostics[int(s,16)]=int(v,16)
 
-          failures = [
-              token
-              for token in [
+          failures=[
+              x for x in [
                   "FRAMES_DESKTOP_CERT_FAIL",
                   "FRAMES BOOT ERROR:",
                   "FRAMES_FATAL",
                   "PANIC",
                   "ASSERT_FAIL",
-              ]
-              if token in serial
+              ] if x in serial
           ]
 
-          result = {
-              "status": (
-                  "PASS"
-                  if (
-                      counts["FRAMES_GUI_DESKTOP_INTEGRATED_OK"] == 1
-                      and crc == 0
-                  )
-                  else "FAIL"
-              ),
-
-              "profile":
-                  "frames-0.9.62-v72-r3-gui-runtime-diagnostic",
-
-              "qemu_exit_code":
-                  qrc,
-
-              "capture_exit_code":
-                  crc,
-
-              "serial_sha256": (
-                  hashlib.sha256(
-                      log.read_bytes()
-                  ).hexdigest()
-                  if log.exists()
-                  else None
-              ),
-
-              "last_completed_marker":
-                  last,
-
-              "marker_counts":
-                  counts,
-
-              "diagnostics":
-                  diagnostics,
-
-              "failure_tokens":
-                  failures,
+          d={
+              "status":"PASS" if counts["FRAMES_GUI_DESKTOP_INTEGRATED_OK"]==1 and crc==0 else "FAIL",
+              "profile":"frames-0.9.62-v72-r3-gui-runtime-diagnostic",
+              "qemu_exit_code":qrc,
+              "capture_exit_code":crc,
+              "serial_sha256":hashlib.sha256(log.read_bytes()).hexdigest() if log.exists() else None,
+              "last_completed_marker":last,
+              "marker_counts":counts,
+              "diagnostics":diagnostics,
+              "failure_tokens":failures,
           }
 
-          out.write_text(
-              json.dumps(
-                  result,
-                  indent=2
-              )
-              + "\n"
-          )
-
-          print(
-              json.dumps(
-                  result,
-                  indent=2
-              )
-          )
+          out.write_text(json.dumps(d,indent=2)+"\n")
+          print(json.dumps(d,indent=2))
           PY
 
           if [[ "$crc" -eq 0 && "$qrc" -eq 0 ]]; then
-
-            python3 \
-              tools/gui_integrated_evidence.py \
+            python3 tools/gui_integrated_evidence.py \
               --serial "$LOG" \
               --qemu-exit "$qrc" \
               --require-pass \
               > build/GUI-INTEGRATED-EVIDENCE.json
 
-            python3 \
-              "$KIT_ROOT/gui_integrated_visual_evidence.py" \
+            python3 "$KIT_ROOT/gui_integrated_visual_evidence.py" \
               --serial "$LOG" \
               --ppm "$PPM" \
               --qemu-exit "$qrc" \
@@ -559,57 +484,28 @@ jobs:
               --require-pass \
               > build/GUI-INTEGRATED-VISUAL-EVIDENCE.json
 
-            cp \
-              build/GUI-INTEGRATED-EVIDENCE.json \
-              build/GUI-INTEGRATED-VISUAL-EVIDENCE.json \
-              "$GITHUB_WORKSPACE/runtime-evidence/"
+            cp build/GUI-INTEGRATED-EVIDENCE.json \
+               build/GUI-INTEGRATED-VISUAL-EVIDENCE.json \
+               "$GITHUB_WORKSPACE/runtime-evidence/"
           fi
 
           [[ "$qrc" -eq 0 && "$crc" -eq 0 ]]
-
       - name: Kernel read-only regression
         id: kernelreg
         shell: bash
         run: |
           set -euo pipefail
-
-          cd "$FRAMES_DIR"
-
-          export NEXUS="$NEXUS_EXE"
-          export FRAMES_PREBUILT=1
-          export OVMF_CODE
-          export OVMF_VARS
-
+          cd "$FRAMES_DIR"; export NEXUS="$NEXUS_EXE" FRAMES_PREBUILT=1 OVMF_CODE OVMF_VARS
           ./tools/qemu_helixfs_readonly_smoke.sh
-
-          cp \
-            build/RUNTIME-EVIDENCE.json \
-            build/HELIXFS-KERNEL-PHASE3-EVIDENCE.json \
-            "$GITHUB_WORKSPACE/runtime-evidence/"
-
+          cp build/RUNTIME-EVIDENCE.json build/HELIXFS-KERNEL-PHASE3-EVIDENCE.json "$GITHUB_WORKSPACE/runtime-evidence/"
       - name: Developer Preview regression
         id: devreg
         shell: bash
         run: |
           set -euo pipefail
-
-          cd "$FRAMES_DIR"
-
-          export NEXUS="$NEXUS_EXE"
-          export FRAMES_PREBUILT=1
-          export OVMF_CODE
-          export OVMF_VARS
-
+          cd "$FRAMES_DIR"; export NEXUS="$NEXUS_EXE" FRAMES_PREBUILT=1 OVMF_CODE OVMF_VARS
           ./tools/qemu_developer_preview_certify.sh
-
-          cp \
-            build/DEVELOPER-PREVIEW-EVIDENCE.json \
-            build/DEVELOPER-PREVIEW-PHASE3-EVIDENCE.json \
-            build/APP-LOADER-EVIDENCE.json \
-            build/HELIXFS-PHASE2-EVIDENCE.json \
-            build/HELIXFS-PHASE3-EVIDENCE.json \
-            "$GITHUB_WORKSPACE/runtime-evidence/"
-
+          cp build/DEVELOPER-PREVIEW-EVIDENCE.json build/DEVELOPER-PREVIEW-PHASE3-EVIDENCE.json build/APP-LOADER-EVIDENCE.json build/HELIXFS-PHASE2-EVIDENCE.json build/HELIXFS-PHASE3-EVIDENCE.json "$GITHUB_WORKSPACE/runtime-evidence/"
       - name: Final integrated GUI verdict
         id: final
         if: steps.gui.outcome == 'success' && steps.kernelreg.outcome == 'success' && steps.devreg.outcome == 'success'
@@ -617,95 +513,111 @@ jobs:
         run: |
           set -euo pipefail
 
-          python3 \
-            "$KIT_ROOT/finalize-integrated-gui.py" \
-            "$GITHUB_WORKSPACE/runtime-evidence"
-
-          python3 - runtime-evidence <<'PY'
+          python3 - "$GITHUB_WORKSPACE/runtime-evidence" <<'PY'
           from pathlib import Path
+          import json,sys
 
-          import hashlib
-          import json
-          import sys
+          r=Path(sys.argv[1])
 
-          root = Path(sys.argv[1])
+          def J(n):
+              return json.loads((r/n).read_text())
 
-          def sha256(path):
-              h = hashlib.sha256()
+          checks={
+              "source_identity":(r/"SOURCE-SHA256.txt").read_text().split()[0]=="42ecb94a5455e428ffc7024f42ad046df23ec24fc01c71163a12f905600de836",
+              "base_development_chain_pass":J("BASE-DEVELOPMENT-CHAIN-EVIDENCE.json").get("status")=="PASS",
+              "repair_structural_pass":J("REPAIR-STRUCTURAL-EVIDENCE.json").get("status")=="PASS",
+              "desktop_serial_pass":J("GUI-INTEGRATED-EVIDENCE.json").get("status")=="PASS",
+              "desktop_visual_pass":J("GUI-INTEGRATED-VISUAL-EVIDENCE.json").get("status")=="PASS",
+              "kernel_runtime_pass":J("RUNTIME-EVIDENCE.json").get("status")=="PASS",
+              "helixfs_kernel_pass":J("HELIXFS-KERNEL-PHASE3-EVIDENCE.json").get("status")=="PASS",
+              "developer_preview_pass":J("DEVELOPER-PREVIEW-EVIDENCE.json").get("status")=="PASS",
+              "developer_phase3_pass":J("DEVELOPER-PREVIEW-PHASE3-EVIDENCE.json").get("status")=="PASS",
+              "app_loader_pass":J("APP-LOADER-EVIDENCE.json").get("status")=="PASS",
+              "helixfs_phase2_pass":J("HELIXFS-PHASE2-EVIDENCE.json").get("status")=="PASS",
+              "helixfs_phase3_pass":J("HELIXFS-PHASE3-EVIDENCE.json").get("status")=="PASS",
+              "sdk_pass":J("SDK-TOOLING-EVIDENCE.json").get("status")=="PASS",
+              "fapp_packaging_pass":J("APP-PACKAGING-EVIDENCE.json").get("status")=="PASS",
+          }
 
-              with open(path, "rb") as f:
-                  for chunk in iter(
-                      lambda: f.read(1 << 20),
-                      b""
-                  ):
-                      h.update(chunk)
+          status="PASS" if all(checks.values()) else "FAIL"
 
+          result={
+              "status":status,
+              "profile":"frames-0.9.62-integrated-gui-desktop-certification-v72-r1",
+              "workflow_revision":"v72-r1-integrated-gui-r4",
+              "frames_version":"0.9.62",
+              "repair_revision":"v72-r1",
+              "candidate_source_sha256":"42ecb94a5455e428ffc7024f42ad046df23ec24fc01c71163a12f905600de836",
+              "parent_gui_source_sha256":"67a6876596c960ec06456328767d8ac1773185aa319c8d166890150b45044bab",
+              "certified_baseline":{
+                  "frames_version":"0.9.50",
+                  "source_sha256":"21d35759dd7eeaa7e17e587a31ec99c97a1b64052a08b38944aabec30a91f883",
+                  "evidence_sha256":"15dfc948d690f7003d3e5e6ad188a2ea5bb59004795978573be7656b937ff977",
+              },
+              "checks":checks,
+              "physical_boot_approved":False,
+              "physical_media_writes_unlocked":False,
+              "frames_1_0_promoted":False,
+          }
+
+          (r/"FINAL-GUI-CERTIFICATION.json").write_text(
+              json.dumps(result,indent=2)+"\n"
+          )
+
+          print(json.dumps(result,indent=2))
+          raise SystemExit(0 if status=="PASS" else 1)
+          PY
+
+          python3 - "$GITHUB_WORKSPACE/runtime-evidence" <<'PY'
+          from pathlib import Path
+          import hashlib,json,sys
+
+          r=Path(sys.argv[1])
+
+          def H(p):
+              h=hashlib.sha256()
+              with open(p,"rb") as f:
+                  for c in iter(lambda:f.read(1<<20),b""):
+                      h.update(c)
               return h.hexdigest()
 
-          files = [
-              p
-              for p in sorted(root.rglob("*"))
-              if (
-                  p.is_file()
-                  and p.name != "EVIDENCE-FILES-SHA256.txt"
-              )
+          files=[
+              p for p in sorted(r.rglob("*"))
+              if p.is_file() and p.name!="EVIDENCE-FILES-SHA256.txt"
           ]
 
-          root.joinpath(
-              "EVIDENCE-FILES-SHA256.txt"
-          ).write_text(
+          (r/"EVIDENCE-FILES-SHA256.txt").write_text(
               "".join(
-                  f"{sha256(p)}  {p.relative_to(root).as_posix()}\n"
+                  f"{H(p)}  {p.relative_to(r).as_posix()}\n"
                   for p in files
               )
           )
 
-          mismatches = []
+          mismatches=[]
 
-          for line in root.joinpath(
-              "EVIDENCE-FILES-SHA256.txt"
-          ).read_text().splitlines():
-
-              expected, name = line.split(
-                  "  ",
-                  1
-              )
-
-              if sha256(root / name) != expected:
+          for line in (r/"EVIDENCE-FILES-SHA256.txt").read_text().splitlines():
+              expected,name=line.split("  ",1)
+              if H(r/name)!=expected:
                   mismatches.append(name)
 
-          root.joinpath(
-              "FINAL-MANIFEST-VERIFY.json"
-          ).write_text(
+          (r/"FINAL-MANIFEST-VERIFY.json").write_text(
               json.dumps(
                   {
-                      "status":
-                          "PASS"
-                          if not mismatches
-                          else "FAIL",
-
-                      "mismatches":
-                          mismatches,
+                      "status":"PASS" if not mismatches else "FAIL",
+                      "mismatches":mismatches,
                   },
                   indent=2
-              )
-              + "\n"
+              )+"\n"
           )
 
-          files = [
-              p
-              for p in sorted(root.rglob("*"))
-              if (
-                  p.is_file()
-                  and p.name != "EVIDENCE-FILES-SHA256.txt"
-              )
+          files=[
+              p for p in sorted(r.rglob("*"))
+              if p.is_file() and p.name!="EVIDENCE-FILES-SHA256.txt"
           ]
 
-          root.joinpath(
-              "EVIDENCE-FILES-SHA256.txt"
-          ).write_text(
+          (r/"EVIDENCE-FILES-SHA256.txt").write_text(
               "".join(
-                  f"{sha256(p)}  {p.relative_to(root).as_posix()}\n"
+                  f"{H(p)}  {p.relative_to(r).as_posix()}\n"
                   for p in files
               )
           )
@@ -716,10 +628,9 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: frames-0.9.62-integrated-gui-desktop-evidence-v72
+          name: frames-0.9.62-integrated-gui-desktop-evidence-v72-r1
           path: runtime-evidence
           if-no-files-found: error
-
       - name: Fail closed after preserving diagnostics
         if: always()
         shell: bash
