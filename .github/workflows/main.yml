@@ -1,59 +1,105 @@
-name: Frames 0.9.50 v60 r3 Evidence Repair
+name: Frames 0.9.62 Integrated GUI Desktop Certification v72
 on:
   workflow_dispatch:
   push:
     paths:
-      - 'Frames-0.9.50-Runtime-Certification-Kit-v60-r3-Evidence-Repair.zip'
+      - 'Frames-0.9.62-Integrated-GUI-Certification-Kit-v72.zip'
 permissions:
   contents: read
 jobs:
-  certify-evidence:
+  certify-gui:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
-      - name: Initialize
-        shell: bash
-        run: rm -rf r3kit runtime-evidence && mkdir -p r3kit runtime-evidence
-      - name: Locate r3 kit
+      - name: Locate certification kit
         id: locate
         shell: bash
-        continue-on-error: true
         run: |
           set -euo pipefail
-          python3 - "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/r3kit" <<'PY'
-          import sys,pathlib,zipfile,json
-          ws=pathlib.Path(sys.argv[1]); out=pathlib.Path(sys.argv[2])
-          marker='Frames-0.9.50-Runtime-Certification-Kit-v60-r3-Evidence-Repair/KIT-CONTRACT.json'
-          matches=[]
+          rm -rf gui-kit runtime-evidence prepared && mkdir -p gui-kit runtime-evidence prepared
+          python3 - "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/gui-kit" <<'PY'
+          import pathlib,zipfile,json,sys
+          ws=pathlib.Path(sys.argv[1]); out=pathlib.Path(sys.argv[2]); marker='Frames-0.9.62-Integrated-GUI-Certification-Kit-v72/KIT-CONTRACT.json'; matches=[]
           for p in ws.rglob('*.zip'):
               try:
                   with zipfile.ZipFile(p) as z:
                       if marker in z.namelist():
                           c=json.loads(z.read(marker))
-                          if c.get('workflow_revision')=='v60-incremental-r3' and c.get('candidate_source_sha256')=='21d35759dd7eeaa7e17e587a31ec99c97a1b64052a08b38944aabec30a91f883':matches.append(p)
-              except Exception:pass
+                          if c.get('workflow_revision')=='v72-integrated-gui-r1' and c.get('candidate_source_sha256')=='67a6876596c960ec06456328767d8ac1773185aa319c8d166890150b45044bab': matches.append(p)
+              except Exception: pass
           assert len(matches)==1,matches
           with zipfile.ZipFile(matches[0]) as z:z.extractall(out)
           PY
-      - name: Re-evaluate exact runtime evidence
-        id: evaluate
-        if: always()
+          echo "KIT_ROOT=$GITHUB_WORKSPACE/gui-kit/Frames-0.9.62-Integrated-GUI-Certification-Kit-v72" >> "$GITHUB_ENV"
+      - name: Install QEMU build tools
         shell: bash
-        continue-on-error: true
-        run: |
-          root="$GITHUB_WORKSPACE/r3kit/Frames-0.9.50-Runtime-Certification-Kit-v60-r3-Evidence-Repair"
-          rc=0
-          python3 "$root/verify-v60-r3-evidence.py" "$root" "$GITHUB_WORKSPACE/runtime-evidence" > runtime-evidence/R3-CONSOLE.log 2>&1 || rc=$?
-          echo "$rc" > runtime-evidence/R3-EXIT-CODE.txt
-          exit "$rc"
-      - name: Verify final manifest
-        if: always()
+        run: sudo apt-get update && sudo apt-get install -y qemu-system-x86 ovmf clang lld python3 unzip
+      - name: Preflight exact development chain
         shell: bash
         run: |
+          set -euo pipefail
+          python3 "$KIT_ROOT/prepare-integrated-gui.py" "$KIT_ROOT" "$GITHUB_WORKSPACE/prepared"
+          cp "$GITHUB_WORKSPACE/prepared/STRUCTURAL-EVIDENCE.json" runtime-evidence/
+          FRAMES_DIR="$GITHUB_WORKSPACE/prepared/source/Frames-0.9.62"
+          chmod +x "$FRAMES_DIR"/tools/*.sh "$FRAMES_DIR"/tools/*.py "$FRAMES_DIR"/sdk/*.sh "$FRAMES_DIR"/sdk/*.py "$FRAMES_DIR"/toolchain/Nexus-Language-5.20.0/nexus
+          echo "FRAMES_DIR=$FRAMES_DIR" >> "$GITHUB_ENV"
+          echo "NEXUS_EXE=$FRAMES_DIR/toolchain/Nexus-Language-5.20.0/nexus" >> "$GITHUB_ENV"
+          sha256sum "$KIT_ROOT/Frames-0.9.62-Source-v72.zip" | tee runtime-evidence/SOURCE-SHA256.txt
+          code=/usr/share/OVMF/OVMF_CODE_4M.fd; vars=/usr/share/OVMF/OVMF_VARS_4M.fd; [[ -f "$code" && -f "$vars" ]]
+          echo "OVMF_CODE=$code" >> "$GITHUB_ENV"; echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"
+      - name: Build exact final desktop source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"; export NEXUS="$NEXUS_EXE"; export ARTIFACT_TOOL_RPC_DAEMON_STARTUP_TIMEOUT_S=1
+          python3 tools/verify_gui_0962.py
+          ./tools/build.sh
+          python3 tools/make_esp.py
+          python3 tools/verify_release.py
+          python3 tools/sdk_selftest.py --require-pass | tee build/SDK-SELFTEST-CONSOLE.log
+          python3 tools/make_developer_preview_image.py
+          python3 tools/verify_developer_preview_image.py --image build/Frames-0.9.62-Developer-Preview.img --package build/HelloFrames.fapp --require-pass
+          python3 tools/app_packaging_evidence.py --package build/HelloFrames.fapp --image build/Frames-0.9.62-Developer-Preview.img --require-pass > build/APP-PACKAGING-EVIDENCE.json
+          python3 tools/make_desktop_preview_image.py
+          cp build/SDK-TOOLING-EVIDENCE.json "$GITHUB_WORKSPACE/runtime-evidence/"
+          cp build/APP-PACKAGING-EVIDENCE.json "$GITHUB_WORKSPACE/runtime-evidence/"
+      - name: Integrated GUI framebuffer certification
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"; BOOT=build/Frames-0.9.62-Desktop-Preview.img; cp "$BOOT" "$BOOT.before"
+          LOG=build/gui-integrated-serial.log; QMP=build/gui-integrated-qmp.sock; PPM=build/gui-integrated.ppm; DBG=build/gui-integrated-qemu-debug.log; rm -f "$LOG" "$QMP" "$PPM" "$DBG"
+          cp "$OVMF_VARS" build/OVMF_VARS.gui.fd
+          set +e
+          timeout 240 qemu-system-x86_64 -machine q35 -accel tcg,thread=multi -m 2048M -smp 4 -cpu max -display none -vga std -serial file:"$LOG" -no-reboot -no-shutdown -qmp "unix:$QMP,server=on,wait=off" -d guest_errors -D "$DBG" -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" -drive if=pflash,format=raw,file=build/OVMF_VARS.gui.fd -drive if=none,id=desktopboot,format=raw,readonly=on,file="$BOOT" -device nvme,serial=FRAMESGUI0962,drive=desktopboot,bootindex=1 &
+          qpid=$!; python3 "$KIT_ROOT/qmp_gui_integrated_capture.py" "$QMP" "$LOG" "$PPM" > build/gui-capture.log 2>&1 & cpid=$!; wait "$qpid"; qrc=$?; wait "$cpid"; crc=$?; set -e
+          echo "$qrc" > build/GUI-QEMU-EXIT-CODE.txt; [[ "$qrc" -eq 0 && "$crc" -eq 0 ]]
+          python3 tools/gui_integrated_evidence.py --serial "$LOG" --qemu-exit "$qrc" --require-pass > build/GUI-INTEGRATED-EVIDENCE.json
+          python3 "$KIT_ROOT/gui_integrated_visual_evidence.py" --serial "$LOG" --ppm "$PPM" --qemu-exit "$qrc" --media-before "$BOOT.before" --media-after "$BOOT" --require-pass > build/GUI-INTEGRATED-VISUAL-EVIDENCE.json
+          cp build/GUI-INTEGRATED-EVIDENCE.json build/GUI-INTEGRATED-VISUAL-EVIDENCE.json build/gui-integrated-serial.log build/gui-integrated.ppm build/GUI-QEMU-EXIT-CODE.txt "$GITHUB_WORKSPACE/runtime-evidence/"
+      - name: Kernel read-only regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"; export NEXUS="$NEXUS_EXE" FRAMES_PREBUILT=1 OVMF_CODE OVMF_VARS
+          ./tools/qemu_helixfs_readonly_smoke.sh
+          cp build/RUNTIME-EVIDENCE.json build/HELIXFS-KERNEL-PHASE3-EVIDENCE.json "$GITHUB_WORKSPACE/runtime-evidence/"
+      - name: Developer Preview regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"; export NEXUS="$NEXUS_EXE" FRAMES_PREBUILT=1 OVMF_CODE OVMF_VARS
+          ./tools/qemu_developer_preview_certify.sh
+          cp build/DEVELOPER-PREVIEW-EVIDENCE.json build/DEVELOPER-PREVIEW-PHASE3-EVIDENCE.json build/APP-LOADER-EVIDENCE.json build/HELIXFS-PHASE2-EVIDENCE.json build/HELIXFS-PHASE3-EVIDENCE.json "$GITHUB_WORKSPACE/runtime-evidence/"
+      - name: Final integrated GUI verdict
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 "$KIT_ROOT/finalize-integrated-gui.py" "$GITHUB_WORKSPACE/runtime-evidence"
           python3 - runtime-evidence <<'PY'
           from pathlib import Path
-          import hashlib,sys,json
+          import hashlib,json,sys
           r=Path(sys.argv[1])
           def H(p):
               h=hashlib.sha256()
@@ -69,23 +115,11 @@ jobs:
           r.joinpath('FINAL-MANIFEST-VERIFY.json').write_text(json.dumps({'status':'PASS' if not mism else 'FAIL','mismatches':mism},indent=2)+'\n')
           files=[p for p in sorted(r.rglob('*')) if p.is_file() and p.name!='EVIDENCE-FILES-SHA256.txt']
           r.joinpath('EVIDENCE-FILES-SHA256.txt').write_text(''.join(f"{H(p)}  {p.relative_to(r).as_posix()}\n" for p in files))
+          assert not mism
           PY
       - if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: frames-0.9.50-helixfs-readonly-phase3-evidence-v60
+          name: frames-0.9.62-integrated-gui-desktop-evidence-v72
           path: runtime-evidence
           if-no-files-found: error
-      - name: Final verdict
-        if: always()
-        shell: bash
-        run: |
-          [[ "${{ steps.locate.outcome }}" == success && "${{ steps.evaluate.outcome }}" == success ]]
-          python3 - <<'PY'
-          import json
-          f=json.load(open('runtime-evidence/FINAL-CERTIFICATION.json'))
-          m=json.load(open('runtime-evidence/FINAL-MANIFEST-VERIFY.json'))
-          assert f['status']=='PASS' and f['workflow_revision']=='v60-incremental-r3'
-          assert m['status']=='PASS'
-          print('FRAMES 0.9.50 v60 r3 FINAL CERTIFICATION PASS')
-          PY
