@@ -1,11 +1,11 @@
-name: Frames 0.9.98 Integrated Secure Online Services Certification v108 r8
+name: Frames 0.9.98 Integrated Secure Online Services Certification v108 r9
 
 on:
   workflow_dispatch:
   push:
     branches: [ main ]
     paths:
-      - 'Frames-0.9.98-Runtime-Certification-Kit-v108-r8.zip'
+      - 'Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip'
 
 permissions:
   contents: read
@@ -16,12 +16,12 @@ jobs:
     timeout-minutes: 35
     env:
       # Automatic runs are intentionally triggered ONLY by uploading/replacing
-      # Frames-0.9.98-Runtime-Certification-Kit-v108-r8.zip. Updating this workflow file does not start a run.
-      EXPECTED_RUNTIME_KIT_SHA256: daac11f094993f235987f8497f67be1cce0843127a2556b4e3b11c51ef9bf2aa
+      # Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip. Updating this workflow file does not start a run.
+      EXPECTED_RUNTIME_KIT_SHA256: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
       EXPECTED_SOURCE_SHA256: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
       EXPECTED_FRAMES_VERSION: 0.9.98
       EXPECTED_SOURCE_REVISION: v108-train
-      WORKFLOW_REVISION: v108-integrated-secure-online-services-r8
+      WORKFLOW_REVISION: v108-integrated-secure-online-services-r9
       PARENT_FRAMES_VERSION: 0.9.91
       PARENT_SOURCE_SHA256: ce58e0eceb770e5b9bc3842ce096deccd9640d986ac0acfec5065305efef2b65
       PARENT_EVIDENCE_SHA256: 526afe1d1cdc1e9996c355c904c6cf19e2e2916425d9c51b72dca01c8881fecb
@@ -38,7 +38,7 @@ jobs:
           set -uo pipefail
           E="$GITHUB_WORKSPACE/runtime-evidence"
           mkdir -p "$E"
-          KIT="$GITHUB_WORKSPACE/Frames-0.9.98-Runtime-Certification-Kit-v108-r8.zip"
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip"
           EXTRACT="$RUNNER_TEMP/frames-v108-r4-kit"
           NESTED="$EXTRACT/Frames-0.9.98-Source-v108.zip"
 
@@ -47,14 +47,14 @@ jobs:
           echo "expected_source_sha=$EXPECTED_SOURCE_SHA256"
 
           if [[ ! -f "$KIT" ]]; then
-            echo "::error::Required upload-last runtime kit is missing: Frames-0.9.98-Runtime-Certification-Kit-v108-r8.zip"
+            echo "::error::Required upload-last runtime kit is missing: Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip"
             python3 - "$E/SOURCE-SEAL-EVIDENCE.json" <<'PY'
           import json,sys
           json.dump({
             'status':'FAIL',
             'reason':'upload-last runtime certification kit missing from repository root',
-            'expected_runtime_kit':'Frames-0.9.98-Runtime-Certification-Kit-v108-r8.zip',
-            'workflow_revision':'v108-integrated-secure-online-services-r8'
+            'expected_runtime_kit':'Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip',
+            'workflow_revision':'v108-integrated-secure-online-services-r9'
           }, open(sys.argv[1],'w'), indent=2)
           open(sys.argv[1],'a').write('\n')
           PY
@@ -72,8 +72,8 @@ jobs:
             'status':'FAIL',
             'reason':'runtime certification kit SHA-256 mismatch',
             'actual_runtime_kit_sha256':sys.argv[2],
-            'expected_runtime_kit_sha256':'daac11f094993f235987f8497f67be1cce0843127a2556b4e3b11c51ef9bf2aa',
-            'workflow_revision':'v108-integrated-secure-online-services-r8'
+            'expected_runtime_kit_sha256':'61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a',
+            'workflow_revision':'v108-integrated-secure-online-services-r9'
           }, open(sys.argv[1],'w'), indent=2)
           open(sys.argv[1],'a').write('\n')
           PY
@@ -118,7 +118,7 @@ jobs:
             'reason':'embedded sealed source SHA-256 mismatch',
             'actual_source_sha256':sys.argv[2],
             'expected_source_sha256':'5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d',
-            'workflow_revision':'v108-integrated-secure-online-services-r8'
+            'workflow_revision':'v108-integrated-secure-online-services-r9'
           }, open(sys.argv[1],'w'), indent=2)
           open(sys.argv[1],'a').write('\n')
           PY
@@ -165,11 +165,11 @@ jobs:
             'status':'PASS',
             'frames_version':'0.9.98',
             'source_revision':'v108-train',
-            'runtime_kit':'Frames-0.9.98-Runtime-Certification-Kit-v108-r8.zip',
+            'runtime_kit':'Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip',
             'runtime_kit_sha256':kit_sha,
             'source_archive':'Frames-0.9.98-Source-v108.zip',
             'source_sha256':source_sha,
-            'workflow_revision':'v108-integrated-secure-online-services-r8'
+            'workflow_revision':'v108-integrated-secure-online-services-r9'
           }, open(out,'w'), indent=2)
           open(out,'a').write('\n')
           PY
@@ -208,7 +208,7 @@ jobs:
           json.dump({
               'status':status,
               'profile':'frames-0.9.98-v108-executable-normalization',
-              'workflow_revision':'v108-integrated-secure-online-services-r8',
+              'workflow_revision':'v108-integrated-secure-online-services-r9',
               'checks':checks
           }, open(out,'w'), indent=2)
           open(out,'a').write('\n')
@@ -234,7 +234,7 @@ jobs:
           import json,sys
           rc=int(sys.argv[2])
           json.dump({'status':'PASS' if rc==0 else 'FAIL','exit_code':rc,
-                     'workflow_revision':'v108-integrated-secure-online-services-r8'},open(sys.argv[1],'w'),indent=2)
+                     'workflow_revision':'v108-integrated-secure-online-services-r9'},open(sys.argv[1],'w'),indent=2)
           open(sys.argv[1],'a').write('\n')
           PY
           exit "$rc"
@@ -256,14 +256,14 @@ jobs:
             python3 - "$E/OVMF-FIRMWARE-EVIDENCE.json" "$code" "$vars" <<'PY'
           import json,sys
           json.dump({'status':'PASS','ovmf_code':sys.argv[2],'ovmf_vars':sys.argv[3] or None,
-                     'workflow_revision':'v108-integrated-secure-online-services-r8'},open(sys.argv[1],'w'),indent=2)
+                     'workflow_revision':'v108-integrated-secure-online-services-r9'},open(sys.argv[1],'w'),indent=2)
           open(sys.argv[1],'a').write('\n')
           PY
           else
             python3 - "$E/OVMF-FIRMWARE-EVIDENCE.json" <<'PY'
           import json,sys
           json.dump({'status':'FAIL','reason':'OVMF CODE firmware not found after dependency installation',
-                     'workflow_revision':'v108-integrated-secure-online-services-r8'},open(sys.argv[1],'w'),indent=2)
+                     'workflow_revision':'v108-integrated-secure-online-services-r9'},open(sys.argv[1],'w'),indent=2)
           open(sys.argv[1],'a').write('\n')
           PY
             exit 1
@@ -321,7 +321,7 @@ jobs:
           json.dump({
               'status':'PASS',
               'profile':'frames-0.9.98-v108-qemu-nat-harness',
-              'workflow_revision':'v108-integrated-secure-online-services-r8',
+              'workflow_revision':'v108-integrated-secure-online-services-r9',
               'real_qemu':real,
               'wrapper':wrap,
               'secure_lane_source_argument':'user,id=framesnet,restrict=on',
@@ -388,7 +388,7 @@ jobs:
           json.dump({
             'status':'PASS',
             'profile':'frames-0.9.98-v108-post-ready-qmp-capture-harness',
-            'workflow_revision':'v108-integrated-secure-online-services-r8',
+            'workflow_revision':'v108-integrated-secure-online-services-r9',
             'sealed_source_sha256':'5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d',
             'tool':'tools/qmp_secure_online_capture.py',
             'original_tool_sha256':original_sha,
@@ -401,9 +401,83 @@ jobs:
           open(out,'a').write('\n')
           PY
 
+      - name: Prepare integrated HelixFS evidence harness
+        id: helix_harness
+        if: steps.capture_harness.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/runtime-evidence"
+          TOOL="$FRAMES_DIR/tools/helixfs_kernel_phase3_evidence.py"
+          [[ -f "$TOOL" ]]
+
+          original_sha="$(sha256sum "$TOOL" | awk '{print $1}')"
+          if [[ "$original_sha" != "dff17b6c3426fc42e6f836a724a4314287ee4b15274958b2edd8eda0e668a1fa" ]]; then
+            echo "::error::Unexpected helixfs_kernel_phase3_evidence.py SHA: $original_sha"
+            exit 1
+          fi
+
+          python3 - "$TOOL" <<'PY'
+          from pathlib import Path
+          import sys
+          p=Path(sys.argv[1])
+          text=p.read_text()
+          old="checks={'markers_exact_once':all(text.count(m)==1 for m in markers),'ordered':all(text.find(markers[i])<text.find(markers[i+1]) for i in range(len(markers)-1)),'no_fatal':all(x not in text for x in ['FRAMES_FATAL','PANIC','ASSERT_FAIL']),'no_storage_write':all(x not in text for x in ['SCSI WRITE(10)','FRAMES_STORAGE_WRITE_INTEGRITY_OK','FRAMES_STORAGE_WRITE_INTEGRITY_FAIL']),'physical_boot_blocked':'FRAMES_PHYSICAL_BOOT_BLOCKED' in text}"
+          new="""expected_counts={m:1 for m in markers}
+          for m in ['FRAMES_HELIXFS_PATH_RESOLVE_OK','FRAMES_HELIXFS_PATH_READ_OK','FRAMES_HELIXFS_TRAVERSAL_OK','FRAMES_HELIXFS_MULTIBLOCK_OK']: expected_counts[m]=2
+          checks={'markers_expected_counts':all(text.count(m)==expected_counts[m] for m in markers),
+                  'ordered':all(text.find(markers[i])<text.find(markers[i+1]) for i in range(len(markers)-1)),
+                  'fileman_reuse_order':all(text.rfind(m)>text.find('FRAMES_FILEMAN_VFS_OK') and text.rfind(m)<text.find('FRAMES_FILEMAN_HELIXFS_OK') for m in ['FRAMES_HELIXFS_PATH_RESOLVE_OK','FRAMES_HELIXFS_PATH_READ_OK','FRAMES_HELIXFS_TRAVERSAL_OK','FRAMES_HELIXFS_MULTIBLOCK_OK']),
+                  'no_fatal':all(x not in text for x in ['FRAMES_FATAL','PANIC','ASSERT_FAIL']),
+                  'no_storage_write':all(x not in text for x in ['SCSI WRITE(10)','FRAMES_STORAGE_WRITE_INTEGRITY_OK','FRAMES_STORAGE_WRITE_INTEGRITY_FAIL']),
+                  'physical_boot_blocked':'FRAMES_PHYSICAL_BOOT_BLOCKED' in text}"""
+          if text.count(old) != 1:
+              raise SystemExit('expected HelixFS exact-once check block not found exactly once')
+          text=text.replace(old,new,1)
+          old_out="'markers':{m:text.count(m) for m in markers}"
+          new_out="'markers':{m:text.count(m) for m in markers},'expected_counts':expected_counts"
+          if text.count(old_out) != 1:
+              raise SystemExit('expected HelixFS JSON marker output block not found exactly once')
+          p.write_text(text.replace(old_out,new_out,1))
+          PY
+
+          patched_sha="$(sha256sum "$TOOL" | awk '{print $1}')"
+          if [[ "$patched_sha" != "3aae808046b87258c166769fc562f064522cbc7eb585cbcb268984de050bf20c" ]]; then
+            echo "::error::Unexpected patched HelixFS evidence SHA: $patched_sha"
+            exit 1
+          fi
+
+          python3 - "$E/HELIXFS-INTEGRATED-EVIDENCE-HARNESS.json" "$original_sha" "$patched_sha" <<'PY'
+          import json,sys
+          out,original_sha,patched_sha=sys.argv[1:]
+          json.dump({
+            'status':'PASS',
+            'profile':'frames-0.9.98-v108-helixfs-integrated-evidence-harness',
+            'workflow_revision':'v108-integrated-secure-online-services-r9',
+            'sealed_source_sha256':'5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d',
+            'tool':'tools/helixfs_kernel_phase3_evidence.py',
+            'original_tool_sha256':original_sha,
+            'expected_original_tool_sha256':'dff17b6c3426fc42e6f836a724a4314287ee4b15274958b2edd8eda0e668a1fa',
+            'patched_tool_sha256':patched_sha,
+            'expected_patched_tool_sha256':'3aae808046b87258c166769fc562f064522cbc7eb585cbcb268984de050bf20c',
+            'one_time_markers_expected_count':1,
+            'integrated_operational_markers_expected_count':2,
+            'integrated_operational_markers':[
+              'FRAMES_HELIXFS_PATH_RESOLVE_OK',
+              'FRAMES_HELIXFS_PATH_READ_OK',
+              'FRAMES_HELIXFS_TRAVERSAL_OK',
+              'FRAMES_HELIXFS_MULTIBLOCK_OK'
+            ],
+            'required_second_use_context':'after FRAMES_FILEMAN_VFS_OK and before FRAMES_FILEMAN_HELIXFS_OK',
+            'reason':'The integrated desktop intentionally exercises HelixFS path/read/traversal operations once during filesystem-platform proof and again during File Manager integration. Lifecycle phase markers remain exact-once. This repair changes only certification evidence semantics after source verification; sealed source/product bytes remain unchanged.'
+          },open(out,'w'),indent=2)
+          open(out,'a').write('\n')
+          PY
+
       - name: Integrated QEMU connected + secure online desktop gate
         id: secure
-        if: steps.source.outcome == 'success' && steps.permissions.outcome == 'success' && steps.dependencies.outcome == 'success' && steps.firmware.outcome == 'success' && steps.network_harness.outcome == 'success' && steps.capture_harness.outcome == 'success'
+        if: steps.source.outcome == 'success' && steps.permissions.outcome == 'success' && steps.dependencies.outcome == 'success' && steps.firmware.outcome == 'success' && steps.network_harness.outcome == 'success' && steps.capture_harness.outcome == 'success' && steps.helix_harness.outcome == 'success'
         continue-on-error: true
         shell: bash
         run: |
@@ -496,7 +570,7 @@ jobs:
           data={
             'status':'PASS' if secure_rc==0 else 'FAIL',
             'profile':'frames-0.9.98-v108-secure-lane-diagnostic',
-            'workflow_revision':'v108-integrated-secure-online-services-r8',
+            'workflow_revision':'v108-integrated-secure-online-services-r9',
             'secure_lane_exit_code':secure_rc,
             'qemu_exit_code':qrc,
             'capture_exit_code':crc,
@@ -625,6 +699,7 @@ jobs:
             'executable_normalization_evidence':'EXECUTABLE-NORMALIZATION-EVIDENCE.json',
             'qemu_network_harness':'QEMU-NETWORK-HARNESS-EVIDENCE.json',
             'qmp_capture_harness':'QMP-CAPTURE-HARNESS-EVIDENCE.json',
+            'helixfs_integrated_evidence_harness':'HELIXFS-INTEGRATED-EVIDENCE-HARNESS.json',
             'secure_lane_diagnostic':'SECURE-LANE-DIAGNOSTIC.json',
             'prepare':'TRAIN-PREPARE-EVIDENCE.json',
             'secure_online_runtime':'SECURE-ONLINE-SERVICES-RUNTIME-EVIDENCE.json',
@@ -660,7 +735,7 @@ jobs:
           checks['workflow_steps']=all(x=='success' for x in outcomes)
           checks['source_sha_exact']=source_sha=='5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d'
           status='PASS' if all(checks.values()) else 'FAIL'
-          final={'status':status,'profile':'frames-0.9.98-integrated-secure-online-services-certification','workflow_revision':'v108-integrated-secure-online-services-r8','frames_version':'0.9.98','train':'0.9.92-0.9.98','candidate_source_sha256':source_sha,'certified_parent_frames_version':'0.9.91','certified_parent_source_sha256':'ce58e0eceb770e5b9bc3842ce096deccd9640d986ac0acfec5065305efef2b65','certified_parent_evidence_sha256':'526afe1d1cdc1e9996c355c904c6cf19e2e2916425d9c51b72dca01c8881fecb','checks':checks,'qemu_nat_external_connectivity_certified':checks.get('connected_services_runtime',False),'secure_online_services_foundation_certified':checks.get('secure_online_runtime',False) and checks.get('secure_online_visual',False),'live_external_tls_certified':False,'certificate_signature_verification_certified':False,'physical_network_hardware_certified':False,'physical_boot_approved':False,'physical_media_writes_unlocked':False,'target_settings_writeback_enabled':False,'file_operation_write_execution_enabled':False,'power_action_execution_enabled':False,'update_execution_enabled':False,'recovery_action_execution_enabled':False,'frames_1_0_promoted':False}
+          final={'status':status,'profile':'frames-0.9.98-integrated-secure-online-services-certification','workflow_revision':'v108-integrated-secure-online-services-r9','frames_version':'0.9.98','train':'0.9.92-0.9.98','candidate_source_sha256':source_sha,'certified_parent_frames_version':'0.9.91','certified_parent_source_sha256':'ce58e0eceb770e5b9bc3842ce096deccd9640d986ac0acfec5065305efef2b65','certified_parent_evidence_sha256':'526afe1d1cdc1e9996c355c904c6cf19e2e2916425d9c51b72dca01c8881fecb','checks':checks,'qemu_nat_external_connectivity_certified':checks.get('connected_services_runtime',False),'secure_online_services_foundation_certified':checks.get('secure_online_runtime',False) and checks.get('secure_online_visual',False),'live_external_tls_certified':False,'certificate_signature_verification_certified':False,'physical_network_hardware_certified':False,'physical_boot_approved':False,'physical_media_writes_unlocked':False,'target_settings_writeback_enabled':False,'file_operation_write_execution_enabled':False,'power_action_execution_enabled':False,'update_execution_enabled':False,'recovery_action_execution_enabled':False,'frames_1_0_promoted':False}
           (E/'FINAL-SECURE-ONLINE-SERVICES-CERTIFICATION.json').write_text(json.dumps(final,indent=2)+'\n')
           # Manifest all evidence existing at this point except the manifest and its verifier.
           files=sorted(p for p in E.iterdir() if p.is_file() and p.name not in ('EVIDENCE-FILES-SHA256.txt','FINAL-MANIFEST-VERIFY.json'))
