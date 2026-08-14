@@ -1,4 +1,4 @@
-name: Frames 0.9.98 Integrated Secure Online Services Certification v108
+name: Frames 0.9.98 Integrated Secure Online Services Certification v108 r2
 
 on:
   workflow_dispatch:
@@ -16,7 +16,7 @@ jobs:
       EXPECTED_SOURCE_SHA256: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
       EXPECTED_FRAMES_VERSION: 0.9.98
       EXPECTED_SOURCE_REVISION: v108-train
-      WORKFLOW_REVISION: v108-integrated-secure-online-services-r1
+      WORKFLOW_REVISION: v108-integrated-secure-online-services-r2
       PARENT_FRAMES_VERSION: 0.9.91
       PARENT_SOURCE_SHA256: ce58e0eceb770e5b9bc3842ce096deccd9640d986ac0acfec5065305efef2b65
       PARENT_EVIDENCE_SHA256: 526afe1d1cdc1e9996c355c904c6cf19e2e2916425d9c51b72dca01c8881fecb
@@ -24,47 +24,164 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install certification dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 ovmf clang lld python3 unzip zip
-
-      - name: Seal exact certification source
+      - name: Seal exact certification source with bootstrap diagnostics
         id: source
+        if: always()
+        continue-on-error: true
         shell: bash
         run: |
-          set -euo pipefail
-          source_zip="$(find "$GITHUB_WORKSPACE" -maxdepth 3 -type f -name 'Frames-0.9.98-Source-v108.zip' -print | head -n1)"
-          test -n "$source_zip"
+          set -uo pipefail
+          E="$GITHUB_WORKSPACE/runtime-evidence"
+          mkdir -p "$E"
+          {
+            echo "workspace=$GITHUB_WORKSPACE"
+            echo "expected_source=Frames-0.9.98-Source-v108.zip"
+            echo "expected_sha=$EXPECTED_SOURCE_SHA256"
+            echo "--- candidate files ---"
+            find "$GITHUB_WORKSPACE" -maxdepth 6 -type f -printf '%P\n' | sort | head -n 1000
+          } > "$E/BOOTSTRAP-SOURCE-DISCOVERY.txt" 2>&1
+
+          source_zip="$(find "$GITHUB_WORKSPACE" -maxdepth 6 -type f -name 'Frames-0.9.98-Source-v108.zip' -print | head -n1)"
+          if [[ -z "$source_zip" ]]; then
+            python3 - "$E/SOURCE-SEAL-EVIDENCE.json" <<'PY'
+          import json,sys
+          json.dump({
+            'status':'FAIL',
+            'reason':'sealed source archive not found in checked-out repository',
+            'expected_archive':'Frames-0.9.98-Source-v108.zip',
+            'expected_sha256':'5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d',
+            'workflow_revision':'v108-integrated-secure-online-services-r2'
+          }, open(sys.argv[1],'w'), indent=2)
+          open(sys.argv[1],'a').write('\n')
+          PY
+            exit 1
+          fi
+
           actual_sha="$(sha256sum "$source_zip" | awk '{print $1}')"
           echo "source_zip=$source_zip" >> "$GITHUB_OUTPUT"
           echo "source_sha=$actual_sha" >> "$GITHUB_OUTPUT"
-          test "$actual_sha" = "$EXPECTED_SOURCE_SHA256"
-          rm -rf "$RUNNER_TEMP/frames-source"
-          mkdir -p "$RUNNER_TEMP/frames-source"
-          unzip -q "$source_zip" -d "$RUNNER_TEMP/frames-source"
-          frames_dir="$RUNNER_TEMP/frames-source/Frames-0.9.98"
-          test -f "$frames_dir/VERSION"
-          test "$(tr -d '\r\n' < "$frames_dir/VERSION")" = "$EXPECTED_FRAMES_VERSION"
-          test "$(tr -d '\r\n' < "$frames_dir/GUI-REPAIR-REVISION")" = "$EXPECTED_SOURCE_REVISION"
-          chmod +x "$frames_dir/toolchain/Nexus-Language-5.20.0/nexus" "$frames_dir"/tools/*.sh "$frames_dir"/tools/*.py
-          echo "FRAMES_DIR=$frames_dir" >> "$GITHUB_ENV"
-          echo "NEXUS=$frames_dir/toolchain/Nexus-Language-5.20.0/nexus" >> "$GITHUB_ENV"
-          code="$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE.fd' \) | head -n1)"
-          vars="$(find /usr/share/OVMF -type f \( -name 'OVMF_VARS_4M.fd' -o -name 'OVMF_VARS.fd' \) | head -n1 || true)"
-          test -n "$code"
-          echo "OVMF_CODE=$code" >> "$GITHUB_ENV"
-          [[ -n "$vars" ]] && echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"
-          mkdir -p "$GITHUB_WORKSPACE/runtime-evidence"
-          python3 - "$GITHUB_WORKSPACE/runtime-evidence/SOURCE-IDENTITY.json" "$source_zip" "$actual_sha" <<'PY'
+
+          if [[ "$actual_sha" != "$EXPECTED_SOURCE_SHA256" ]]; then
+            python3 - "$E/SOURCE-SEAL-EVIDENCE.json" "$source_zip" "$actual_sha" <<'PY'
           import json,sys,os
-          out,src,sha=sys.argv[1:]
-          json.dump({'status':'PASS','frames_version':'0.9.98','source_revision':'v108-train','source_archive':os.path.basename(src),'source_sha256':sha,'workflow_revision':'v108-integrated-secure-online-services-r1'},open(out,'w'),indent=2)
+          out,src,actual=sys.argv[1:]
+          json.dump({
+            'status':'FAIL',
+            'reason':'sealed source SHA-256 mismatch',
+            'source_archive':os.path.basename(src),
+            'actual_sha256':actual,
+            'expected_sha256':'5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d',
+            'workflow_revision':'v108-integrated-secure-online-services-r2'
+          }, open(out,'w'), indent=2)
           open(out,'a').write('\n')
           PY
+            exit 1
+          fi
+
+          rm -rf "$RUNNER_TEMP/frames-source"
+          mkdir -p "$RUNNER_TEMP/frames-source"
+          python3 - "$source_zip" "$RUNNER_TEMP/frames-source" <<'PY'
+          import sys, zipfile
+          src,dst=sys.argv[1:]
+          with zipfile.ZipFile(src) as z:
+              bad=z.testzip()
+              if bad:
+                  raise SystemExit(f'ZIP integrity failure at {bad}')
+              z.extractall(dst)
+          PY
+
+          frames_dir="$RUNNER_TEMP/frames-source/Frames-0.9.98"
+          if [[ ! -f "$frames_dir/VERSION" || ! -f "$frames_dir/GUI-REPAIR-REVISION" ]]; then
+            python3 - "$E/SOURCE-SEAL-EVIDENCE.json" <<'PY'
+          import json,sys
+          json.dump({'status':'FAIL','reason':'expected Frames-0.9.98 source root/identity files missing after extraction'},open(sys.argv[1],'w'),indent=2)
+          open(sys.argv[1],'a').write('\n')
+          PY
+            exit 1
+          fi
+          version="$(tr -d '\r\n' < "$frames_dir/VERSION")"
+          revision="$(tr -d '\r\n' < "$frames_dir/GUI-REPAIR-REVISION")"
+          if [[ "$version" != "$EXPECTED_FRAMES_VERSION" || "$revision" != "$EXPECTED_SOURCE_REVISION" ]]; then
+            python3 - "$E/SOURCE-SEAL-EVIDENCE.json" "$version" "$revision" <<'PY'
+          import json,sys
+          json.dump({'status':'FAIL','reason':'source identity mismatch','actual_version':sys.argv[2],'actual_revision':sys.argv[3],
+                     'expected_version':'0.9.98','expected_revision':'v108-train'},open(sys.argv[1],'w'),indent=2)
+          open(sys.argv[1],'a').write('\n')
+          PY
+            exit 1
+          fi
+
+          chmod +x "$frames_dir/toolchain/Nexus-Language-5.20.0/nexus" 2>/dev/null || true
+          find "$frames_dir/tools" -maxdepth 1 -type f \( -name '*.sh' -o -name '*.py' \) -exec chmod +x {} +
+
+          echo "FRAMES_DIR=$frames_dir" >> "$GITHUB_ENV"
+          echo "NEXUS=$frames_dir/toolchain/Nexus-Language-5.20.0/nexus" >> "$GITHUB_ENV"
+
+          python3 - "$E/SOURCE-IDENTITY.json" "$source_zip" "$actual_sha" <<'PY'
+          import json,sys,os
+          out,src,sha=sys.argv[1:]
+          json.dump({'status':'PASS','frames_version':'0.9.98','source_revision':'v108-train','source_archive':os.path.basename(src),
+                     'source_sha256':sha,'workflow_revision':'v108-integrated-secure-online-services-r2'},open(out,'w'),indent=2)
+          open(out,'a').write('\n')
+          PY
+          cp "$E/SOURCE-IDENTITY.json" "$E/SOURCE-SEAL-EVIDENCE.json"
+
+      - name: Install certification dependencies with diagnostics
+        id: dependencies
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -uo pipefail
+          E="$GITHUB_WORKSPACE/runtime-evidence"
+          mkdir -p "$E"
+          rc=0
+          {
+            sudo apt-get update &&
+            sudo apt-get install -y qemu-system-x86 ovmf clang lld python3 unzip zip
+          } > "$E/DEPENDENCY-INSTALL.log" 2>&1 || rc=$?
+          python3 - "$E/DEPENDENCY-INSTALL-EVIDENCE.json" "$rc" <<'PY'
+          import json,sys
+          rc=int(sys.argv[2])
+          json.dump({'status':'PASS' if rc==0 else 'FAIL','exit_code':rc,
+                     'workflow_revision':'v108-integrated-secure-online-services-r2'},open(sys.argv[1],'w'),indent=2)
+          open(sys.argv[1],'a').write('\n')
+          PY
+          exit "$rc"
+
+      - name: Resolve OVMF firmware with diagnostics
+        id: firmware
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -uo pipefail
+          E="$GITHUB_WORKSPACE/runtime-evidence"
+          mkdir -p "$E"
+          code="$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE.fd' \) -print 2>/dev/null | head -n1)"
+          vars="$(find /usr/share/OVMF -type f \( -name 'OVMF_VARS_4M.fd' -o -name 'OVMF_VARS.fd' \) -print 2>/dev/null | head -n1)"
+          if [[ -n "$code" ]]; then
+            echo "OVMF_CODE=$code" >> "$GITHUB_ENV"
+            [[ -n "$vars" ]] && echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"
+            python3 - "$E/OVMF-FIRMWARE-EVIDENCE.json" "$code" "$vars" <<'PY'
+          import json,sys
+          json.dump({'status':'PASS','ovmf_code':sys.argv[2],'ovmf_vars':sys.argv[3] or None,
+                     'workflow_revision':'v108-integrated-secure-online-services-r2'},open(sys.argv[1],'w'),indent=2)
+          open(sys.argv[1],'a').write('\n')
+          PY
+          else
+            python3 - "$E/OVMF-FIRMWARE-EVIDENCE.json" <<'PY'
+          import json,sys
+          json.dump({'status':'FAIL','reason':'OVMF CODE firmware not found after dependency installation',
+                     'workflow_revision':'v108-integrated-secure-online-services-r2'},open(sys.argv[1],'w'),indent=2)
+          open(sys.argv[1],'a').write('\n')
+          PY
+            exit 1
+          fi
 
       - name: Prepare and structural regression gate
         id: prepare
+        if: steps.source.outcome == 'success' && steps.dependencies.outcome == 'success' && steps.firmware.outcome == 'success'
         continue-on-error: true
         shell: bash
         run: |
@@ -83,6 +200,7 @@ jobs:
 
       - name: Integrated QEMU connected + secure online desktop gate
         id: secure
+        if: steps.source.outcome == 'success' && steps.dependencies.outcome == 'success' && steps.firmware.outcome == 'success'
         continue-on-error: true
         shell: bash
         run: |
@@ -103,6 +221,7 @@ jobs:
 
       - name: Developer Preview, HelixFS and FAPP regression gate
         id: developer
+        if: steps.source.outcome == 'success' && steps.dependencies.outcome == 'success' && steps.firmware.outcome == 'success'
         continue-on-error: true
         shell: bash
         run: |
@@ -113,6 +232,7 @@ jobs:
 
       - name: SDK tooling regression gate
         id: sdk
+        if: steps.source.outcome == 'success' && steps.dependencies.outcome == 'success' && steps.firmware.outcome == 'success'
         continue-on-error: true
         shell: bash
         run: |
@@ -124,6 +244,9 @@ jobs:
         if: always()
         shell: bash
         env:
+          SOURCE_OUTCOME: ${{ steps.source.outcome }}
+          DEPENDENCIES_OUTCOME: ${{ steps.dependencies.outcome }}
+          FIRMWARE_OUTCOME: ${{ steps.firmware.outcome }}
           PREPARE_OUTCOME: ${{ steps.prepare.outcome }}
           SECURE_OUTCOME: ${{ steps.secure.outcome }}
           DEVELOPER_OUTCOME: ${{ steps.developer.outcome }}
@@ -166,11 +289,16 @@ jobs:
               [[ -f "$FRAMES_DIR/build/$f" ]] && cp "$FRAMES_DIR/build/$f" "$E/$f"
             done
           fi
-          printf '%s\n' "prepare=$PREPARE_OUTCOME" "secure=$SECURE_OUTCOME" "developer=$DEVELOPER_OUTCOME" "sdk=$SDK_OUTCOME" > "$E/WORKFLOW-STEP-OUTCOMES.txt"
-          python3 - "$E" "$EXPECTED_SOURCE_SHA256" "$PREPARE_OUTCOME" "$SECURE_OUTCOME" "$DEVELOPER_OUTCOME" "$SDK_OUTCOME" <<'PY'
+          printf '%s\n' "source=$SOURCE_OUTCOME" "dependencies=$DEPENDENCIES_OUTCOME" "firmware=$FIRMWARE_OUTCOME" "prepare=$PREPARE_OUTCOME" "secure=$SECURE_OUTCOME" "developer=$DEVELOPER_OUTCOME" "sdk=$SDK_OUTCOME" > "$E/WORKFLOW-STEP-OUTCOMES.txt"
+          python3 - "$E" "$SOURCE_OUTCOME" "$DEPENDENCIES_OUTCOME" "$FIRMWARE_OUTCOME" "$PREPARE_OUTCOME" "$SECURE_OUTCOME" "$DEVELOPER_OUTCOME" "$SDK_OUTCOME" <<'PY'
           from pathlib import Path
           import json,sys,hashlib
-          E=Path(sys.argv[1]); source_sha=sys.argv[2]; outcomes=sys.argv[3:]
+          E=Path(sys.argv[1]); outcomes=sys.argv[2:]
+          source_sha=''
+          try:
+              source_sha=json.loads((E/'SOURCE-IDENTITY.json').read_text()).get('source_sha256','')
+          except Exception:
+              pass
           required={
             'prepare':'TRAIN-PREPARE-EVIDENCE.json',
             'secure_online_runtime':'SECURE-ONLINE-SERVICES-RUNTIME-EVIDENCE.json',
@@ -194,6 +322,9 @@ jobs:
             'desktop_image':'DESKTOP-IMAGE-EVIDENCE.json',
           }
           checks={}
+          checks['source_seal']=outcomes[0]=='success'
+          checks['dependencies']=outcomes[1]=='success'
+          checks['firmware']=outcomes[2]=='success'
           for name,fn in required.items():
               p=E/fn
               try: checks[name]=p.is_file() and json.loads(p.read_text()).get('status')=='PASS'
@@ -201,7 +332,7 @@ jobs:
           checks['workflow_steps']=all(x=='success' for x in outcomes)
           checks['source_sha_exact']=source_sha=='5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d'
           status='PASS' if all(checks.values()) else 'FAIL'
-          final={'status':status,'profile':'frames-0.9.98-integrated-secure-online-services-certification','workflow_revision':'v108-integrated-secure-online-services-r1','frames_version':'0.9.98','train':'0.9.92-0.9.98','candidate_source_sha256':source_sha,'certified_parent_frames_version':'0.9.91','certified_parent_source_sha256':'ce58e0eceb770e5b9bc3842ce096deccd9640d986ac0acfec5065305efef2b65','certified_parent_evidence_sha256':'526afe1d1cdc1e9996c355c904c6cf19e2e2916425d9c51b72dca01c8881fecb','checks':checks,'qemu_nat_external_connectivity_certified':checks.get('connected_services_runtime',False),'secure_online_services_foundation_certified':checks.get('secure_online_runtime',False) and checks.get('secure_online_visual',False),'live_external_tls_certified':False,'certificate_signature_verification_certified':False,'physical_network_hardware_certified':False,'physical_boot_approved':False,'physical_media_writes_unlocked':False,'target_settings_writeback_enabled':False,'file_operation_write_execution_enabled':False,'power_action_execution_enabled':False,'update_execution_enabled':False,'recovery_action_execution_enabled':False,'frames_1_0_promoted':False}
+          final={'status':status,'profile':'frames-0.9.98-integrated-secure-online-services-certification','workflow_revision':'v108-integrated-secure-online-services-r2','frames_version':'0.9.98','train':'0.9.92-0.9.98','candidate_source_sha256':source_sha,'certified_parent_frames_version':'0.9.91','certified_parent_source_sha256':'ce58e0eceb770e5b9bc3842ce096deccd9640d986ac0acfec5065305efef2b65','certified_parent_evidence_sha256':'526afe1d1cdc1e9996c355c904c6cf19e2e2916425d9c51b72dca01c8881fecb','checks':checks,'qemu_nat_external_connectivity_certified':checks.get('connected_services_runtime',False),'secure_online_services_foundation_certified':checks.get('secure_online_runtime',False) and checks.get('secure_online_visual',False),'live_external_tls_certified':False,'certificate_signature_verification_certified':False,'physical_network_hardware_certified':False,'physical_boot_approved':False,'physical_media_writes_unlocked':False,'target_settings_writeback_enabled':False,'file_operation_write_execution_enabled':False,'power_action_execution_enabled':False,'update_execution_enabled':False,'recovery_action_execution_enabled':False,'frames_1_0_promoted':False}
           (E/'FINAL-SECURE-ONLINE-SERVICES-CERTIFICATION.json').write_text(json.dumps(final,indent=2)+'\n')
           # Manifest all evidence existing at this point except the manifest and its verifier.
           files=sorted(p for p in E.iterdir() if p.is_file() and p.name not in ('EVIDENCE-FILES-SHA256.txt','FINAL-MANIFEST-VERIFY.json'))
