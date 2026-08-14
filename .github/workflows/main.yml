@@ -1,10 +1,10 @@
-name: Frames 0.9.70 Integrated Productivity & Storage Certification v80
+name: Frames 0.9.77 Integrated Daily Desktop UX Certification v87
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - 'Frames-0.9.70-Integrated-Productivity-Storage-Certification-Kit-v80.zip'
+      - 'Frames-0.9.77-Integrated-Daily-UX-Certification-Kit-v87.zip'
 
 permissions:
   contents: read
@@ -12,7 +12,7 @@ permissions:
 jobs:
   prepare:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v5
 
@@ -20,13 +20,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          KIT="$GITHUB_WORKSPACE/Frames-0.9.70-Integrated-Productivity-Storage-Certification-Kit-v80.zip"
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.77-Integrated-Daily-UX-Certification-Kit-v87.zip"
           [[ -f "$KIT" ]]
-          echo "b3e58565f41a7ba3b264c4b06f00d6c33b44e0d46581f7ffad16e6eb5f5c4b91  Frames-0.9.70-Integrated-Productivity-Storage-Certification-Kit-v80.zip" | sha256sum -c -
-          rm -rf "$GITHUB_WORKSPACE/train-kit" "$GITHUB_WORKSPACE/prepared"
-          mkdir -p "$GITHUB_WORKSPACE/train-kit" "$GITHUB_WORKSPACE/prepared"
-          unzip -q "$KIT" -d "$GITHUB_WORKSPACE/train-kit"
-          KIT_ROOT="$GITHUB_WORKSPACE/train-kit/Frames-0.9.70-Integrated-Productivity-Storage-Certification-Kit-v80"
+          echo "add1a1b75dd6618e995b61a7f8736dace9da45e8cf686980415584e2ccdd0c3f  Frames-0.9.77-Integrated-Daily-UX-Certification-Kit-v87.zip" | sha256sum -c -
+          rm -rf "$GITHUB_WORKSPACE/daily-kit" "$GITHUB_WORKSPACE/prepared"
+          mkdir -p "$GITHUB_WORKSPACE/daily-kit" "$GITHUB_WORKSPACE/prepared"
+          unzip -q "$KIT" -d "$GITHUB_WORKSPACE/daily-kit"
+          KIT_ROOT="$GITHUB_WORKSPACE/daily-kit/Frames-0.9.77-Integrated-Daily-UX-Certification-Kit-v87"
           echo "KIT_ROOT=$KIT_ROOT" >> "$GITHUB_ENV"
 
       - name: Install build tools
@@ -36,12 +36,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang lld python3 unzip
 
-      - name: Seal certified parent and exact 0.9.70 train impact
+      - name: Seal certified parent and exact train impact
         shell: bash
         run: |
           set -euo pipefail
           python3 "$KIT_ROOT/prepare-train.py" "$KIT_ROOT" "$GITHUB_WORKSPACE/prepared"
-          FRAMES_DIR="$GITHUB_WORKSPACE/prepared/source/Frames-0.9.70"
+          FRAMES_DIR="$GITHUB_WORKSPACE/prepared/source/Frames-0.9.77"
           echo "FRAMES_DIR=$FRAMES_DIR" >> "$GITHUB_ENV"
 
       - name: Build exact candidate once
@@ -51,38 +51,30 @@ jobs:
           cd "$FRAMES_DIR"
           export NEXUS="$FRAMES_DIR/toolchain/Nexus-Language-5.20.0/nexus"
           chmod +x tools/*.sh tools/*.py sdk/*.sh sdk/*.py "$NEXUS" 2>/dev/null || true
-
-          python3 tools/verify_productivity_0970.py
+          python3 tools/verify_daily_ux_0977.py
           ./tools/build.sh
-
-          python3 tools/verify_theme_pack.py --require-pass             > "$GITHUB_WORKSPACE/prepared/THEME-PACK-EVIDENCE.json"
-
+          python3 tools/verify_theme_pack.py --require-pass > "$GITHUB_WORKSPACE/prepared/THEME-PACK-EVIDENCE.json"
           python3 tools/make_esp.py
           python3 tools/verify_release.py
-
-          python3 tools/sdk_selftest.py --require-pass             > "$GITHUB_WORKSPACE/prepared/SDK-PREP-EVIDENCE.json"
-
+          python3 tools/sdk_selftest.py --require-pass > "$GITHUB_WORKSPACE/prepared/SDK-PREP-EVIDENCE.json"
           python3 tools/make_developer_preview_image.py
-          python3 tools/verify_developer_preview_image.py             --image build/Frames-0.9.70-Developer-Preview.img             --package build/HelloFrames.fapp             --require-pass
-
-          python3 tools/app_packaging_evidence.py             --package build/HelloFrames.fapp             --image build/Frames-0.9.70-Developer-Preview.img             --require-pass             > "$GITHUB_WORKSPACE/prepared/APP-PACKAGING-PREP-EVIDENCE.json"
-
+          python3 tools/verify_developer_preview_image.py             --image build/Frames-0.9.77-Developer-Preview.img             --package build/HelloFrames.fapp --require-pass
+          python3 tools/app_packaging_evidence.py             --package build/HelloFrames.fapp             --image build/Frames-0.9.77-Developer-Preview.img --require-pass             > "$GITHUB_WORKSPACE/prepared/APP-PACKAGING-PREP-EVIDENCE.json"
           python3 tools/make_desktop_preview_image.py
-          python3 tools/verify_desktop_preview_image.py             --image build/Frames-0.9.70-Desktop-Preview.img             --package build/HelloFrames.fapp             --require-pass             > "$GITHUB_WORKSPACE/prepared/DESKTOP-IMAGE-EVIDENCE.json"
-
+          python3 tools/verify_desktop_preview_image.py             --image build/Frames-0.9.77-Desktop-Preview.img             --package build/HelloFrames.fapp --require-pass             > "$GITHUB_WORKSPACE/prepared/DESKTOP-IMAGE-EVIDENCE.json"
           tar -czf "$GITHUB_WORKSPACE/prepared-source-build.tgz"             -C "$GITHUB_WORKSPACE/prepared" source
 
       - name: Upload prepared exact build
         uses: actions/upload-artifact@v7
         with:
-          name: frames-0970-v80-prepared-source-build
+          name: frames-0977-v87-prepared-source-build
           path: prepared-source-build.tgz
           if-no-files-found: error
 
       - name: Upload prepare evidence
         uses: actions/upload-artifact@v7
         with:
-          name: frames-0970-v80-prepare-evidence
+          name: frames-0977-v87-prepare-evidence
           path: |
             prepared/TRAIN-PREPARE-EVIDENCE.json
             prepared/THEME-PACK-EVIDENCE.json
@@ -92,12 +84,12 @@ jobs:
   lanes:
     needs: prepare
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       max-parallel: 4
       matrix:
-        lane: [desktop-productivity, kernel-readonly, developer-preview, sdk-packaging]
+        lane: [desktop-daily-ux, kernel-readonly, developer-preview, sdk-packaging]
 
     steps:
       - uses: actions/checkout@v5
@@ -106,31 +98,31 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          KIT="$GITHUB_WORKSPACE/Frames-0.9.70-Integrated-Productivity-Storage-Certification-Kit-v80.zip"
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.77-Integrated-Daily-UX-Certification-Kit-v87.zip"
           [[ -f "$KIT" ]]
-          echo "b3e58565f41a7ba3b264c4b06f00d6c33b44e0d46581f7ffad16e6eb5f5c4b91  Frames-0.9.70-Integrated-Productivity-Storage-Certification-Kit-v80.zip" | sha256sum -c -
-          rm -rf "$GITHUB_WORKSPACE/train-kit"
-          mkdir -p "$GITHUB_WORKSPACE/train-kit"
-          unzip -q "$KIT" -d "$GITHUB_WORKSPACE/train-kit"
-          KIT_ROOT="$GITHUB_WORKSPACE/train-kit/Frames-0.9.70-Integrated-Productivity-Storage-Certification-Kit-v80"
-          [[ -f "$KIT_ROOT/qmp-productivity-capture.py" ]]
-          [[ -f "$KIT_ROOT/productivity-visual-evidence.py" ]]
+          echo "add1a1b75dd6618e995b61a7f8736dace9da45e8cf686980415584e2ccdd0c3f  Frames-0.9.77-Integrated-Daily-UX-Certification-Kit-v87.zip" | sha256sum -c -
+          rm -rf "$GITHUB_WORKSPACE/daily-kit"
+          mkdir -p "$GITHUB_WORKSPACE/daily-kit"
+          unzip -q "$KIT" -d "$GITHUB_WORKSPACE/daily-kit"
+          KIT_ROOT="$GITHUB_WORKSPACE/daily-kit/Frames-0.9.77-Integrated-Daily-UX-Certification-Kit-v87"
+          [[ -f "$KIT_ROOT/qmp-daily-ux-capture.py" ]]
+          [[ -f "$KIT_ROOT/daily-ux-visual-evidence.py" ]]
           echo "KIT_ROOT=$KIT_ROOT" >> "$GITHUB_ENV"
 
       - name: Download prepared exact build
         uses: actions/download-artifact@v7
         with:
-          name: frames-0970-v80-prepared-source-build
+          name: frames-0977-v87-prepared-source-build
           path: .
 
-      - name: Restore prepared build and create evidence directory
+      - name: Restore prepared build
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p prepared lane-evidence
           echo "${{ matrix.lane }}" > lane-evidence/LANE-NAME.txt
           tar -xzf prepared-source-build.tgz -C prepared
-          FRAMES_DIR="$GITHUB_WORKSPACE/prepared/source/Frames-0.9.70"
+          FRAMES_DIR="$GITHUB_WORKSPACE/prepared/source/Frames-0.9.77"
           echo "FRAMES_DIR=$FRAMES_DIR" >> "$GITHUB_ENV"
           echo "NEXUS_EXE=$FRAMES_DIR/toolchain/Nexus-Language-5.20.0/nexus" >> "$GITHUB_ENV"
           chmod +x "$FRAMES_DIR"/tools/*.sh "$FRAMES_DIR"/tools/*.py "$FRAMES_DIR"/sdk/*.sh "$FRAMES_DIR"/sdk/*.py "$FRAMES_DIR"/toolchain/Nexus-Language-5.20.0/nexus 2>/dev/null || true
@@ -138,6 +130,255 @@ jobs:
       - name: Install QEMU for runtime lanes
         if: matrix.lane != 'sdk-packaging'
         shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf python3
+          OVMF_CODE=/usr/share/OVMF/OVMF_CODE_4M.fd
+          OVMF_VARS=/usr/share/OVMF/OVMF_VARS_4M.fd
+          [[ -f "$OVMF_CODE" && -f "$OVMF_VARS" ]]
+          echo "OVMF_CODE=$OVMF_CODE" >> "$GITHUB_ENV"
+          echo "OVMF_VARS=$OVMF_VARS" >> "$GITHUB_ENV"
+
+      - name: Daily UX desktop framebuffer lane
+        id: desktop
+        if: matrix.lane == 'desktop-daily-ux'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"
+          export NEXUS="$NEXUS_EXE"
+          BOOT=build/Frames-0.9.77-Desktop-Preview.img
+          cp "$BOOT" "$BOOT.before"
+          LOG=build/daily-ux-serial.log
+          QMP=build/daily-ux-qmp.sock
+          PPM=build/daily-ux.ppm
+          DBG=build/daily-ux-qemu-debug.log
+          CAP=build/daily-ux-capture.log
+          QERR=build/daily-ux-qemu-stderr.log
+          rm -f "$LOG" "$QMP" "$PPM" "$DBG" "$CAP" "$QERR"
+          : > "$LOG"; : > "$DBG"; : > "$CAP"; : > "$QERR"
+          cp "$OVMF_VARS" build/OVMF_VARS.daily.fd
+
+          set +e
+          timeout 270 qemu-system-x86_64             -machine q35 -accel tcg,thread=multi -m 2048M -smp 4 -cpu max             -display none -vga std -serial file:"$LOG" -no-reboot -no-shutdown             -qmp "unix:$QMP,server=on,wait=off" -d guest_errors -D "$DBG"             -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE"             -drive if=pflash,format=raw,file=build/OVMF_VARS.daily.fd             -drive if=none,id=desktopboot,format=raw,readonly=on,file="$BOOT"             -device nvme,serial=FRAMESDAILY0977,drive=desktopboot,bootindex=1             > "$QERR" 2>&1 &
+          qpid=$!
+
+          python3 "$KIT_ROOT/qmp-daily-ux-capture.py" "$QMP" "$LOG" "$PPM"             > "$CAP" 2>&1 &
+          cpid=$!
+          wait "$cpid"; crc=$?
+          if kill -0 "$qpid" 2>/dev/null && [[ "$crc" -ne 0 ]]; then
+            kill -TERM "$qpid" 2>/dev/null || true
+          fi
+          wait "$qpid"; qrc=$?
+          set -e
+
+          echo "$qrc" > build/DAILY-QEMU-EXIT-CODE.txt
+          echo "$crc" > build/DAILY-CAPTURE-EXIT-CODE.txt
+
+          python3 - "$LOG" "$CAP" "$QERR" "$DBG" "$qrc" "$crc" "$GITHUB_WORKSPACE/lane-evidence/DESKTOP-LANE-DIAGNOSTIC.json" <<'PY'
+          from pathlib import Path
+          import hashlib,json,sys
+          log=Path(sys.argv[1]); cap=Path(sys.argv[2]); qerr=Path(sys.argv[3]); dbg=Path(sys.argv[4])
+          qrc=int(sys.argv[5]); crc=int(sys.argv[6]); out=Path(sys.argv[7])
+          serial=log.read_text(errors="replace") if log.exists() else ""
+          d={
+              "status":"PASS" if qrc==0 and crc==0 else "FAIL",
+              "profile":"frames-0.9.77-v87-desktop-lane-diagnostic",
+              "qemu_exit_code":qrc,
+              "capture_exit_code":crc,
+              "serial_size":log.stat().st_size if log.exists() else 0,
+              "serial_sha256":hashlib.sha256(log.read_bytes()).hexdigest() if log.exists() else None,
+              "capture_tail":cap.read_text(errors="replace")[-8000:] if cap.exists() else "",
+              "qemu_stderr_tail":qerr.read_text(errors="replace")[-8000:] if qerr.exists() else "",
+              "qemu_debug_size":dbg.stat().st_size if dbg.exists() else 0,
+              "markers":{
+                  "daily_ux":serial.count("FRAMES_DAILY_UX_INTEGRATED_OK"),
+                  "productivity":serial.count("FRAMES_PRODUCTIVITY_INTEGRATED_OK"),
+                  "appearance":serial.count("FRAMES_APPEARANCE_SYSTEM_OK"),
+                  "kernel_ready":serial.count("FRAMES_KERNEL_READY"),
+                  "desktop_fail":serial.count("FRAMES_DESKTOP_CERT_FAIL"),
+                  "boot_error":serial.count("FRAMES BOOT ERROR:"),
+              },
+          }
+          out.write_text(json.dumps(d,indent=2)+"\n")
+          print(json.dumps(d,indent=2))
+          PY
+
+          cp "$LOG" "$DBG" "$CAP" "$QERR" build/DAILY-QEMU-EXIT-CODE.txt build/DAILY-CAPTURE-EXIT-CODE.txt "$GITHUB_WORKSPACE/lane-evidence/" || true
+          [[ ! -f "$PPM" ]] || cp "$PPM" "$GITHUB_WORKSPACE/lane-evidence/"
+
+          if [[ "$qrc" -eq 0 && "$crc" -eq 0 && -s "$LOG" && -s "$PPM" ]]; then
+            python3 tools/daily_ux_integrated_evidence.py               --serial "$LOG" --qemu-exit "$qrc" --require-pass               > "$GITHUB_WORKSPACE/lane-evidence/DAILY-UX-RUNTIME-EVIDENCE.json"
+            python3 tools/productivity_integrated_evidence.py               --serial "$LOG" --qemu-exit "$qrc" --require-pass               > "$GITHUB_WORKSPACE/lane-evidence/PRODUCTIVITY-RUNTIME-EVIDENCE.json"
+            python3 tools/appearance_integrated_evidence.py               --serial "$LOG" --qemu-exit "$qrc" --require-pass               > "$GITHUB_WORKSPACE/lane-evidence/APPEARANCE-RUNTIME-EVIDENCE.json"
+            python3 "$KIT_ROOT/daily-ux-visual-evidence.py"               --serial "$LOG" --ppm "$PPM" --qemu-exit "$qrc"               --media-before "$BOOT.before" --media-after "$BOOT" --require-pass               > "$GITHUB_WORKSPACE/lane-evidence/DAILY-UX-VISUAL-EVIDENCE.json"
+          fi
+
+          [[ "$qrc" -eq 0 && "$crc" -eq 0 ]]
+          [[ -s "$LOG" && -s "$PPM" ]]
+          [[ -f "$GITHUB_WORKSPACE/lane-evidence/DAILY-UX-RUNTIME-EVIDENCE.json" ]]
+          [[ -f "$GITHUB_WORKSPACE/lane-evidence/PRODUCTIVITY-RUNTIME-EVIDENCE.json" ]]
+          [[ -f "$GITHUB_WORKSPACE/lane-evidence/APPEARANCE-RUNTIME-EVIDENCE.json" ]]
+          [[ -f "$GITHUB_WORKSPACE/lane-evidence/DAILY-UX-VISUAL-EVIDENCE.json" ]]
+
+      - name: Kernel and HelixFS read-only regression lane
+        if: matrix.lane == 'kernel-readonly'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"
+          export NEXUS="$NEXUS_EXE" FRAMES_PREBUILT=1 OVMF_CODE OVMF_VARS
+          ./tools/qemu_helixfs_readonly_smoke.sh
+          cp build/RUNTIME-EVIDENCE.json build/HELIXFS-KERNEL-PHASE3-EVIDENCE.json "$GITHUB_WORKSPACE/lane-evidence/"
+
+      - name: Developer Preview regression lane
+        if: matrix.lane == 'developer-preview'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"
+          export NEXUS="$NEXUS_EXE" FRAMES_PREBUILT=1 OVMF_CODE OVMF_VARS
+          ./tools/qemu_developer_preview_certify.sh
+          cp build/DEVELOPER-PREVIEW-EVIDENCE.json build/DEVELOPER-PREVIEW-PHASE3-EVIDENCE.json             build/APP-LOADER-EVIDENCE.json build/HELIXFS-PHASE2-EVIDENCE.json build/HELIXFS-PHASE3-EVIDENCE.json             "$GITHUB_WORKSPACE/lane-evidence/"
+
+      - name: SDK FAPP and theme packaging regression lane
+        if: matrix.lane == 'sdk-packaging'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"
+          export NEXUS="$NEXUS_EXE"
+          python3 tools/verify_theme_pack.py --require-pass > "$GITHUB_WORKSPACE/lane-evidence/THEME-PACK-SDK-REGRESSION.json"
+          python3 tools/sdk_selftest.py --require-pass > "$GITHUB_WORKSPACE/lane-evidence/SDK-TOOLING-EVIDENCE.json"
+          python3 tools/app_packaging_evidence.py             --package build/HelloFrames.fapp --image build/Frames-0.9.77-Developer-Preview.img --require-pass             > "$GITHUB_WORKSPACE/lane-evidence/APP-PACKAGING-EVIDENCE.json"
+
+      - name: Upload lane evidence before verdict
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frames-0977-v87-lane-${{ matrix.lane }}
+          path: lane-evidence
+          if-no-files-found: error
+
+      - name: Fail desktop lane after preserving diagnostics
+        if: always() && matrix.lane == 'desktop-daily-ux'
+        shell: bash
+        run: |
+          echo "desktop=${{ steps.desktop.outcome }}"
+          [[ "${{ steps.desktop.outcome }}" == "success" ]]
+
+  aggregate:
+    needs: [prepare, lanes]
+    runs-on: ubuntu-24.04
+    if: always() && needs.prepare.result == 'success'
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Verify and extract certification kit
+        shell: bash
+        run: |
+          set -euo pipefail
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.77-Integrated-Daily-UX-Certification-Kit-v87.zip"
+          [[ -f "$KIT" ]]
+          echo "add1a1b75dd6618e995b61a7f8736dace9da45e8cf686980415584e2ccdd0c3f  Frames-0.9.77-Integrated-Daily-UX-Certification-Kit-v87.zip" | sha256sum -c -
+          rm -rf "$GITHUB_WORKSPACE/daily-kit" "$GITHUB_WORKSPACE/runtime-evidence"
+          mkdir -p "$GITHUB_WORKSPACE/daily-kit" "$GITHUB_WORKSPACE/runtime-evidence"
+          unzip -q "$KIT" -d "$GITHUB_WORKSPACE/daily-kit"
+          KIT_ROOT="$GITHUB_WORKSPACE/daily-kit/Frames-0.9.77-Integrated-Daily-UX-Certification-Kit-v87"
+          echo "KIT_ROOT=$KIT_ROOT" >> "$GITHUB_ENV"
+
+      - name: Download prepare evidence
+        uses: actions/download-artifact@v7
+        with:
+          name: frames-0977-v87-prepare-evidence
+          path: runtime-evidence
+
+      - name: Download all lane evidence
+        uses: actions/download-artifact@v7
+        with:
+          pattern: frames-0977-v87-lane-*
+          path: runtime-evidence
+          merge-multiple: true
+
+      - name: Produce final integrated verdict
+        id: final
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ needs.lanes.result }}" == "success" ]]; then
+            python3 "$KIT_ROOT/finalize-train.py" "$GITHUB_WORKSPACE/runtime-evidence"
+          else
+            python3 - "$GITHUB_WORKSPACE/runtime-evidence" "${{ needs.lanes.result }}" <<'PY'
+          from pathlib import Path
+          import json,sys
+          r=Path(sys.argv[1]); lane_result=sys.argv[2]
+          out={
+              "status":"FAIL",
+              "profile":"frames-0.9.77-integrated-daily-desktop-ux-certification",
+              "workflow_revision":"v87-integrated-daily-ux-r1",
+              "frames_version":"0.9.77",
+              "train":"0.9.71-0.9.77",
+              "candidate_source_sha256":"bd3cb03c00418ec78923c2d16d6b3b52881f9675314f1234e50b7b4e023b2521",
+              "lane_result":lane_result,
+              "reason":"one_or_more_matrix_lanes_failed",
+              "physical_boot_approved":False,
+              "physical_media_writes_unlocked":False,
+              "target_settings_writeback_enabled":False,
+              "file_operation_write_execution_enabled":False,
+              "power_action_execution_enabled":False,
+              "frames_1_0_promoted":False,
+          }
+          (r/"FINAL-DAILY-UX-CERTIFICATION.json").write_text(json.dumps(out,indent=2)+"\n")
+          print(json.dumps(out,indent=2))
+          raise SystemExit(1)
+          PY
+          fi
+
+      - name: Seal aggregate evidence manifest
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$GITHUB_WORKSPACE/runtime-evidence" <<'PY'
+          from pathlib import Path
+          import hashlib,json,sys
+          r=Path(sys.argv[1])
+          def H(p):
+              h=hashlib.sha256()
+              with open(p,"rb") as f:
+                  for x in iter(lambda:f.read(1<<20),b""): h.update(x)
+              return h.hexdigest()
+          files=[p for p in sorted(r.rglob("*")) if p.is_file() and p.name!="EVIDENCE-FILES-SHA256.txt"]
+          (r/"EVIDENCE-FILES-SHA256.txt").write_text("".join(f"{H(p)}  {p.relative_to(r).as_posix()}\n" for p in files))
+          mismatches=[]
+          for line in (r/"EVIDENCE-FILES-SHA256.txt").read_text().splitlines():
+              expected,name=line.split("  ",1)
+              if H(r/name)!=expected: mismatches.append(name)
+          (r/"FINAL-MANIFEST-VERIFY.json").write_text(json.dumps({"status":"PASS" if not mismatches else "FAIL","mismatches":mismatches},indent=2)+"\n")
+          assert not mismatches
+          PY
+
+      - name: Upload final integrated certification artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frames-0.9.77-integrated-daily-ux-evidence-v87
+          path: runtime-evidence
+          if-no-files-found: error
+
+      - name: Fail closed only after evidence upload
+        if: always()
+        shell: bash
+        run: |
+          echo "prepare=${{ needs.prepare.result }}"
+          echo "lanes=${{ needs.lanes.result }}"
+          echo "final=${{ steps.final.outcome }}"
+          [[ "${{ needs.prepare.result }}" == "success" ]]
+          [[ "${{ needs.lanes.result }}" == "success" ]]
+          [[ "${{ steps.final.outcome }}" == "success" ]]        shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
