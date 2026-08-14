@@ -1,11 +1,11 @@
-name: Frames 0.9.98 Integrated Secure Online Services Certification v108 r5
+name: Frames 0.9.98 Integrated Secure Online Services Certification v108 r6
 
 on:
   workflow_dispatch:
   push:
     branches: [ main ]
     paths:
-      - 'Frames-0.9.98-Runtime-Certification-Kit-v108-r5.zip'
+      - 'Frames-0.9.98-Runtime-Certification-Kit-v108-r6.zip'
 
 permissions:
   contents: read
@@ -16,12 +16,12 @@ jobs:
     timeout-minutes: 35
     env:
       # Automatic runs are intentionally triggered ONLY by uploading/replacing
-      # Frames-0.9.98-Runtime-Certification-Kit-v108-r5.zip. Updating this workflow file does not start a run.
-      EXPECTED_RUNTIME_KIT_SHA256: d78e7ab1eb5303cbde7801d979a70e4659b6b2ccec5f4ebb671a273cae5d006e
+      # Frames-0.9.98-Runtime-Certification-Kit-v108-r6.zip. Updating this workflow file does not start a run.
+      EXPECTED_RUNTIME_KIT_SHA256: 8a48cee56f68bdf2cb447f096b8fa1ebe525f61931f1c791fe8f0bad258ba4a5
       EXPECTED_SOURCE_SHA256: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
       EXPECTED_FRAMES_VERSION: 0.9.98
       EXPECTED_SOURCE_REVISION: v108-train
-      WORKFLOW_REVISION: v108-integrated-secure-online-services-r5
+      WORKFLOW_REVISION: v108-integrated-secure-online-services-r6
       PARENT_FRAMES_VERSION: 0.9.91
       PARENT_SOURCE_SHA256: ce58e0eceb770e5b9bc3842ce096deccd9640d986ac0acfec5065305efef2b65
       PARENT_EVIDENCE_SHA256: 526afe1d1cdc1e9996c355c904c6cf19e2e2916425d9c51b72dca01c8881fecb
@@ -38,7 +38,7 @@ jobs:
           set -uo pipefail
           E="$GITHUB_WORKSPACE/runtime-evidence"
           mkdir -p "$E"
-          KIT="$GITHUB_WORKSPACE/Frames-0.9.98-Runtime-Certification-Kit-v108-r5.zip"
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.98-Runtime-Certification-Kit-v108-r6.zip"
           EXTRACT="$RUNNER_TEMP/frames-v108-r4-kit"
           NESTED="$EXTRACT/Frames-0.9.98-Source-v108.zip"
 
@@ -47,14 +47,14 @@ jobs:
           echo "expected_source_sha=$EXPECTED_SOURCE_SHA256"
 
           if [[ ! -f "$KIT" ]]; then
-            echo "::error::Required upload-last runtime kit is missing: Frames-0.9.98-Runtime-Certification-Kit-v108-r5.zip"
+            echo "::error::Required upload-last runtime kit is missing: Frames-0.9.98-Runtime-Certification-Kit-v108-r6.zip"
             python3 - "$E/SOURCE-SEAL-EVIDENCE.json" <<'PY'
           import json,sys
           json.dump({
             'status':'FAIL',
             'reason':'upload-last runtime certification kit missing from repository root',
-            'expected_runtime_kit':'Frames-0.9.98-Runtime-Certification-Kit-v108-r5.zip',
-            'workflow_revision':'v108-integrated-secure-online-services-r5'
+            'expected_runtime_kit':'Frames-0.9.98-Runtime-Certification-Kit-v108-r6.zip',
+            'workflow_revision':'v108-integrated-secure-online-services-r6'
           }, open(sys.argv[1],'w'), indent=2)
           open(sys.argv[1],'a').write('\n')
           PY
@@ -72,8 +72,8 @@ jobs:
             'status':'FAIL',
             'reason':'runtime certification kit SHA-256 mismatch',
             'actual_runtime_kit_sha256':sys.argv[2],
-            'expected_runtime_kit_sha256':'d78e7ab1eb5303cbde7801d979a70e4659b6b2ccec5f4ebb671a273cae5d006e',
-            'workflow_revision':'v108-integrated-secure-online-services-r5'
+            'expected_runtime_kit_sha256':'8a48cee56f68bdf2cb447f096b8fa1ebe525f61931f1c791fe8f0bad258ba4a5',
+            'workflow_revision':'v108-integrated-secure-online-services-r6'
           }, open(sys.argv[1],'w'), indent=2)
           open(sys.argv[1],'a').write('\n')
           PY
@@ -118,7 +118,7 @@ jobs:
             'reason':'embedded sealed source SHA-256 mismatch',
             'actual_source_sha256':sys.argv[2],
             'expected_source_sha256':'5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d',
-            'workflow_revision':'v108-integrated-secure-online-services-r5'
+            'workflow_revision':'v108-integrated-secure-online-services-r6'
           }, open(sys.argv[1],'w'), indent=2)
           open(sys.argv[1],'a').write('\n')
           PY
@@ -165,11 +165,11 @@ jobs:
             'status':'PASS',
             'frames_version':'0.9.98',
             'source_revision':'v108-train',
-            'runtime_kit':'Frames-0.9.98-Runtime-Certification-Kit-v108-r5.zip',
+            'runtime_kit':'Frames-0.9.98-Runtime-Certification-Kit-v108-r6.zip',
             'runtime_kit_sha256':kit_sha,
             'source_archive':'Frames-0.9.98-Source-v108.zip',
             'source_sha256':source_sha,
-            'workflow_revision':'v108-integrated-secure-online-services-r5'
+            'workflow_revision':'v108-integrated-secure-online-services-r6'
           }, open(out,'w'), indent=2)
           open(out,'a').write('\n')
           PY
@@ -208,7 +208,7 @@ jobs:
           json.dump({
               'status':status,
               'profile':'frames-0.9.98-v108-executable-normalization',
-              'workflow_revision':'v108-integrated-secure-online-services-r5',
+              'workflow_revision':'v108-integrated-secure-online-services-r6',
               'checks':checks
           }, open(out,'w'), indent=2)
           open(out,'a').write('\n')
@@ -234,7 +234,7 @@ jobs:
           import json,sys
           rc=int(sys.argv[2])
           json.dump({'status':'PASS' if rc==0 else 'FAIL','exit_code':rc,
-                     'workflow_revision':'v108-integrated-secure-online-services-r5'},open(sys.argv[1],'w'),indent=2)
+                     'workflow_revision':'v108-integrated-secure-online-services-r6'},open(sys.argv[1],'w'),indent=2)
           open(sys.argv[1],'a').write('\n')
           PY
           exit "$rc"
@@ -256,22 +256,84 @@ jobs:
             python3 - "$E/OVMF-FIRMWARE-EVIDENCE.json" "$code" "$vars" <<'PY'
           import json,sys
           json.dump({'status':'PASS','ovmf_code':sys.argv[2],'ovmf_vars':sys.argv[3] or None,
-                     'workflow_revision':'v108-integrated-secure-online-services-r5'},open(sys.argv[1],'w'),indent=2)
+                     'workflow_revision':'v108-integrated-secure-online-services-r6'},open(sys.argv[1],'w'),indent=2)
           open(sys.argv[1],'a').write('\n')
           PY
           else
             python3 - "$E/OVMF-FIRMWARE-EVIDENCE.json" <<'PY'
           import json,sys
           json.dump({'status':'FAIL','reason':'OVMF CODE firmware not found after dependency installation',
-                     'workflow_revision':'v108-integrated-secure-online-services-r5'},open(sys.argv[1],'w'),indent=2)
+                     'workflow_revision':'v108-integrated-secure-online-services-r6'},open(sys.argv[1],'w'),indent=2)
           open(sys.argv[1],'a').write('\n')
           PY
             exit 1
           fi
 
+      - name: Prepare QEMU NAT certification harness
+        id: network_harness
+        if: steps.source.outcome == 'success' && steps.permissions.outcome == 'success' && steps.dependencies.outcome == 'success' && steps.firmware.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/runtime-evidence"
+          WRAP="$RUNNER_TEMP/frames-qemu-v108-r6"
+          REAL_QEMU="$(command -v qemu-system-x86_64)"
+          [[ -x "$REAL_QEMU" ]]
+
+          cat > "$WRAP" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          real="${FRAMES_REAL_QEMU:?}"
+          log="${FRAMES_QEMU_ARG_LOG:?}"
+          args=()
+          changed=0
+          for arg in "$@"; do
+            if [[ "$arg" == "user,id=framesnet,restrict=on" ]]; then
+              args+=("user,id=framesnet,restrict=off")
+              changed=1
+            else
+              args+=("$arg")
+            fi
+          done
+          {
+            printf 'original_arg_count=%s\n' "$#"
+            printf 'network_override_applied=%s\n' "$changed"
+            printf 'effective_argv='
+            printf '%q ' "$real" "${args[@]}"
+            printf '\n'
+          } >> "$log"
+          [[ "$changed" -eq 1 ]] || {
+            echo "expected secure-online QEMU netdev argument was not present" >&2
+            exit 97
+          }
+          exec "$real" "${args[@]}"
+          SH
+          chmod +x "$WRAP"
+
+          echo "FRAMES_SECURE_QEMU_WRAPPER=$WRAP" >> "$GITHUB_ENV"
+          echo "FRAMES_REAL_QEMU=$REAL_QEMU" >> "$GITHUB_ENV"
+          echo "FRAMES_QEMU_ARG_LOG=$E/QEMU-NETWORK-HARNESS.log" >> "$GITHUB_ENV"
+
+          python3 - "$E/QEMU-NETWORK-HARNESS-EVIDENCE.json" "$REAL_QEMU" "$WRAP" <<'PY'
+          import json, pathlib, sys
+          out,real,wrap=sys.argv[1:]
+          json.dump({
+              'status':'PASS',
+              'profile':'frames-0.9.98-v108-qemu-nat-harness',
+              'workflow_revision':'v108-integrated-secure-online-services-r6',
+              'real_qemu':real,
+              'wrapper':wrap,
+              'secure_lane_source_argument':'user,id=framesnet,restrict=on',
+              'secure_lane_effective_argument':'user,id=framesnet,restrict=off',
+              'reason':'Inherited 0.9.91 QEMU NAT external DNS/connectivity evidence requires guest packets to be routable to the outside; this is a certification-harness-only override and does not modify sealed Frames source/product bytes.'
+          }, open(out,'w'), indent=2)
+          open(out,'a').write('\n')
+          PY
+
       - name: Prepare and structural regression gate
         id: prepare
-        if: steps.source.outcome == 'success' && steps.permissions.outcome == 'success' && steps.dependencies.outcome == 'success' && steps.firmware.outcome == 'success'
+        if: steps.source.outcome == 'success' && steps.permissions.outcome == 'success' && steps.dependencies.outcome == 'success' && steps.firmware.outcome == 'success' && steps.network_harness.outcome == 'success'
         continue-on-error: true
         shell: bash
         run: |
@@ -290,12 +352,15 @@ jobs:
 
       - name: Integrated QEMU connected + secure online desktop gate
         id: secure
-        if: steps.source.outcome == 'success' && steps.permissions.outcome == 'success' && steps.dependencies.outcome == 'success' && steps.firmware.outcome == 'success'
+        if: steps.source.outcome == 'success' && steps.permissions.outcome == 'success' && steps.dependencies.outcome == 'success' && steps.firmware.outcome == 'success' && steps.network_harness.outcome == 'success'
         continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
           cd "$FRAMES_DIR"
+          export QEMU="$FRAMES_SECURE_QEMU_WRAPPER"
+          export FRAMES_REAL_QEMU
+          export FRAMES_QEMU_ARG_LOG
           ./tools/qemu_secure_online_services_certify.sh
           qrc="$(cat build/SECURE-ONLINE-QEMU-EXIT-CODE.txt)"
           python3 tools/runtime_evidence.py --serial build/secure-online-serial.log --require-pass > /dev/null
@@ -311,7 +376,7 @@ jobs:
 
       - name: Developer Preview, HelixFS and FAPP regression gate
         id: developer
-        if: steps.source.outcome == 'success' && steps.permissions.outcome == 'success' && steps.dependencies.outcome == 'success' && steps.firmware.outcome == 'success'
+        if: steps.source.outcome == 'success' && steps.permissions.outcome == 'success' && steps.dependencies.outcome == 'success' && steps.firmware.outcome == 'success' && steps.network_harness.outcome == 'success'
         continue-on-error: true
         shell: bash
         run: |
@@ -322,7 +387,7 @@ jobs:
 
       - name: SDK tooling regression gate
         id: sdk
-        if: steps.source.outcome == 'success' && steps.permissions.outcome == 'success' && steps.dependencies.outcome == 'success' && steps.firmware.outcome == 'success'
+        if: steps.source.outcome == 'success' && steps.permissions.outcome == 'success' && steps.dependencies.outcome == 'success' && steps.firmware.outcome == 'success' && steps.network_harness.outcome == 'success'
         continue-on-error: true
         shell: bash
         run: |
@@ -338,6 +403,7 @@ jobs:
           PERMISSIONS_OUTCOME: ${{ steps.permissions.outcome }}
           DEPENDENCIES_OUTCOME: ${{ steps.dependencies.outcome }}
           FIRMWARE_OUTCOME: ${{ steps.firmware.outcome }}
+          NETWORK_HARNESS_OUTCOME: ${{ steps.network_harness.outcome }}
           PREPARE_OUTCOME: ${{ steps.prepare.outcome }}
           SECURE_OUTCOME: ${{ steps.secure.outcome }}
           DEVELOPER_OUTCOME: ${{ steps.developer.outcome }}
@@ -380,8 +446,8 @@ jobs:
               [[ -f "$FRAMES_DIR/build/$f" ]] && cp "$FRAMES_DIR/build/$f" "$E/$f"
             done
           fi
-          printf '%s\n' "source=$SOURCE_OUTCOME" "permissions=$PERMISSIONS_OUTCOME" "dependencies=$DEPENDENCIES_OUTCOME" "firmware=$FIRMWARE_OUTCOME" "prepare=$PREPARE_OUTCOME" "secure=$SECURE_OUTCOME" "developer=$DEVELOPER_OUTCOME" "sdk=$SDK_OUTCOME" > "$E/WORKFLOW-STEP-OUTCOMES.txt"
-          python3 - "$E" "$SOURCE_OUTCOME" "$PERMISSIONS_OUTCOME" "$DEPENDENCIES_OUTCOME" "$FIRMWARE_OUTCOME" "$PREPARE_OUTCOME" "$SECURE_OUTCOME" "$DEVELOPER_OUTCOME" "$SDK_OUTCOME" <<'PY'
+          printf '%s\n' "source=$SOURCE_OUTCOME" "permissions=$PERMISSIONS_OUTCOME" "dependencies=$DEPENDENCIES_OUTCOME" "firmware=$FIRMWARE_OUTCOME" "network_harness=$NETWORK_HARNESS_OUTCOME" "prepare=$PREPARE_OUTCOME" "secure=$SECURE_OUTCOME" "developer=$DEVELOPER_OUTCOME" "sdk=$SDK_OUTCOME" > "$E/WORKFLOW-STEP-OUTCOMES.txt"
+          python3 - "$E" "$SOURCE_OUTCOME" "$PERMISSIONS_OUTCOME" "$DEPENDENCIES_OUTCOME" "$FIRMWARE_OUTCOME" "$NETWORK_HARNESS_OUTCOME" "$PREPARE_OUTCOME" "$SECURE_OUTCOME" "$DEVELOPER_OUTCOME" "$SDK_OUTCOME" <<'PY'
           from pathlib import Path
           import json,sys,hashlib
           E=Path(sys.argv[1]); outcomes=sys.argv[2:]
@@ -392,6 +458,7 @@ jobs:
               pass
           required={
             'executable_normalization_evidence':'EXECUTABLE-NORMALIZATION-EVIDENCE.json',
+            'qemu_network_harness':'QEMU-NETWORK-HARNESS-EVIDENCE.json',
             'prepare':'TRAIN-PREPARE-EVIDENCE.json',
             'secure_online_runtime':'SECURE-ONLINE-SERVICES-RUNTIME-EVIDENCE.json',
             'secure_online_visual':'SECURE-ONLINE-SERVICES-VISUAL-EVIDENCE.json',
@@ -418,6 +485,7 @@ jobs:
           checks['executable_normalization']=outcomes[1]=='success'
           checks['dependencies']=outcomes[2]=='success'
           checks['firmware']=outcomes[3]=='success'
+          checks['qemu_network_harness_step']=outcomes[4]=='success'
           for name,fn in required.items():
               p=E/fn
               try: checks[name]=p.is_file() and json.loads(p.read_text()).get('status')=='PASS'
@@ -425,7 +493,7 @@ jobs:
           checks['workflow_steps']=all(x=='success' for x in outcomes)
           checks['source_sha_exact']=source_sha=='5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d'
           status='PASS' if all(checks.values()) else 'FAIL'
-          final={'status':status,'profile':'frames-0.9.98-integrated-secure-online-services-certification','workflow_revision':'v108-integrated-secure-online-services-r5','frames_version':'0.9.98','train':'0.9.92-0.9.98','candidate_source_sha256':source_sha,'certified_parent_frames_version':'0.9.91','certified_parent_source_sha256':'ce58e0eceb770e5b9bc3842ce096deccd9640d986ac0acfec5065305efef2b65','certified_parent_evidence_sha256':'526afe1d1cdc1e9996c355c904c6cf19e2e2916425d9c51b72dca01c8881fecb','checks':checks,'qemu_nat_external_connectivity_certified':checks.get('connected_services_runtime',False),'secure_online_services_foundation_certified':checks.get('secure_online_runtime',False) and checks.get('secure_online_visual',False),'live_external_tls_certified':False,'certificate_signature_verification_certified':False,'physical_network_hardware_certified':False,'physical_boot_approved':False,'physical_media_writes_unlocked':False,'target_settings_writeback_enabled':False,'file_operation_write_execution_enabled':False,'power_action_execution_enabled':False,'update_execution_enabled':False,'recovery_action_execution_enabled':False,'frames_1_0_promoted':False}
+          final={'status':status,'profile':'frames-0.9.98-integrated-secure-online-services-certification','workflow_revision':'v108-integrated-secure-online-services-r6','frames_version':'0.9.98','train':'0.9.92-0.9.98','candidate_source_sha256':source_sha,'certified_parent_frames_version':'0.9.91','certified_parent_source_sha256':'ce58e0eceb770e5b9bc3842ce096deccd9640d986ac0acfec5065305efef2b65','certified_parent_evidence_sha256':'526afe1d1cdc1e9996c355c904c6cf19e2e2916425d9c51b72dca01c8881fecb','checks':checks,'qemu_nat_external_connectivity_certified':checks.get('connected_services_runtime',False),'secure_online_services_foundation_certified':checks.get('secure_online_runtime',False) and checks.get('secure_online_visual',False),'live_external_tls_certified':False,'certificate_signature_verification_certified':False,'physical_network_hardware_certified':False,'physical_boot_approved':False,'physical_media_writes_unlocked':False,'target_settings_writeback_enabled':False,'file_operation_write_execution_enabled':False,'power_action_execution_enabled':False,'update_execution_enabled':False,'recovery_action_execution_enabled':False,'frames_1_0_promoted':False}
           (E/'FINAL-SECURE-ONLINE-SERVICES-CERTIFICATION.json').write_text(json.dumps(final,indent=2)+'\n')
           # Manifest all evidence existing at this point except the manifest and its verifier.
           files=sorted(p for p in E.iterdir() if p.is_file() and p.name not in ('EVIDENCE-FILES-SHA256.txt','FINAL-MANIFEST-VERIFY.json'))
