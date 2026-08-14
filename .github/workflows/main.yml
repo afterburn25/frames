@@ -1,10 +1,10 @@
-name: Frames 0.9.63 Appearance System & Theme Engine Integrated Certification v73
+name: Frames 0.9.63 Appearance System & Theme Engine Integrated Certification v73 r2
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - 'Frames-0.9.63-Appearance-Certification-Kit-v73.zip'
+      - 'Frames-0.9.63-Appearance-Certification-Kit-v73-r1.zip'
 
 permissions:
   contents: read
@@ -16,17 +16,19 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Verify and extract exact certification kit
+      - name: Verify and extract exact repaired certification kit
         shell: bash
         run: |
           set -euo pipefail
-          KIT="$GITHUB_WORKSPACE/Frames-0.9.63-Appearance-Certification-Kit-v73.zip"
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.63-Appearance-Certification-Kit-v73-r1.zip"
           [[ -f "$KIT" ]]
-          echo "31b049af5df88db6276e10348c80cef20c1eaa7ca94a8b69011c33fdd796a309  Frames-0.9.63-Appearance-Certification-Kit-v73.zip" | sha256sum -c -
+          echo "bcdac24551217e9d6f1c95bd66df75367ab589a33e1b2f953d32243cce4ebe19  Frames-0.9.63-Appearance-Certification-Kit-v73-r1.zip" | sha256sum -c -
           rm -rf "$GITHUB_WORKSPACE/gui-kit" "$GITHUB_WORKSPACE/prepared"
           mkdir -p "$GITHUB_WORKSPACE/gui-kit" "$GITHUB_WORKSPACE/prepared"
           unzip -q "$KIT" -d "$GITHUB_WORKSPACE/gui-kit"
-          echo "KIT_ROOT=$GITHUB_WORKSPACE/gui-kit/Frames-0.9.63-Appearance-Certification-Kit-v73" >> "$GITHUB_ENV"
+          KIT_ROOT="$GITHUB_WORKSPACE/gui-kit/Frames-0.9.63-Appearance-Certification-Kit-v73"
+          [[ -f "$KIT_ROOT/prepare-appearance.py" ]]
+          echo "KIT_ROOT=$KIT_ROOT" >> "$GITHUB_ENV"
 
       - name: Install build tools
         shell: bash
@@ -40,39 +42,48 @@ jobs:
         run: |
           set -euo pipefail
           python3 "$KIT_ROOT/prepare-appearance.py" "$KIT_ROOT" "$GITHUB_WORKSPACE/prepared"
-          echo "FRAMES_DIR=$GITHUB_WORKSPACE/prepared/source/Frames-0.9.63" >> "$GITHUB_ENV"
+          FRAMES_DIR="$GITHUB_WORKSPACE/prepared/source/Frames-0.9.63"
+          echo "FRAMES_DIR=$FRAMES_DIR" >> "$GITHUB_ENV"
 
-      - name: Build exact candidate once
+      - name: Build exact repaired candidate once
         shell: bash
         run: |
           set -euo pipefail
           cd "$FRAMES_DIR"
           export NEXUS="$FRAMES_DIR/toolchain/Nexus-Language-5.20.0/nexus"
           chmod +x tools/*.sh tools/*.py sdk/*.sh sdk/*.py "$NEXUS" 2>/dev/null || true
+
           python3 tools/verify_appearance_0963.py
           ./tools/build.sh
-          python3 tools/verify_theme_pack.py --require-pass > "$GITHUB_WORKSPACE/prepared/THEME-PACK-EVIDENCE.json"
+
+          python3 tools/verify_theme_pack.py --require-pass             > "$GITHUB_WORKSPACE/prepared/THEME-PACK-EVIDENCE.json"
+
           python3 tools/make_esp.py
           python3 tools/verify_release.py
-          python3 tools/sdk_selftest.py --require-pass > "$GITHUB_WORKSPACE/prepared/SDK-TOOLING-PREP.json"
+
+          python3 tools/sdk_selftest.py --require-pass             > "$GITHUB_WORKSPACE/prepared/SDK-TOOLING-PREP.json"
+
           python3 tools/make_developer_preview_image.py
-          python3 tools/verify_developer_preview_image.py --image build/Frames-0.9.63-Developer-Preview.img --package build/HelloFrames.fapp --require-pass
-          python3 tools/app_packaging_evidence.py --package build/HelloFrames.fapp --image build/Frames-0.9.63-Developer-Preview.img --require-pass > "$GITHUB_WORKSPACE/prepared/APP-PACKAGING-PREP.json"
+          python3 tools/verify_developer_preview_image.py             --image build/Frames-0.9.63-Developer-Preview.img             --package build/HelloFrames.fapp             --require-pass
+
+          python3 tools/app_packaging_evidence.py             --package build/HelloFrames.fapp             --image build/Frames-0.9.63-Developer-Preview.img             --require-pass             > "$GITHUB_WORKSPACE/prepared/APP-PACKAGING-PREP.json"
+
           python3 tools/make_desktop_preview_image.py
-          python3 tools/verify_desktop_preview_image.py --image build/Frames-0.9.63-Desktop-Preview.img --package build/HelloFrames.fapp --require-pass > "$GITHUB_WORKSPACE/prepared/DESKTOP-IMAGE-EVIDENCE.json"
-          tar -czf "$GITHUB_WORKSPACE/prepared-source-build.tgz" -C "$GITHUB_WORKSPACE/prepared" source
+          python3 tools/verify_desktop_preview_image.py             --image build/Frames-0.9.63-Desktop-Preview.img             --package build/HelloFrames.fapp             --require-pass             > "$GITHUB_WORKSPACE/prepared/DESKTOP-IMAGE-EVIDENCE.json"
+
+          tar -czf "$GITHUB_WORKSPACE/prepared-source-build.tgz"             -C "$GITHUB_WORKSPACE/prepared" source
 
       - name: Upload prepared source/build
         uses: actions/upload-artifact@v7
         with:
-          name: frames-0963-prepared-source-build
+          name: frames-0963-r1-prepared-source-build
           path: prepared-source-build.tgz
           if-no-files-found: error
 
       - name: Upload prepare evidence
         uses: actions/upload-artifact@v7
         with:
-          name: frames-0963-prepare-evidence
+          name: frames-0963-r1-prepare-evidence
           path: |
             prepared/PREPARE-EVIDENCE.json
             prepared/THEME-PACK-EVIDENCE.json
@@ -88,13 +99,29 @@ jobs:
       max-parallel: 4
       matrix:
         lane: [desktop-appearance, kernel-readonly, developer-preview, sdk-packaging]
+
     steps:
       - uses: actions/checkout@v5
+
+      - name: Verify and extract certification kit in this lane
+        shell: bash
+        run: |
+          set -euo pipefail
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.63-Appearance-Certification-Kit-v73-r1.zip"
+          [[ -f "$KIT" ]]
+          echo "bcdac24551217e9d6f1c95bd66df75367ab589a33e1b2f953d32243cce4ebe19  Frames-0.9.63-Appearance-Certification-Kit-v73-r1.zip" | sha256sum -c -
+          rm -rf "$GITHUB_WORKSPACE/gui-kit"
+          mkdir -p "$GITHUB_WORKSPACE/gui-kit"
+          unzip -q "$KIT" -d "$GITHUB_WORKSPACE/gui-kit"
+          KIT_ROOT="$GITHUB_WORKSPACE/gui-kit/Frames-0.9.63-Appearance-Certification-Kit-v73"
+          [[ -f "$KIT_ROOT/qmp-appearance-capture.py" ]]
+          [[ -f "$KIT_ROOT/appearance-visual-evidence.py" ]]
+          echo "KIT_ROOT=$KIT_ROOT" >> "$GITHUB_ENV"
 
       - name: Download exact prepared build
         uses: actions/download-artifact@v7
         with:
-          name: frames-0963-prepared-source-build
+          name: frames-0963-r1-prepared-source-build
           path: .
 
       - name: Restore prepared source
@@ -102,11 +129,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p prepared lane-evidence
+          echo "${{ matrix.lane }}" > lane-evidence/LANE-NAME.txt
           tar -xzf prepared-source-build.tgz -C prepared
+
           FRAMES_DIR="$GITHUB_WORKSPACE/prepared/source/Frames-0.9.63"
           echo "FRAMES_DIR=$FRAMES_DIR" >> "$GITHUB_ENV"
           echo "NEXUS_EXE=$FRAMES_DIR/toolchain/Nexus-Language-5.20.0/nexus" >> "$GITHUB_ENV"
-          chmod +x "$FRAMES_DIR"/tools/*.sh "$FRAMES_DIR"/tools/*.py "$FRAMES_DIR"/sdk/*.sh "$FRAMES_DIR"/sdk/*.py "$FRAMES_DIR"/toolchain/Nexus-Language-5.20.0/nexus 2>/dev/null || true
+
+          chmod +x             "$FRAMES_DIR"/tools/*.sh             "$FRAMES_DIR"/tools/*.py             "$FRAMES_DIR"/sdk/*.sh             "$FRAMES_DIR"/sdk/*.py             "$FRAMES_DIR"/toolchain/Nexus-Language-5.20.0/nexus             2>/dev/null || true
 
       - name: Install QEMU for runtime lanes
         if: matrix.lane != 'sdk-packaging'
@@ -115,40 +145,118 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y qemu-system-x86 ovmf python3
-          echo "OVMF_CODE=/usr/share/OVMF/OVMF_CODE_4M.fd" >> "$GITHUB_ENV"
-          echo "OVMF_VARS=/usr/share/OVMF/OVMF_VARS_4M.fd" >> "$GITHUB_ENV"
+
+          OVMF_CODE=/usr/share/OVMF/OVMF_CODE_4M.fd
+          OVMF_VARS=/usr/share/OVMF/OVMF_VARS_4M.fd
+          [[ -f "$OVMF_CODE" && -f "$OVMF_VARS" ]]
+
+          echo "OVMF_CODE=$OVMF_CODE" >> "$GITHUB_ENV"
+          echo "OVMF_VARS=$OVMF_VARS" >> "$GITHUB_ENV"
 
       - name: Desktop appearance framebuffer lane
+        id: appearance
         if: matrix.lane == 'desktop-appearance'
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
           cd "$FRAMES_DIR"
           export NEXUS="$NEXUS_EXE"
+
           BOOT=build/Frames-0.9.63-Desktop-Preview.img
+          [[ -f "$BOOT" ]]
           cp "$BOOT" "$BOOT.before"
+
           LOG=build/appearance-serial.log
           QMP=build/appearance-qmp.sock
           PPM=build/appearance.ppm
           DBG=build/appearance-qemu-debug.log
           CAP=build/appearance-capture.log
-          rm -f "$LOG" "$QMP" "$PPM" "$DBG" "$CAP"
+          QERR=build/appearance-qemu-stderr.log
+
+          rm -f "$LOG" "$QMP" "$PPM" "$DBG" "$CAP" "$QERR"
+          : > "$LOG"
+          : > "$DBG"
+          : > "$CAP"
+          : > "$QERR"
+
           cp "$OVMF_VARS" build/OVMF_VARS.appearance.fd
+
           set +e
-          timeout 240 qemu-system-x86_64 -machine q35 -accel tcg,thread=multi -m 2048M -smp 4 -cpu max -display none -vga std             -serial file:"$LOG" -no-reboot -no-shutdown -qmp "unix:$QMP,server=on,wait=off" -d guest_errors -D "$DBG"             -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE"             -drive if=pflash,format=raw,file=build/OVMF_VARS.appearance.fd             -drive if=none,id=desktopboot,format=raw,readonly=on,file="$BOOT"             -device nvme,serial=FRAMESAPPEAR0963,drive=desktopboot,bootindex=1 &
+          timeout 240 qemu-system-x86_64             -machine q35             -accel tcg,thread=multi             -m 2048M             -smp 4             -cpu max             -display none             -vga std             -serial file:"$LOG"             -no-reboot             -no-shutdown             -qmp "unix:$QMP,server=on,wait=off"             -d guest_errors             -D "$DBG"             -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE"             -drive if=pflash,format=raw,file=build/OVMF_VARS.appearance.fd             -drive if=none,id=desktopboot,format=raw,readonly=on,file="$BOOT"             -device nvme,serial=FRAMESAPPEAR0963,drive=desktopboot,bootindex=1             > "$QERR" 2>&1 &
           qpid=$!
-          python3 "$GITHUB_WORKSPACE/gui-kit/Frames-0.9.63-Appearance-Certification-Kit-v73/qmp-appearance-capture.py" "$QMP" "$LOG" "$PPM" > "$CAP" 2>&1 &
+
+          python3 "$KIT_ROOT/qmp-appearance-capture.py"             "$QMP" "$LOG" "$PPM"             > "$CAP" 2>&1 &
           cpid=$!
-          wait "$cpid"; crc=$?
-          if kill -0 "$qpid" 2>/dev/null && [[ "$crc" -ne 0 ]]; then kill -TERM "$qpid" 2>/dev/null || true; fi
-          wait "$qpid"; qrc=$?
+
+          wait "$cpid"
+          crc=$?
+
+          if kill -0 "$qpid" 2>/dev/null && [[ "$crc" -ne 0 ]]; then
+            kill -TERM "$qpid" 2>/dev/null || true
+          fi
+
+          wait "$qpid"
+          qrc=$?
           set -e
+
           echo "$qrc" > build/APPEARANCE-QEMU-EXIT-CODE.txt
           echo "$crc" > build/APPEARANCE-CAPTURE-EXIT-CODE.txt
-          python3 tools/appearance_integrated_evidence.py --serial "$LOG" --qemu-exit "$qrc" --require-pass > "$GITHUB_WORKSPACE/lane-evidence/APPEARANCE-RUNTIME-EVIDENCE.json"
-          python3 "$GITHUB_WORKSPACE/gui-kit/Frames-0.9.63-Appearance-Certification-Kit-v73/appearance-visual-evidence.py"             --serial "$LOG" --ppm "$PPM" --qemu-exit "$qrc" --media-before "$BOOT.before" --media-after "$BOOT" --require-pass             > "$GITHUB_WORKSPACE/lane-evidence/APPEARANCE-VISUAL-EVIDENCE.json"
-          cp "$LOG" "$PPM" "$DBG" "$CAP" build/APPEARANCE-QEMU-EXIT-CODE.txt build/APPEARANCE-CAPTURE-EXIT-CODE.txt "$GITHUB_WORKSPACE/lane-evidence/"
+
+          python3 -             "$LOG" "$CAP" "$QERR" "$DBG" "$qrc" "$crc"             "$GITHUB_WORKSPACE/lane-evidence/APPEARANCE-LANE-DIAGNOSTIC.json" <<'PY'
+          from pathlib import Path
+          import hashlib,json,sys
+
+          log=Path(sys.argv[1])
+          cap=Path(sys.argv[2])
+          qerr=Path(sys.argv[3])
+          dbg=Path(sys.argv[4])
+          qrc=int(sys.argv[5])
+          crc=int(sys.argv[6])
+          out=Path(sys.argv[7])
+
+          serial=log.read_text(errors="replace") if log.exists() else ""
+
+          result={
+              "status":"PASS" if qrc==0 and crc==0 else "FAIL",
+              "profile":"frames-0.9.63-v73-r1-desktop-appearance-lane",
+              "qemu_exit_code":qrc,
+              "capture_exit_code":crc,
+              "serial_size":log.stat().st_size if log.exists() else 0,
+              "serial_sha256":hashlib.sha256(log.read_bytes()).hexdigest() if log.exists() else None,
+              "capture_log_tail":cap.read_text(errors="replace")[-8000:] if cap.exists() else "",
+              "qemu_stderr_tail":qerr.read_text(errors="replace")[-8000:] if qerr.exists() else "",
+              "qemu_debug_size":dbg.stat().st_size if dbg.exists() else 0,
+              "markers":{
+                  "appearance_system":serial.count("FRAMES_APPEARANCE_SYSTEM_OK"),
+                  "desktop_integrated":serial.count("FRAMES_GUI_DESKTOP_INTEGRATED_OK"),
+                  "phase12":serial.count("FRAMES_DESKTOP_PHASE12_OK"),
+                  "kernel_ready":serial.count("FRAMES_KERNEL_READY"),
+                  "desktop_fail":serial.count("FRAMES_DESKTOP_CERT_FAIL"),
+                  "boot_error":serial.count("FRAMES BOOT ERROR:"),
+              },
+          }
+
+          out.write_text(json.dumps(result,indent=2)+"\n")
+          print(json.dumps(result,indent=2))
+          PY
+
+          cp             "$LOG" "$DBG" "$CAP" "$QERR"             build/APPEARANCE-QEMU-EXIT-CODE.txt             build/APPEARANCE-CAPTURE-EXIT-CODE.txt             "$GITHUB_WORKSPACE/lane-evidence/" || true
+
+          if [[ -f "$PPM" ]]; then
+            cp "$PPM" "$GITHUB_WORKSPACE/lane-evidence/"
+          fi
+
+          if [[ "$qrc" -eq 0 && "$crc" -eq 0 && -s "$LOG" && -s "$PPM" ]]; then
+            python3 tools/appearance_integrated_evidence.py               --serial "$LOG"               --qemu-exit "$qrc"               --require-pass               > "$GITHUB_WORKSPACE/lane-evidence/APPEARANCE-RUNTIME-EVIDENCE.json"
+
+            python3 "$KIT_ROOT/appearance-visual-evidence.py"               --serial "$LOG"               --ppm "$PPM"               --qemu-exit "$qrc"               --media-before "$BOOT.before"               --media-after "$BOOT"               --require-pass               > "$GITHUB_WORKSPACE/lane-evidence/APPEARANCE-VISUAL-EVIDENCE.json"
+          fi
+
           [[ "$qrc" -eq 0 && "$crc" -eq 0 ]]
+          [[ -s "$LOG" && -s "$PPM" ]]
+          [[ -f "$GITHUB_WORKSPACE/lane-evidence/APPEARANCE-RUNTIME-EVIDENCE.json" ]]
+          [[ -f "$GITHUB_WORKSPACE/lane-evidence/APPEARANCE-VISUAL-EVIDENCE.json" ]]
 
       - name: Kernel read-only regression lane
         if: matrix.lane == 'kernel-readonly'
@@ -156,9 +264,14 @@ jobs:
         run: |
           set -euo pipefail
           cd "$FRAMES_DIR"
-          export NEXUS="$NEXUS_EXE" FRAMES_PREBUILT=1 OVMF_CODE OVMF_VARS
+          export NEXUS="$NEXUS_EXE"
+          export FRAMES_PREBUILT=1
+          export OVMF_CODE
+          export OVMF_VARS
+
           ./tools/qemu_helixfs_readonly_smoke.sh
-          cp build/RUNTIME-EVIDENCE.json build/HELIXFS-KERNEL-PHASE3-EVIDENCE.json "$GITHUB_WORKSPACE/lane-evidence/"
+
+          cp             build/RUNTIME-EVIDENCE.json             build/HELIXFS-KERNEL-PHASE3-EVIDENCE.json             "$GITHUB_WORKSPACE/lane-evidence/"
 
       - name: Developer Preview regression lane
         if: matrix.lane == 'developer-preview'
@@ -166,9 +279,14 @@ jobs:
         run: |
           set -euo pipefail
           cd "$FRAMES_DIR"
-          export NEXUS="$NEXUS_EXE" FRAMES_PREBUILT=1 OVMF_CODE OVMF_VARS
+          export NEXUS="$NEXUS_EXE"
+          export FRAMES_PREBUILT=1
+          export OVMF_CODE
+          export OVMF_VARS
+
           ./tools/qemu_developer_preview_certify.sh
-          cp build/DEVELOPER-PREVIEW-EVIDENCE.json build/DEVELOPER-PREVIEW-PHASE3-EVIDENCE.json build/APP-LOADER-EVIDENCE.json              build/HELIXFS-PHASE2-EVIDENCE.json build/HELIXFS-PHASE3-EVIDENCE.json "$GITHUB_WORKSPACE/lane-evidence/"
+
+          cp             build/DEVELOPER-PREVIEW-EVIDENCE.json             build/DEVELOPER-PREVIEW-PHASE3-EVIDENCE.json             build/APP-LOADER-EVIDENCE.json             build/HELIXFS-PHASE2-EVIDENCE.json             build/HELIXFS-PHASE3-EVIDENCE.json             "$GITHUB_WORKSPACE/lane-evidence/"
 
       - name: SDK / theme packaging regression lane
         if: matrix.lane == 'sdk-packaging'
@@ -177,72 +295,168 @@ jobs:
           set -euo pipefail
           cd "$FRAMES_DIR"
           export NEXUS="$NEXUS_EXE"
-          python3 tools/verify_theme_pack.py --require-pass > "$GITHUB_WORKSPACE/lane-evidence/THEME-PACK-SDK-REGRESSION.json"
-          python3 tools/sdk_selftest.py --require-pass > "$GITHUB_WORKSPACE/lane-evidence/SDK-TOOLING-EVIDENCE.json"
-          python3 tools/app_packaging_evidence.py --package build/HelloFrames.fapp --image build/Frames-0.9.63-Developer-Preview.img --require-pass > "$GITHUB_WORKSPACE/lane-evidence/APP-PACKAGING-EVIDENCE.json"
+
+          python3 tools/verify_theme_pack.py --require-pass             > "$GITHUB_WORKSPACE/lane-evidence/THEME-PACK-SDK-REGRESSION.json"
+
+          python3 tools/sdk_selftest.py --require-pass             > "$GITHUB_WORKSPACE/lane-evidence/SDK-TOOLING-EVIDENCE.json"
+
+          python3 tools/app_packaging_evidence.py             --package build/HelloFrames.fapp             --image build/Frames-0.9.63-Developer-Preview.img             --require-pass             > "$GITHUB_WORKSPACE/lane-evidence/APP-PACKAGING-EVIDENCE.json"
 
       - name: Upload lane evidence
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: frames-0963-lane-${{ matrix.lane }}
+          name: frames-0963-r1-lane-${{ matrix.lane }}
           path: lane-evidence
           if-no-files-found: error
+
+      - name: Fail desktop lane after preserving diagnostics
+        if: always() && matrix.lane == 'desktop-appearance'
+        shell: bash
+        run: |
+          echo "appearance=${{ steps.appearance.outcome }}"
+          [[ "${{ steps.appearance.outcome }}" == "success" ]]
 
   aggregate:
     needs: [prepare, lanes]
     runs-on: ubuntu-24.04
-    if: always() && needs.prepare.result == 'success' && needs.lanes.result == 'success'
+    if: always() && needs.prepare.result == 'success'
+
     steps:
       - uses: actions/checkout@v5
 
-      - name: Extract certification kit
+      - name: Verify and extract certification kit
         shell: bash
         run: |
           set -euo pipefail
-          unzip -q Frames-0.9.63-Appearance-Certification-Kit-v73.zip -d gui-kit
-          echo "KIT_ROOT=$GITHUB_WORKSPACE/gui-kit/Frames-0.9.63-Appearance-Certification-Kit-v73" >> "$GITHUB_ENV"
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.63-Appearance-Certification-Kit-v73-r1.zip"
+          [[ -f "$KIT" ]]
+          echo "bcdac24551217e9d6f1c95bd66df75367ab589a33e1b2f953d32243cce4ebe19  Frames-0.9.63-Appearance-Certification-Kit-v73-r1.zip" | sha256sum -c -
+          rm -rf gui-kit runtime-evidence
+          mkdir -p gui-kit runtime-evidence
+          unzip -q "$KIT" -d gui-kit
+          KIT_ROOT="$GITHUB_WORKSPACE/gui-kit/Frames-0.9.63-Appearance-Certification-Kit-v73"
+          echo "KIT_ROOT=$KIT_ROOT" >> "$GITHUB_ENV"
 
       - name: Download prepare evidence
         uses: actions/download-artifact@v7
         with:
-          name: frames-0963-prepare-evidence
+          name: frames-0963-r1-prepare-evidence
           path: runtime-evidence
 
       - name: Download all lane evidence
         uses: actions/download-artifact@v7
         with:
-          pattern: frames-0963-lane-*
+          pattern: frames-0963-r1-lane-*
           path: runtime-evidence
           merge-multiple: true
 
-      - name: Final integrated appearance verdict
+      - name: Produce final appearance verdict
+        id: final
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
-          python3 "$KIT_ROOT/finalize-appearance.py" "$GITHUB_WORKSPACE/runtime-evidence"
+
+          if [[ "${{ needs.lanes.result }}" == "success" ]]; then
+            python3 "$KIT_ROOT/finalize-appearance.py" "$GITHUB_WORKSPACE/runtime-evidence"
+          else
+            python3 - "$GITHUB_WORKSPACE/runtime-evidence" "${{ needs.lanes.result }}" <<'PY'
+          from pathlib import Path
+          import json,sys
+
+          r=Path(sys.argv[1])
+          lane_result=sys.argv[2]
+
+          out={
+              "status":"FAIL",
+              "profile":"frames-0.9.63-appearance-system-theme-engine-integrated-certification",
+              "workflow_revision":"v73-r1-integrated-appearance-r2",
+              "frames_version":"0.9.63",
+              "candidate_source_sha256":"c95db014462a453fbb15303293231b1d32161956521782d3ff4504c5558269bd",
+              "lane_result":lane_result,
+              "reason":"one_or_more_matrix_lanes_failed",
+              "physical_boot_approved":False,
+              "physical_media_writes_unlocked":False,
+              "target_theme_writeback_enabled":False,
+              "frames_1_0_promoted":False,
+          }
+
+          (r/"FINAL-APPEARANCE-CERTIFICATION.json").write_text(
+              json.dumps(out,indent=2)+"\n"
+          )
+          print(json.dumps(out,indent=2))
+          raise SystemExit(1)
+          PY
+          fi
+
+      - name: Seal aggregate evidence manifest
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
           python3 - "$GITHUB_WORKSPACE/runtime-evidence" <<'PY'
           from pathlib import Path
           import hashlib,json,sys
+
           r=Path(sys.argv[1])
+
           def H(p):
               h=hashlib.sha256()
               with open(p,"rb") as f:
-                  for c in iter(lambda:f.read(1<<20),b""): h.update(c)
+                  for chunk in iter(lambda:f.read(1<<20),b""):
+                      h.update(chunk)
               return h.hexdigest()
-          files=[p for p in sorted(r.rglob("*")) if p.is_file() and p.name!="EVIDENCE-FILES-SHA256.txt"]
-          (r/"EVIDENCE-FILES-SHA256.txt").write_text("".join(f"{H(p)}  {p.relative_to(r).as_posix()}\n" for p in files))
-          mism=[]
+
+          files=[
+              p for p in sorted(r.rglob("*"))
+              if p.is_file() and p.name!="EVIDENCE-FILES-SHA256.txt"
+          ]
+
+          (r/"EVIDENCE-FILES-SHA256.txt").write_text(
+              "".join(
+                  f"{H(p)}  {p.relative_to(r).as_posix()}\n"
+                  for p in files
+              )
+          )
+
+          mismatches=[]
+
           for line in (r/"EVIDENCE-FILES-SHA256.txt").read_text().splitlines():
               expected,name=line.split("  ",1)
-              if H(r/name)!=expected: mism.append(name)
-          (r/"FINAL-MANIFEST-VERIFY.json").write_text(json.dumps({"status":"PASS" if not mism else "FAIL","mismatches":mism},indent=2)+"\n")
-          assert not mism
+              if H(r/name)!=expected:
+                  mismatches.append(name)
+
+          (r/"FINAL-MANIFEST-VERIFY.json").write_text(
+              json.dumps(
+                  {
+                      "status":"PASS" if not mismatches else "FAIL",
+                      "mismatches":mismatches,
+                  },
+                  indent=2
+              )+"\n"
+          )
+
+          assert not mismatches
           PY
 
       - name: Upload final certification evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: frames-0.9.63-appearance-theme-engine-evidence-v73
+          name: frames-0.9.63-appearance-theme-engine-evidence-v73-r1
           path: runtime-evidence
           if-no-files-found: error
+
+      - name: Fail closed after evidence upload
+        if: always()
+        shell: bash
+        run: |
+          echo "prepare=${{ needs.prepare.result }}"
+          echo "lanes=${{ needs.lanes.result }}"
+          echo "final=${{ steps.final.outcome }}"
+
+          [[ "${{ needs.prepare.result }}" == "success" ]]
+          [[ "${{ needs.lanes.result }}" == "success" ]]
+          [[ "${{ steps.final.outcome }}" == "success" ]]
