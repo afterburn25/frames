@@ -1,16 +1,16 @@
-name: Frames 0.9.49 HelixFS Read-Only Phase 2 Incremental Certification v59
+name: Frames 0.9.50 HelixFS Read-Only Phase 3 Incremental Certification v60
 on:
   workflow_dispatch:
   push:
     paths:
-      - '**/*v59*.zip'
-      - '.github/workflows/frames-0.9.49-v59.yml'
+      - '**/*v60*.zip'
+      - '.github/workflows/frames-0.9.50-v60.yml'
 permissions:
   contents: read
 env:
-  EXPECTED_SOURCE_SHA256: 'abd3a02749c561da1ea9d0b0fb0bba3aa0f233beea17c8bb3baadc848690d603'
-  EXPECTED_BASELINE_SOURCE_SHA256: '142150f649035413ab829a44169522c180d7a8471d89a3dbaad3c37bc49f3a7a'
-  EXPECTED_BASELINE_EVIDENCE_SHA256: '1d11509e5e8cd58fc0b889f2589826cde32058ce215dc4f7cab7444bc4634adb'
+  EXPECTED_SOURCE_SHA256: 'b973a995d7f07e48e4bfaf64b083c1ea187faf07ed213a6ea754da37798f4721'
+  EXPECTED_BASELINE_SOURCE_SHA256: 'abd3a02749c561da1ea9d0b0fb0bba3aa0f233beea17c8bb3baadc848690d603'
+  EXPECTED_BASELINE_EVIDENCE_SHA256: '3009f5997bac3d2ec9ad99d690bf6666fe52763f5750c860632bfdd0b87ec38c'
 jobs:
   prepare:
     runs-on: ubuntu-24.04
@@ -39,7 +39,7 @@ jobs:
           set -euo pipefail
           python3 - "$GITHUB_WORKSPACE" "$RUNNER_TEMP" "$GITHUB_WORKSPACE/prep-evidence" <<'PY'
           import sys,pathlib,zipfile,json,shutil
-          ws=pathlib.Path(sys.argv[1]); temp=pathlib.Path(sys.argv[2]); ev=pathlib.Path(sys.argv[3]); marker='Frames-0.9.49-Runtime-Certification-Kit-v59/KIT-CONTRACT.json'; rows=[]; matches=[]
+          ws=pathlib.Path(sys.argv[1]); temp=pathlib.Path(sys.argv[2]); ev=pathlib.Path(sys.argv[3]); marker='Frames-0.9.50-Runtime-Certification-Kit-v60/KIT-CONTRACT.json'; rows=[]; matches=[]
           for p in sorted(ws.rglob('*.zip')):
               row={'path':str(p.relative_to(ws))}
               try:
@@ -47,19 +47,19 @@ jobs:
                       row['zip_integrity']='PASS' if z.testzip() is None else 'FAIL'; row['contract']=marker in z.namelist()
                       if marker in z.namelist():
                           c=json.loads(z.read(marker)); row['contract_data']=c
-                          if c.get('workflow_revision')=='v59-incremental-r1' and c.get('candidate_source_sha256')=='abd3a02749c561da1ea9d0b0fb0bba3aa0f233beea17c8bb3baadc848690d603': matches.append(p)
+                          if c.get('workflow_revision')=='v60-incremental-r1' and c.get('candidate_source_sha256')=='b973a995d7f07e48e4bfaf64b083c1ea187faf07ed213a6ea754da37798f4721': matches.append(p)
               except Exception as e: row['error']=repr(e)
               rows.append(row)
           (ev/'KIT-DISCOVERY-INVENTORY.json').write_text(json.dumps(rows,indent=2)+'\n')
           assert len(matches)==1,matches
-          out=temp/'v59kit'; shutil.rmtree(out,ignore_errors=True); out.mkdir()
+          out=temp/'v60kit'; shutil.rmtree(out,ignore_errors=True); out.mkdir()
           with zipfile.ZipFile(matches[0]) as z:z.extractall(out)
           (ev/'KIT-DISCOVERY-SELECTED.txt').write_text(str(matches[0].relative_to(ws))+'\n')
           PY
-          root="$RUNNER_TEMP/v59kit/Frames-0.9.49-Runtime-Certification-Kit-v59"; [[ -d "$root" ]]
-          python3 "$root/prepare-v59.py" "$root" "$GITHUB_WORKSPACE/prep-evidence" "$GITHUB_WORKSPACE/prepared-work"
-          cp "$root/aggregate-v59.py" prep-evidence/aggregate-v59.py
-          cp -a prepared-work/Frames-0.9.49/. prepared-source/
+          root="$RUNNER_TEMP/v60kit/Frames-0.9.50-Runtime-Certification-Kit-v60"; [[ -d "$root" ]]
+          python3 "$root/prepare-v60.py" "$root" "$GITHUB_WORKSPACE/prep-evidence" "$GITHUB_WORKSPACE/prepared-work"
+          cp "$root/aggregate-v60.py" prep-evidence/aggregate-v60.py
+          cp -a prepared-work/Frames-0.9.50/. prepared-source/
           FRAMES_DIR="$GITHUB_WORKSPACE/prepared-source"; nexus="$FRAMES_DIR/toolchain/Nexus-Language-5.20.0/nexus"; chmod +x "$nexus" "$FRAMES_DIR"/tools/*.sh "$FRAMES_DIR"/tools/*.py "$FRAMES_DIR"/sdk/*.sh "$FRAMES_DIR"/sdk/*.py
           echo "FRAMES_DIR=$FRAMES_DIR" >> "$GITHUB_ENV"; echo "NEXUS_EXE=$nexus" >> "$GITHUB_ENV"
       - name: Discover OVMF
@@ -77,7 +77,7 @@ jobs:
         continue-on-error: true
         run: |
           set -uo pipefail; cd "$FRAMES_DIR"; export NEXUS="$NEXUS_EXE"; rc=0
-          { python3 tools/verify_helixfs_0949.py && ./tools/build.sh && python3 tools/make_esp.py && python3 tools/verify_release.py && python3 tools/sdk_selftest.py --require-pass && python3 tools/make_developer_preview_image.py && python3 tools/verify_developer_preview_image.py --image build/Frames-0.9.49-Developer-Preview.img --package build/HelloFrames.fapp --require-pass && python3 tools/app_packaging_evidence.py --package build/HelloFrames.fapp --image build/Frames-0.9.49-Developer-Preview.img --require-pass; } > "$GITHUB_WORKSPACE/prep-evidence/BUILD-CONSOLE.log" 2>&1 || rc=$?
+          { python3 tools/verify_helixfs_0950.py && ./tools/build.sh && python3 tools/make_esp.py && python3 tools/verify_release.py && python3 tools/sdk_selftest.py --require-pass && python3 tools/make_developer_preview_image.py && python3 tools/verify_developer_preview_image.py --image build/Frames-0.9.50-Developer-Preview.img --package build/HelloFrames.fapp --require-pass && python3 tools/app_packaging_evidence.py --package build/HelloFrames.fapp --image build/Frames-0.9.50-Developer-Preview.img --require-pass; } > "$GITHUB_WORKSPACE/prep-evidence/BUILD-CONSOLE.log" 2>&1 || rc=$?
           echo "$rc" > "$GITHUB_WORKSPACE/prep-evidence/BUILD-EXIT-CODE.txt"; exit "$rc"
       - name: Seal prepared source
         id: seal
@@ -90,9 +90,9 @@ jobs:
           import sys,pathlib,json,hashlib
           r=pathlib.Path(sys.argv[1]);e=pathlib.Path(sys.argv[2])
           def H(p): return hashlib.sha256(p.read_bytes()).hexdigest()
-          req=['build/FramesKernel.fkrn','build/System.fex','build/BOOTX64.EFI','build/Frames-0.9.49-ESP.img','build/Frames-0.9.49-Developer-Preview.img','build/HelloFrames.fapp']
+          req=['build/FramesKernel.fkrn','build/System.fex','build/BOOTX64.EFI','build/Frames-0.9.50-ESP.img','build/Frames-0.9.50-Developer-Preview.img','build/HelloFrames.fapp']
           assert all((r/x).is_file() for x in req)
-          j={'status':'PASS','frames_version':'0.9.49','candidate_source_sha256':'abd3a02749c561da1ea9d0b0fb0bba3aa0f233beea17c8bb3baadc848690d603','artifacts':{x:{'sha256':H(r/x),'bytes':(r/x).stat().st_size} for x in req},'physical_boot_approved':False}
+          j={'status':'PASS','frames_version':'0.9.50','candidate_source_sha256':'b973a995d7f07e48e4bfaf64b083c1ea187faf07ed213a6ea754da37798f4721','artifacts':{x:{'sha256':H(r/x),'bytes':(r/x).stat().st_size} for x in req},'physical_boot_approved':False}
           (e/'PREPARED-SOURCE-IDENTITY.json').write_text(json.dumps(j,indent=2)+'\n')
           PY
       - name: Archive prepared source
@@ -101,8 +101,8 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
-          tar --sort=name --mtime='UTC 2026-08-13 00:00:00' --owner=0 --group=0 --numeric-owner -C "$GITHUB_WORKSPACE" -cf - prepared-source | gzip -n -9 > sealed-prepared-source/Frames-0.9.49-v59-prepared-source.tar.gz
-          sha256sum sealed-prepared-source/Frames-0.9.49-v59-prepared-source.tar.gz > prep-evidence/PREPARED-SOURCE-ARCHIVE-SHA256.txt
+          tar --sort=name --mtime='UTC 2026-08-13 00:00:00' --owner=0 --group=0 --numeric-owner -C "$GITHUB_WORKSPACE" -cf - prepared-source | gzip -n -9 > sealed-prepared-source/Frames-0.9.50-v60-prepared-source.tar.gz
+          sha256sum sealed-prepared-source/Frames-0.9.50-v60-prepared-source.tar.gz > prep-evidence/PREPARED-SOURCE-ARCHIVE-SHA256.txt
       - name: Record prep outcomes
         if: always()
         shell: bash
@@ -119,13 +119,13 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: frames-v59-prepared-source
+          name: frames-v60-prepared-source
           path: sealed-prepared-source
           if-no-files-found: warn
       - if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: frames-v59-prep-evidence
+          name: frames-v60-prep-evidence
           path: prep-evidence
           if-no-files-found: error
       - name: Prep verdict
@@ -155,20 +155,20 @@ jobs:
         id: source
         continue-on-error: true
         with:
-          name: frames-v59-prepared-source
+          name: frames-v60-prepared-source
           path: prepared-archive
       - uses: actions/download-artifact@v8
         id: prep
         continue-on-error: true
         with:
-          name: frames-v59-prep-evidence
+          name: frames-v60-prep-evidence
           path: lane-evidence/prep
       - name: Verify handoff
         id: verify
         shell: bash
         continue-on-error: true
         run: |
-          set -euo pipefail; archive=prepared-archive/Frames-0.9.49-v59-prepared-source.tar.gz; want="$(awk '{print $1}' lane-evidence/prep/PREPARED-SOURCE-ARCHIVE-SHA256.txt)"; got="$(sha256sum "$archive"|awk '{print $1}')"; [[ "$want" == "$got" ]]; tar -xzf "$archive" -C .; mv prepared-source/* "$GITHUB_WORKSPACE/prepared-source/" 2>/dev/null || true
+          set -euo pipefail; archive=prepared-archive/Frames-0.9.50-v60-prepared-source.tar.gz; want="$(awk '{print $1}' lane-evidence/prep/PREPARED-SOURCE-ARCHIVE-SHA256.txt)"; got="$(sha256sum "$archive"|awk '{print $1}')"; [[ "$want" == "$got" ]]; tar -xzf "$archive" -C .; mv prepared-source/* "$GITHUB_WORKSPACE/prepared-source/" 2>/dev/null || true
           FRAMES_DIR="$GITHUB_WORKSPACE/prepared-source"; cd "$FRAMES_DIR"; sha256sum -c "$GITHUB_WORKSPACE/lane-evidence/prep/PREPARED-SOURCE-MANIFEST-SHA256.txt" > "$GITHUB_WORKSPACE/lane-evidence/HANDOFF.log"; chmod +x tools/*.sh tools/*.py sdk/*.sh sdk/*.py toolchain/Nexus-Language-5.20.0/nexus; echo "FRAMES_DIR=$FRAMES_DIR" >> "$GITHUB_ENV"; echo "NEXUS_EXE=$FRAMES_DIR/toolchain/Nexus-Language-5.20.0/nexus" >> "$GITHUB_ENV"
       - name: OVMF
         id: ovmf
@@ -187,11 +187,11 @@ jobs:
           case "$LANE" in
             kernel-readonly-smoke) ./tools/qemu_helixfs_readonly_smoke.sh > "$E/KERNEL-READONLY-CONSOLE.log" 2>&1 || rc=$? ;;
             developer-helixfs) ./tools/qemu_developer_preview_certify.sh > "$E/DEVELOPER-HELIXFS-CONSOLE.log" 2>&1 || rc=$? ;;
-            sdk-packaging) python3 tools/sdk_selftest.py --require-pass > "$E/SDK-SELFTEST-EVIDENCE.json" 2>&1 || rc=$?; if [[ "$rc" -eq 0 ]]; then python3 tools/make_developer_preview_image.py >/dev/null && python3 tools/app_packaging_evidence.py --package build/HelloFrames.fapp --image build/Frames-0.9.49-Developer-Preview.img --require-pass > "$E/APP-PACKAGING-EVIDENCE.json" 2>&1 || rc=$?; fi ;;
+            sdk-packaging) python3 tools/sdk_selftest.py --require-pass > "$E/SDK-SELFTEST-EVIDENCE.json" 2>&1 || rc=$?; if [[ "$rc" -eq 0 ]]; then python3 tools/make_developer_preview_image.py >/dev/null && python3 tools/app_packaging_evidence.py --package build/HelloFrames.fapp --image build/Frames-0.9.50-Developer-Preview.img --require-pass > "$E/APP-PACKAGING-EVIDENCE.json" 2>&1 || rc=$?; fi ;;
             *) rc=90 ;;
           esac
           find build -maxdepth 1 -type f \( -name '*.json' -o -name '*EXIT-CODE.txt' -o -name '*.log' \) -exec cp {} "$E/" \; 2>/dev/null || true
-          echo "$rc" > "$E/LANE-CERTIFY-EXIT-CODE.txt"; printf '{"status":"%s","lane":"%s","exit_code":%s,"workflow_revision":"v59-incremental-r1"}\n' "$([[ "$rc" -eq 0 ]] && echo PASS || echo FAIL)" "$LANE" "$rc" > "$E/LANE-RESULT.json"; exit "$rc"
+          echo "$rc" > "$E/LANE-CERTIFY-EXIT-CODE.txt"; printf '{"status":"%s","lane":"%s","exit_code":%s,"workflow_revision":"v60-incremental-r1"}\n' "$([[ "$rc" -eq 0 ]] && echo PASS || echo FAIL)" "$LANE" "$rc" > "$E/LANE-RESULT.json"; exit "$rc"
       - name: Record outcomes
         if: always()
         shell: bash
@@ -207,7 +207,7 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: frames-v59-lane-${{ matrix.lane }}
+          name: frames-v60-lane-${{ matrix.lane }}
           path: lane-evidence
           if-no-files-found: error
       - name: Lane verdict
@@ -226,13 +226,13 @@ jobs:
         id: prep
         continue-on-error: true
         with:
-          name: frames-v59-prep-evidence
+          name: frames-v60-prep-evidence
           path: runtime-evidence/prep
       - uses: actions/download-artifact@v8
         id: lanes
         continue-on-error: true
         with:
-          pattern: frames-v59-lane-*
+          pattern: frames-v60-lane-*
           path: downloaded-lanes
           merge-multiple: false
       - name: Aggregate
@@ -241,7 +241,7 @@ jobs:
         continue-on-error: true
         run: |
           cp -a downloaded-lanes/. runtime-evidence/lanes/ 2>/dev/null || true
-          python3 runtime-evidence/prep/aggregate-v59.py runtime-evidence "${{ needs.prepare.result }}" "${{ needs.certify.result }}"
+          python3 runtime-evidence/prep/aggregate-v60.py runtime-evidence "${{ needs.prepare.result }}" "${{ needs.certify.result }}"
       - name: Seal evidence manifest
         if: always()
         shell: bash
@@ -268,7 +268,7 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: frames-0.9.49-helixfs-readonly-phase2-evidence-v59
+          name: frames-0.9.50-helixfs-readonly-phase3-evidence-v60
           path: runtime-evidence
           if-no-files-found: error
       - name: Final verdict
@@ -279,6 +279,6 @@ jobs:
           python3 - <<'PY'
           import json
           f=json.load(open('runtime-evidence/INCREMENTAL-CERTIFICATION.json'));m=json.load(open('runtime-evidence/EVIDENCE-MANIFEST-VERIFY.json'))
-          assert f['status']=='PASS' and f['workflow_revision']=='v59-incremental-r1' and m['status']=='PASS'
-          print('FRAMES 0.9.49 v59 FINAL CERTIFICATION PASS')
+          assert f['status']=='PASS' and f['workflow_revision']=='v60-incremental-r1' and m['status']=='PASS'
+          print('FRAMES 0.9.50 v60 FINAL CERTIFICATION PASS')
           PY
