@@ -1,4 +1,4 @@
-name: Frames 0.9.62 Integrated GUI Desktop Certification v72 r4 Boot Contract Repair
+name: Frames 0.9.62 Integrated GUI Desktop Certification v72 r5 Repair Seal Fix
 on:
   workflow_dispatch:
 permissions:
@@ -81,6 +81,7 @@ jobs:
           expected_changed=[
               "GUI-REPAIR-REVISION",
               "boot/uefi/frames_boot.c",
+              "media/EFI/BOOT/BOOTX64.EFI",
               "tools/make_desktop_preview_image.py",
               "tools/verify_desktop_preview_image.py",
               "tools/verify_gui_0962.py",
@@ -126,6 +127,8 @@ jobs:
               "desktop_fapp_policy":"boot_policy_flags|=4096" in boot,
               "desktop_image_verifier":(repair/"tools/verify_desktop_preview_image.py").is_file(),
               "structural_verifier_strengthened":"verify_desktop_preview_image.py" in vg,
+              "media_bootx64_repaired":h(repair/"media/EFI/BOOT/BOOTX64.EFI")=="65d83749f21d80556f914b97b514391cd2fe0b8221e8f588e9536008f9bd5bd6",
+              "media_bootx64_changed_from_parent":a.get("media/EFI/BOOT/BOOTX64.EFI")!=b.get("media/EFI/BOOT/BOOTX64.EFI"),
           }
 
           status="PASS" if all(checks.values()) else "FAIL"
@@ -544,7 +547,7 @@ jobs:
           result={
               "status":status,
               "profile":"frames-0.9.62-integrated-gui-desktop-certification-v72-r1",
-              "workflow_revision":"v72-r1-integrated-gui-r4",
+              "workflow_revision":"v72-r1-integrated-gui-r5",
               "frames_version":"0.9.62",
               "repair_revision":"v72-r1",
               "candidate_source_sha256":"42ecb94a5455e428ffc7024f42ad046df23ec24fc01c71163a12f905600de836",
