@@ -1,0 +1,107 @@
+name: Frames Real GUI Baseline Audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v116-full-product-v101-integration ]
+    paths:
+      - '.github/workflows/frames-real-gui-baseline-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    strategy:
+      fail-fast: false
+      matrix:
+        candidate: [v72, v94]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v116-full-product-v101-integration
+      - name: Install tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 unzip gdisk mtools dosfstools qemu-system-x86 ovmf netcat-openbsd
+      - name: Extract candidate source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/source" "$GITHUB_WORKSPACE/gui-audit-${{ matrix.candidate }}"
+          if [ '${{ matrix.candidate }}' = 'v72' ]; then
+            ZIP="$GITHUB_WORKSPACE/Frames-0.9.62-Source-v72-r1.zip"
+            VER=0.9.62
+          else
+            KIT="$GITHUB_WORKSPACE/Frames-0.9.84-Integrated-System-Services-Certification-Kit-v94.zip"
+            mkdir -p "$RUNNER_TEMP/kit"
+            unzip -q "$KIT" -d "$RUNNER_TEMP/kit"
+            ZIP="$(find "$RUNNER_TEMP/kit" -type f -iname '*Source*.zip' -print | sort | head -n1)"
+            VER=0.9.84
+          fi
+          test -s "$ZIP"
+          sha256sum "$ZIP" | tee "$GITHUB_WORKSPACE/gui-audit-${{ matrix.candidate }}/SOURCE-SHA256.txt"
+          unzip -q "$ZIP" -d "$RUNNER_TEMP/source"
+          SRC=""
+          while IFS= read -r vf; do
+            d="${vf%/VERSION}"
+            v="$(tr -d '\r\n' < "$vf")"
+            if [ "$v" = "$VER" ] && [ -f "$d/kernel/main.nx" ]; then SRC="$d"; break; fi
+          done < <(find "$RUNNER_TEMP/source" -type f -name VERSION -print | sort)
+          test -n "$SRC"
+          echo "SRC=$SRC" >> "$GITHUB_ENV"
+          echo "candidate=${{ matrix.candidate }} version=$VER source=$SRC" | tee "$GITHUB_WORKSPACE/gui-audit-${{ matrix.candidate }}/IDENTITY.txt"
+          grep -RniE 'compositor|desktop|gui_runtime|desktop_runtime|shell_runtime|render_desktop|launch.*system|System\.fex' "$SRC" --exclude-dir=build | head -400 > "$GITHUB_WORKSPACE/gui-audit-${{ matrix.candidate }}/GUI-SOURCE-SURVEY.txt" || true
+      - name: Build candidate exactly as supplied
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$SRC"
+          chmod +x tools/*.sh tools/*.py sdk/*.sh 2>/dev/null || true
+          find toolchain -type f -name nexus -exec chmod +x {} + 2>/dev/null || true
+          ./tools/build.sh 2>&1 | tee "$GITHUB_WORKSPACE/gui-audit-${{ matrix.candidate }}/BUILD.log"
+          if [ -f tools/make_esp.py ]; then python3 tools/make_esp.py 2>&1 | tee "$GITHUB_WORKSPACE/gui-audit-${{ matrix.candidate }}/MAKE-ESP.log"; fi
+          if [ -f tools/sdk_selftest.py ]; then python3 tools/sdk_selftest.py 2>&1 | tee "$GITHUB_WORKSPACE/gui-audit-${{ matrix.candidate }}/SDK-SELFTEST.log" || true; fi
+          if [ -f tools/make_desktop_preview_image.py ]; then python3 tools/make_desktop_preview_image.py 2>&1 | tee "$GITHUB_WORKSPACE/gui-audit-${{ matrix.candidate }}/DESKTOP-PREVIEW.log" || true; fi
+          if [ -f tools/verify_release.py ]; then python3 tools/verify_release.py 2>&1 | tee "$GITHUB_WORKSPACE/gui-audit-${{ matrix.candidate }}/VERIFY-RELEASE.log" || true; fi
+          find build -maxdepth 2 -type f -printf '%P %s bytes\n' | sort | tee "$GITHUB_WORKSPACE/gui-audit-${{ matrix.candidate }}/BUILD-INVENTORY.txt"
+          stat -c 'System.fex bytes=%s' build/System.fex | tee "$GITHUB_WORKSPACE/gui-audit-${{ matrix.candidate }}/SYSTEM-FEX-SIZE.txt" || true
+          grep -Eai 'policy:|decision:|gui_runtime|desktop|compositor|system service|runtime authority' "$GITHUB_WORKSPACE/gui-audit-${{ matrix.candidate }}/VERIFY-RELEASE.log" > "$GITHUB_WORKSPACE/gui-audit-${{ matrix.candidate }}/POLICY-GUI-SUMMARY.txt" || true
+      - name: Boot supplied ESP and capture framebuffer
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          cd "$SRC"
+          ESP="$(find build -maxdepth 1 -type f -iname '*ESP*.img' -print | sort | head -n1 || true)"
+          test -n "$ESP"; test -s "$ESP"
+          CODE=""; VARS=""
+          for p in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd; do [ -f "$p" ] && CODE="$p" && break; done
+          for p in /usr/share/OVMF/OVMF_VARS_4M.fd /usr/share/OVMF/OVMF_VARS.fd; do [ -f "$p" ] && VARS="$p" && break; done
+          cp "$VARS" "$RUNNER_TEMP/vars.fd"
+          MON="$RUNNER_TEMP/mon.sock"
+          SERIAL="$GITHUB_WORKSPACE/gui-audit-${{ matrix.candidate }}/SERIAL.log"
+          SHOT="$GITHUB_WORKSPACE/gui-audit-${{ matrix.candidate }}/FRAMEBUFFER.ppm"
+          qemu-system-x86_64 -machine q35 -m 1024 -smp 2 \
+            -drive if=pflash,format=raw,readonly=on,file="$CODE" \
+            -drive if=pflash,format=raw,file="$RUNNER_TEMP/vars.fd" \
+            -drive if=virtio,format=raw,file="$ESP" -boot menu=off \
+            -serial file:"$SERIAL" -monitor unix:"$MON",server=on,wait=off \
+            -display none -vga std -no-reboot &
+          PID=$!
+          for i in $(seq 1 30); do [ -S "$MON" ] && break; sleep 1; done
+          sleep 30
+          printf 'screendump %s\ninfo status\nquit\n' "$SHOT" | nc -U "$MON" || true
+          wait "$PID" || true
+          grep -Eai 'GUI|DESKTOP|COMPOS|SHELL|SYSTEM|FRAMES_' "$SERIAL" | tail -500 > "$GITHUB_WORKSPACE/gui-audit-${{ matrix.candidate }}/RUNTIME-GUI-MARKERS.txt" || true
+      - name: Upload audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-Real-GUI-Audit-${{ matrix.candidate }}
+          path: gui-audit-${{ matrix.candidate }}/
+          if-no-files-found: error
+          retention-days: 30
