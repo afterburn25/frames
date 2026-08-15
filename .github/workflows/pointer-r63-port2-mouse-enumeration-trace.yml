@@ -113,7 +113,7 @@ jobs:
           set -euo pipefail
           IMG="r63-out/Frames-0.9.98-r63-Port2-USB-Mouse-Trace-UEFI-FRAMESLOG-Rufus.img"
           sgdisk -i 1 "$IMG" | tee r63-out/UEFI-GPT-PARTITION1.txt
-          grep -qi 'EF00.*EFI system partition' r63-out/UEFI-GPT-PARTITION1.txt
+          grep -qi 'C12A7328-F81F-11D2-BA4B-00A0C93EC93B.*EFI system partition' r63-out/UEFI-GPT-PARTITION1.txt
           read ESP_START ESP_SECTORS <<<"$(python3 - "$IMG" <<'PY'
           import struct,sys
           with open(sys.argv[1],'rb') as f:
@@ -129,7 +129,7 @@ jobs:
           mdir -i "$ESP" ::/EFI/BOOT/BOOTX64.EFI | tee r63-out/UEFI-BOOTX64-VERIFY.txt
           mcopy -i "$ESP" ::/EFI/BOOT/BOOTX64.EFI r63-out/BOOTX64.EFI
           test -s r63-out/BOOTX64.EFI
-          printf 'uefi_bootability=PASS\nesp_gpt_type=EF00\nfilesystem=FAT\nremovable_media_path=EFI/BOOT/BOOTX64.EFI\n' > r63-out/UEFI-BOOT-STATUS.txt
+          printf 'uefi_bootability=PASS\nesp_gpt_type_guid=C12A7328-F81F-11D2-BA4B-00A0C93EC93B\nfilesystem=FAT\nremovable_media_path=EFI/BOOT/BOOTX64.EFI\n' > r63-out/UEFI-BOOT-STATUS.txt
           rm -f "$ESP"
 
       - name: Package r63 evidence
