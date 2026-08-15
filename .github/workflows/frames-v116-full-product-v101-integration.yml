@@ -44,15 +44,11 @@ jobs:
           sha256sum "$KIT" | tee "$GITHUB_WORKSPACE/integration-evidence/V101-KIT-SHA256.txt"
           unzip -q "$KIT" -d "$RUNNER_TEMP/v101-kit"
           find "$RUNNER_TEMP/v101-kit" -maxdepth 5 -type f -printf '%P\n' | sort > "$GITHUB_WORKSPACE/integration-evidence/V101-KIT-INVENTORY.txt"
-
           SRCZIP="$(find "$RUNNER_TEMP/v101-kit" -type f \( -iname 'Frames-0.9.91-Source*.zip' -o -iname '*0.9.91*Source*.zip' \) -print | sort | head -n1 || true)"
-          if [ -z "$SRCZIP" ]; then
-            SRCZIP="$(find "$RUNNER_TEMP/v101-kit" -type f -iname '*Source*.zip' -print | sort | head -n1 || true)"
-          fi
+          if [ -z "$SRCZIP" ]; then SRCZIP="$(find "$RUNNER_TEMP/v101-kit" -type f -iname '*Source*.zip' -print | sort | head -n1 || true)"; fi
           test -n "$SRCZIP"
           sha256sum "$SRCZIP" | tee "$GITHUB_WORKSPACE/integration-evidence/V101-SOURCE-SHA256.txt"
           unzip -q "$SRCZIP" -d "$RUNNER_TEMP/v101-source"
-
           PRODUCT=""
           while IFS= read -r vf; do
             d="${vf%/VERSION}"
@@ -60,7 +56,6 @@ jobs:
             if [ "$v" = "0.9.91" ] && [ -f "$d/kernel/main.nx" ]; then PRODUCT="$d"; break; fi
           done < <(find "$RUNNER_TEMP/v101-source" -type f -name VERSION -print | sort)
           test -n "$PRODUCT"
-
           echo "PRODUCT=$PRODUCT" >> "$GITHUB_ENV"
           printf 'product=%s\nversion=%s\n' "$PRODUCT" "$(cat "$PRODUCT/VERSION")" | tee "$GITHUB_WORKSPACE/integration-evidence/PRODUCT-IDENTITY.txt"
           sha256sum "$PRODUCT/kernel/main.nx" | tee "$GITHUB_WORKSPACE/integration-evidence/V101-KERNEL-MAIN-SHA256-BEFORE.txt"
@@ -73,13 +68,11 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          import base64, gzip, os, re, subprocess, sys, hashlib
-
+          import base64, gzip, os, re, subprocess, hashlib
           workspace = Path(os.environ['GITHUB_WORKSPACE'])
           product = Path(os.environ['PRODUCT'])
           evidence = workspace / 'integration-evidence'
           report = []
-
           transforms = [
               ('v109', 'architecture/v109/make_unified_device_architecture_v109.py'),
               ('v110', 'architecture/v110/make_driver_runtime_v110.py'),
@@ -90,18 +83,13 @@ jobs:
               ('v115', 'architecture/v115/make_driver_migration_unified_input_v115.py'),
               ('v116', 'architecture/v116/make_usb_core_xhci_migration_v116.py'),
           ]
-
           for label, rel in transforms:
               text = (workspace / rel).read_text()
               m = re.search(r'base64\.b64decode\(\s*"""(.*?)"""\s*\)', text, re.S)
-              if not m:
-                  raise SystemExit(f'{label}: embedded patch payload not found')
+              if not m: raise SystemExit(f'{label}: embedded patch payload not found')
               payload = gzip.decompress(base64.b64decode(m.group(1))).decode('utf-8')
               (evidence / f'{label}-PORT.patch').write_text(payload)
-              proc = subprocess.run(
-                  ['patch', '-p0', '--forward', '--batch', '--fuzz=3'],
-                  cwd=product, input=payload, text=True,
-                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+              proc = subprocess.run(['patch','-p1','--forward','--batch','--fuzz=3'], cwd=product, input=payload, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
               (evidence / f'{label}-PORT.log').write_text(proc.stdout)
               kernel_hash = hashlib.sha256((product/'kernel/main.nx').read_bytes()).hexdigest()
               report.append(f'{label} rc={proc.returncode} kernel_sha256={kernel_hash}')
@@ -109,7 +97,6 @@ jobs:
                   (evidence / 'PORT-FAILURE.txt').write_text('\n'.join(report) + '\n')
                   print(proc.stdout)
                   raise SystemExit(f'{label}: patch did not apply cleanly to v101 product kernel')
-
           (evidence / 'PORT-SUCCESS.txt').write_text('\n'.join(report) + '\n')
           print('\n'.join(report))
           PY
@@ -122,17 +109,11 @@ jobs:
           cd "$PRODUCT"
           chmod +x tools/*.sh tools/*.py sdk/*.sh 2>/dev/null || true
           find toolchain -type f -name nexus -exec chmod +x {} + 2>/dev/null || true
-
           ./tools/build.sh 2>&1 | tee "$GITHUB_WORKSPACE/integration-evidence/BUILD.log"
-
-          # Run the product's normal prerequisite chain when present. These are
-          # intentionally discovered from the sealed v101 source rather than
-          # borrowed from the diagnostic v108 tree.
           if [ -f tools/make_esp.py ]; then python3 tools/make_esp.py 2>&1 | tee "$GITHUB_WORKSPACE/integration-evidence/MAKE-ESP.log"; fi
           if [ -f tools/sdk_selftest.py ]; then python3 tools/sdk_selftest.py 2>&1 | tee "$GITHUB_WORKSPACE/integration-evidence/SDK-SELFTEST.log"; fi
           if [ -f tools/make_desktop_preview_image.py ]; then python3 tools/make_desktop_preview_image.py 2>&1 | tee "$GITHUB_WORKSPACE/integration-evidence/DESKTOP-PREVIEW.log"; fi
           if [ -f tools/verify_release.py ]; then python3 tools/verify_release.py 2>&1 | tee "$GITHUB_WORKSPACE/integration-evidence/VERIFY-RELEASE.log"; fi
-
           find build -maxdepth 2 -type f -printf '%P %s bytes\n' | sort | tee "$GITHUB_WORKSPACE/integration-evidence/BUILD-INVENTORY.txt"
           sha256sum build/FramesKernel.fkrn | tee "$GITHUB_WORKSPACE/integration-evidence/PRODUCT-V116-FKRN-SHA256.txt"
           test -s build/BOOTX64.EFI
@@ -145,9 +126,7 @@ jobs:
           set -euo pipefail
           cd "$PRODUCT"
           ESP="$(find build -maxdepth 1 -type f -iname '*ESP*.img' -print | sort | head -n1 || true)"
-          test -n "$ESP"
-          test -s "$ESP"
-
+          test -n "$ESP"; test -s "$ESP"
           FIRST="$(sgdisk -i 1 "$ESP" | awk -F: '/First sector/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); split($2,a," "); print a[1]; exit}')"
           LAST="$(sgdisk -i 1 "$ESP" | awk -F: '/Last sector/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); split($2,a," "); print a[1]; exit}')"
           test -n "$FIRST"; test -n "$LAST"
@@ -159,7 +138,6 @@ jobs:
           mdir -i "$EFI_IMG" ::/EFI/BOOT/ | tee "$GITHUB_WORKSPACE/integration-evidence/EFI-BOOT-DIR.txt"
           mdir -i "$EFI_IMG" ::/FRAMES/ 2>&1 | tee "$GITHUB_WORKSPACE/integration-evidence/EFI-FRAMES-DIR.txt" || true
           mdir -i "$EFI_IMG" ::/EFI/BOOT/BOOTX64.EFI
-
           ROOT="$RUNNER_TEMP/iso-root"
           rm -rf "$ROOT"; mkdir -p "$ROOT/FRAMES" "$ROOT/EFI"
           cp "$EFI_IMG" "$ROOT/EFI/product-efiboot.img"
@@ -168,21 +146,9 @@ jobs:
           cp build/System.fex "$ROOT/FRAMES/System.fex"
           cp "$ESP" "$ROOT/FRAMES/Product-ESP.img"
           find build -maxdepth 1 -type f \( -iname '*Desktop*.img' -o -iname '*.fthm' -o -iname '*.cfg' -o -iname '*.fapp' \) -exec cp -t "$ROOT/FRAMES" {} + 2>/dev/null || true
-          cat > "$ROOT/README.TXT" <<'TXT'
-          Frames v116 Full Product Integration Test Boot
-          Product shell: Frames 0.9.91 Integrated Connected Services v101
-          Kernel additions: v109-v116 architecture/runtime/HAL/concurrency/input/xHCI port
-          This is an integration test image, not a new certified release promotion.
-          TXT
-
+          printf '%s\n' 'Frames v116 Full Product Integration Test Boot' 'Product shell: Frames 0.9.91 Integrated Connected Services v101' 'Kernel additions: v109-v116 architecture/runtime/HAL/concurrency/input/xHCI port' 'This is an integration test image, not a new certified release promotion.' > "$ROOT/README.TXT"
           OUT="$GITHUB_WORKSPACE/Frames-v116-Full-Product-v101-Integrated-UEFI.iso"
-          xorriso -as mkisofs \
-            -iso-level 3 -R -J -V FRAMES_FULL \
-            -append_partition 2 0xef "$EFI_IMG" \
-            -appended_part_as_gpt \
-            -e --interval:appended_partition_2:all:: \
-            -no-emul-boot \
-            -o "$OUT" "$ROOT" 2>&1 | tee "$GITHUB_WORKSPACE/integration-evidence/XORRISO.log"
+          xorriso -as mkisofs -iso-level 3 -R -J -V FRAMES_FULL -append_partition 2 0xef "$EFI_IMG" -appended_part_as_gpt -e --interval:appended_partition_2:all:: -no-emul-boot -o "$OUT" "$ROOT" 2>&1 | tee "$GITHUB_WORKSPACE/integration-evidence/XORRISO.log"
           test -s "$OUT"
           sha256sum "$OUT" | tee "$GITHUB_WORKSPACE/Frames-v116-Full-Product-v101-Integrated-UEFI.iso.sha256"
           echo "ISO=$OUT" >> "$GITHUB_ENV"
@@ -200,22 +166,12 @@ jobs:
           MON="$RUNNER_TEMP/qemu-monitor.sock"
           SERIAL="$GITHUB_WORKSPACE/integration-evidence/FULL-PRODUCT-SERIAL.log"
           SHOT="$GITHUB_WORKSPACE/integration-evidence/FULL-PRODUCT-FRAMEBUFFER.ppm"
-
-          qemu-system-x86_64 \
-            -machine q35 -m 1024 -smp 2 \
-            -drive if=pflash,format=raw,readonly=on,file="$code" \
-            -drive if=pflash,format=raw,file="$RUNNER_TEMP/OVMF_VARS.fd" \
-            -cdrom "$ISO" -boot d \
-            -serial file:"$SERIAL" \
-            -monitor unix:"$MON",server=on,wait=off \
-            -display none -vga std -no-reboot &
+          qemu-system-x86_64 -machine q35 -m 1024 -smp 2 -drive if=pflash,format=raw,readonly=on,file="$code" -drive if=pflash,format=raw,file="$RUNNER_TEMP/OVMF_VARS.fd" -cdrom "$ISO" -boot d -serial file:"$SERIAL" -monitor unix:"$MON",server=on,wait=off -display none -vga std -no-reboot &
           QPID=$!
           for i in $(seq 1 60); do [ -S "$MON" ] && break; sleep 1; done
           sleep 35
           printf 'screendump %s\ninfo status\nquit\n' "$SHOT" | nc -U "$MON" || true
           wait "$QPID" || true
-          test -s "$SERIAL" || true
-          test -s "$SHOT" || true
           grep -E 'FRAMES_|GUI|DESKTOP|SHELL|COMPOS|CONNECTED|SYSTEM_SERVICE' "$SERIAL" | tail -300 > "$GITHUB_WORKSPACE/integration-evidence/PRODUCT-RUNTIME-MARKERS.txt" || true
 
       - name: Upload full integrated ISO and evidence
