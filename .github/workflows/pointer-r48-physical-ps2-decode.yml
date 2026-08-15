@@ -1,4 +1,4 @@
-name: Frames 0.9.98 r48 Physical PS2 Decode Boundary ISO
+name: Frames 0.9.98 r48 Physical PS2 Decode Boundary USB Image
 
 on:
   workflow_dispatch:
@@ -16,8 +16,8 @@ env:
   EXPECTED_R46_KERNEL_MAIN_SHA256: e5ccd3d4a453184f620e2ed5f928599bc8a7fa6959098f3aeff4916f6dcff165
 
 jobs:
-  build-r48:
-    name: Build r48 physical PS2 decode-boundary UEFI ISO
+  build-r48-usb:
+    name: Build r48 Rufus-compatible raw USB image
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -29,7 +29,7 @@ jobs:
           set -euo pipefail
           rm -rf r48-out
           mkdir -p r48-out
-          printf 'status=started\nrevision=r48\n' > r48-out/BUILD-STATUS.txt
+          printf 'status=started\nrevision=r48-usb\n' > r48-out/BUILD-STATUS.txt
 
       - name: Reconstruct exact certified r46 base
         shell: bash
@@ -68,7 +68,7 @@ jobs:
           diff -u r48-out/kernel-main-before-r48.nx r48-out/kernel-main-r48.nx > r48-out/R48-INSTRUMENTATION.patch || true
           r48_sha="$(sha256sum "$FRAMES_DIR/kernel/main.nx" | awk '{print $1}')"
           cat > r48-out/R48-SOURCE-IDENTITY.txt <<EOF
-          revision=r48
+          revision=r48-usb
           base=r46-certified
           base_kernel_main_sha256=$EXPECTED_R46_KERNEL_MAIN_SHA256
           r48_diagnostic_kernel_main_sha256=$r48_sha
@@ -76,16 +76,16 @@ jobs:
           telemetry=RHDR RXBY RYBY HVAL PDIN DXMG DYMG EMIT
           EOF
 
-      - name: Install build and ISO dependencies
+      - name: Install build dependencies
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y clang lld python3 unzip zip xorriso mtools dosfstools
+          sudo apt-get install -y clang lld python3 unzip zip fdisk gdisk mtools dosfstools
           find "$FRAMES_DIR" -type f -name '*.sh' -exec chmod +x {} +
           find "$FRAMES_DIR/toolchain" -type f -name nexus -exec chmod +x {} +
 
-      - name: Build and verify r48 image
+      - name: Build exact r48 raw disk image
         shell: bash
         run: |
           set -euo pipefail
@@ -96,45 +96,43 @@ jobs:
           python3 tools/make_desktop_preview_image.py
           python3 tools/verify_desktop_preview_image.py --image build/Frames-0.9.98-Desktop-Preview.img --require-pass
           python3 tools/verify_release.py
-          cp build/Frames-0.9.98-Desktop-Preview.img "$GITHUB_WORKSPACE/r48-out/Frames-0.9.98-r48-Physical-PS2-Decode-Boundary.img"
+          cp build/Frames-0.9.98-Desktop-Preview.img "$GITHUB_WORKSPACE/r48-out/Frames-0.9.98-r48-Physical-PS2-Decode-Boundary-Rufus.img"
 
-      - name: Package and verify UEFI ISO
+      - name: Verify USB media layout
         shell: bash
         run: |
           set -euo pipefail
-          cd "$FRAMES_DIR"
-          ESP=build/esp.img
-          if [ ! -f "$ESP" ]; then ESP="$(find build -maxdepth 2 -type f \( -iname '*esp*.img' -o -iname '*efi*.img' \) | head -n1)"; fi
-          test -n "$ESP" -a -f "$ESP"
-          cp "$ESP" "$GITHUB_WORKSPACE/r48-out/Frames-0.9.98-r48-UEFI-ESP.img"
-          rm -rf "$RUNNER_TEMP/r48-iso"; mkdir -p "$RUNNER_TEMP/r48-iso"
-          cp "$ESP" "$RUNNER_TEMP/r48-iso/efiboot.img"
-          printf 'Frames 0.9.98 r48 physical PS2 decode-boundary diagnostic\n' > "$RUNNER_TEMP/r48-iso/README.TXT"
-          xorriso -as mkisofs -R -J -V FRAMES_R48 -eltorito-alt-boot -e efiboot.img -no-emul-boot \
-            -o "$GITHUB_WORKSPACE/r48-out/Frames-0.9.98-r48-Physical-PS2-Decode-Boundary.iso" "$RUNNER_TEMP/r48-iso"
-          xorriso -indev "$GITHUB_WORKSPACE/r48-out/Frames-0.9.98-r48-Physical-PS2-Decode-Boundary.iso" -report_el_torito plain > "$GITHUB_WORKSPACE/r48-out/ISO-ELTORITO-REPORT.txt" 2>&1
-          grep -qi 'UEFI\|EFI' "$GITHUB_WORKSPACE/r48-out/ISO-ELTORITO-REPORT.txt"
+          IMG="r48-out/Frames-0.9.98-r48-Physical-PS2-Decode-Boundary-Rufus.img"
+          test -s "$IMG"
+          file "$IMG" | tee r48-out/USB-IMAGE-FILE.txt
+          fdisk -l "$IMG" | tee r48-out/USB-IMAGE-PARTITIONS.txt
+          sgdisk -p "$IMG" | tee r48-out/USB-IMAGE-GPT.txt || true
+          grep -Eiq 'EFI|FAT|GPT|DOS/MBR' r48-out/USB-IMAGE-FILE.txt r48-out/USB-IMAGE-PARTITIONS.txt r48-out/USB-IMAGE-GPT.txt
+          img_sha="$(sha256sum "$IMG" | awk '{print $1}')"
+          printf 'status=PASS\nrevision=r48-usb\nmedia=raw-disk-image\nrufus_mode=write image directly / DD-style\nimage_sha256=%s\n' "$img_sha" > r48-out/BUILD-STATUS.txt
 
       - name: Record hands-on instructions and hashes
         shell: bash
         run: |
           set -euo pipefail
           cat > r48-out/HANDS-ON-TEST.txt <<'EOF'
-          Boot Frames-0.9.98-r48-Physical-PS2-Decode-Boundary.iso in the same UEFI setup as the prior hands-on test.
+          Frames 0.9.98 r48 Physical PS/2 Decode Boundary - Rufus USB Image
+
+          Use Frames-0.9.98-r48-Physical-PS2-Decode-Boundary-Rufus.img directly in Rufus.
+          This is a raw disk image, not an ISO. Write it directly to the USB drive (DD/raw image style if Rufus asks).
+          Boot the USB in UEFI mode.
+
           Confirm the title is PTR DIAG R48. Move the mouse right, left, down, and up for several seconds, then take one clear photo of the whole panel.
-          Focus fields: RHDR=raw header, RXBY=raw X byte, RYBY=raw Y byte, HVAL=header valid, PDIN=packet decoder entries, DXMG/DYMG=decoded signed magnitudes (0x200 sign bit), EMIT=PS2 calls to generic_pointer_emit_relative.
-          Keep SRC, CORE, TRNS, P2IR, P2PK, PRAW, SYNC, GOOD, GPEN and BHDR visible too.
+          Focus fields: RHDR, RXBY, RYBY, HVAL, PDIN, DXMG, DYMG, EMIT, plus SRC, CORE, TRNS, P2IR, P2PK, PRAW, SYNC, GOOD and GPEN.
           Diagnostic-only build; do not promote.
           EOF
-          iso_sha="$(sha256sum r48-out/Frames-0.9.98-r48-Physical-PS2-Decode-Boundary.iso | awk '{print $1}')"
-          printf 'status=PASS\nrevision=r48\niso_sha256=%s\n' "$iso_sha" > r48-out/BUILD-STATUS.txt
           sha256sum r48-out/* > r48-out/SHA256SUMS.txt
 
-      - name: Upload r48 ISO and evidence
+      - name: Upload r48 Rufus USB image and evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: frames-0.9.98-r48-physical-ps2-decode-boundary-iso
+          name: frames-0.9.98-r48-rufus-usb-image
           path: r48-out/**
           if-no-files-found: error
           retention-days: 14
