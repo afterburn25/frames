@@ -1,0 +1,126 @@
+name: Frames v116 Full Product Freeze Isolation v1
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v116-full-product-v101-integration ]
+    paths:
+      - '.github/workflows/frames-v116-freeze-isolation-v1.yml'
+      - 'architecture/integration/apply_freeze_isolation_loader_v1.py'
+      - 'architecture/integration/port_architecture_to_product.py'
+
+permissions:
+  contents: read
+
+jobs:
+  build-freeze-isolation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v116-full-product-v101-integration
+
+      - name: Install tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 unzip patch gdisk mtools dosfstools xorriso binutils qemu-system-x86 ovmf
+
+      - name: Extract exact Frames 0.9.91 v101 product source
+        run: |
+          set -euo pipefail
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.91-Integrated-Connected-Services-Certification-Kit-v101.zip"
+          test -s "$KIT"
+          mkdir -p "$RUNNER_TEMP/v101-kit" "$RUNNER_TEMP/v101-source" "$GITHUB_WORKSPACE/freeze-evidence"
+          unzip -q "$KIT" -d "$RUNNER_TEMP/v101-kit"
+          SRCZIP="$(find "$RUNNER_TEMP/v101-kit" -type f \( -iname 'Frames-0.9.91-Source*.zip' -o -iname '*0.9.91*Source*.zip' \) -print | sort | head -n1 || true)"
+          test -n "$SRCZIP"
+          unzip -q "$SRCZIP" -d "$RUNNER_TEMP/v101-source"
+          PRODUCT=""
+          while IFS= read -r vf; do
+            d="${vf%/VERSION}"
+            v="$(tr -d '\r\n' < "$vf")"
+            if [ "$v" = "0.9.91" ] && [ -f "$d/kernel/main.nx" ] && [ -f "$d/boot/uefi/frames_boot.c" ]; then PRODUCT="$d"; break; fi
+          done < <(find "$RUNNER_TEMP/v101-source" -type f -name VERSION -print | sort)
+          test -n "$PRODUCT"
+          echo "PRODUCT=$PRODUCT" >> "$GITHUB_ENV"
+          sha256sum "$SRCZIP" > "$GITHUB_WORKSPACE/freeze-evidence/SOURCE-SHA256.txt"
+
+      - name: Add freeze isolation loader breadcrumbs
+        run: |
+          set -euo pipefail
+          python3 "$GITHUB_WORKSPACE/architecture/integration/apply_freeze_isolation_loader_v1.py" "$PRODUCT" | tee "$GITHUB_WORKSPACE/freeze-evidence/APPLY-FREEZE-DIAG.txt"
+          grep -F 'FRAMES_FREEZE_PRE_EBS' "$PRODUCT/boot/uefi/frames_boot.c"
+          grep -F 'FRAMES_FREEZE_POST_EBS' "$PRODUCT/boot/uefi/frames_boot.c"
+          grep -F 'FRAMES_FREEZE_KERNEL_CALL' "$PRODUCT/boot/uefi/frames_boot.c"
+
+      - name: Port certified v109-v116 architecture
+        run: |
+          set -euo pipefail
+          PORT="$GITHUB_WORKSPACE/architecture/integration/port_architecture_to_product.py"
+          while read -r label rel; do
+            python3 "$PORT" "$label" "$GITHUB_WORKSPACE/$rel" "$PRODUCT" "$GITHUB_WORKSPACE/freeze-evidence"
+          done <<'EOF'
+          v109 architecture/v109/make_unified_device_architecture_v109.py
+          v110 architecture/v110/make_driver_runtime_v110.py
+          v111 architecture/v111/make_async_io_service_runtime_v111.py
+          v112 architecture/v112/make_device_service_integration_v112.py
+          v113 architecture/v113/make_driver_execution_hal_v113.py
+          v114 architecture/v114/make_kernel_concurrency_driver_scheduling_v114.py
+          v115 architecture/v115/make_driver_migration_unified_input_v115.py
+          v116 architecture/v116/make_usb_core_xhci_migration_v116.py
+          EOF
+
+      - name: Build complete diagnostic product
+        run: |
+          set -euo pipefail
+          cd "$PRODUCT"
+          chmod +x tools/*.sh tools/*.py sdk/*.sh 2>/dev/null || true
+          find toolchain -type f -name nexus -exec chmod +x {} + 2>/dev/null || true
+          ./tools/build.sh 2>&1 | tee "$GITHUB_WORKSPACE/freeze-evidence/BUILD.log"
+          python3 tools/make_esp.py 2>&1 | tee "$GITHUB_WORKSPACE/freeze-evidence/MAKE-ESP.log"
+          test -s build/BOOTX64.EFI; test -s build/FramesKernel.fkrn; test -s build/System.fex
+          strings -a build/BOOTX64.EFI | grep -E 'FRAMES_FREEZE_(PRE_EBS|POST_EBS|KERNEL_CALL)' | tee "$GITHUB_WORKSPACE/freeze-evidence/BOOTX64-FREEZE-MARKERS.txt"
+          sha256sum build/BOOTX64.EFI build/FramesKernel.fkrn build/System.fex > "$GITHUB_WORKSPACE/freeze-evidence/PAYLOAD-SHA256.txt"
+
+      - name: Create USB-friendly UEFI ISO
+        run: |
+          set -euo pipefail
+          cd "$PRODUCT"
+          ESP="$(find build -maxdepth 1 -type f -iname '*ESP*.img' -print | sort | head -n1 || true)"
+          test -n "$ESP"; test -s "$ESP"
+          FIRST="$(sgdisk -i 1 "$ESP" | awk -F: '/First sector/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); split($2,a," "); print a[1]; exit}')"
+          LAST="$(sgdisk -i 1 "$ESP" | awk -F: '/Last sector/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); split($2,a," "); print a[1]; exit}')"
+          COUNT=$((LAST-FIRST+1)); EFI_IMG="$RUNNER_TEMP/frames-freeze-v1-efiboot.img"
+          dd if="$ESP" of="$EFI_IMG" bs=512 skip="$FIRST" count="$COUNT" status=none
+          ROOT="$RUNNER_TEMP/iso-root"; mkdir -p "$ROOT/EFI" "$ROOT/FRAMES"
+          cp "$EFI_IMG" "$ROOT/EFI/efiboot.img"
+          cp build/BOOTX64.EFI build/FramesKernel.fkrn build/System.fex "$ROOT/FRAMES/"
+          OUT="$GITHUB_WORKSPACE/Frames-v116-Full-Product-FREEZE-ISOLATION-v1-UEFI.iso"
+          xorriso -as mkisofs -iso-level 3 -R -J -V FRAMES_FREEZE_V1 -append_partition 2 0xef "$EFI_IMG" -appended_part_as_gpt -e --interval:appended_partition_2:all:: -no-emul-boot -o "$OUT" "$ROOT" 2>&1 | tee "$GITHUB_WORKSPACE/freeze-evidence/XORRISO.log"
+          test -s "$OUT"
+          sha256sum "$OUT" | tee "$GITHUB_WORKSPACE/Frames-v116-Full-Product-FREEZE-ISOLATION-v1-UEFI.iso.sha256"
+
+      - name: QEMU handoff evidence
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          ISO="$GITHUB_WORKSPACE/Frames-v116-Full-Product-FREEZE-ISOLATION-v1-UEFI.iso"
+          OVMF_CODE="$(find /usr/share -type f \( -name 'OVMF_CODE.fd' -o -name 'OVMF_CODE_4M.fd' \) | head -n1)"
+          test -n "$OVMF_CODE"
+          timeout 20s qemu-system-x86_64 -machine q35 -m 1024 -cpu max -bios "$OVMF_CODE" -cdrom "$ISO" -boot d -display none -serial file:"$GITHUB_WORKSPACE/freeze-evidence/QEMU-SERIAL.log" -debugcon file:"$GITHUB_WORKSPACE/freeze-evidence/QEMU-DEBUGCON.log" -no-reboot -no-shutdown || true
+          grep -E 'FRAMES_FREEZE_' "$GITHUB_WORKSPACE/freeze-evidence/QEMU-SERIAL.log" > "$GITHUB_WORKSPACE/freeze-evidence/QEMU-FREEZE-MARKERS.txt" || true
+
+      - name: Upload freeze isolation ISO and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v116-Full-Product-FREEZE-ISOLATION-v1-UEFI
+          path: |
+            ${{ github.workspace }}/Frames-v116-Full-Product-FREEZE-ISOLATION-v1-UEFI.iso
+            ${{ github.workspace }}/Frames-v116-Full-Product-FREEZE-ISOLATION-v1-UEFI.iso.sha256
+            ${{ github.workspace }}/freeze-evidence/
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 30
