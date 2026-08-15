@@ -77,11 +77,19 @@ jobs:
       - name: Build both candidates and prove reproducibility
         run: |
           set -euo pipefail
-          cd "$A"; ./tools/build.sh; A_FKRN="$(sha256sum build/FramesKernel.fkrn|awk '{print $1}')"; python3 tools/make_esp.py; python3 tools/make_desktop_preview_image.py
-          cd "$B"; ./tools/build.sh; B_FKRN="$(sha256sum build/FramesKernel.fkrn|awk '{print $1}')"
+          cd "$A"
+          ./tools/build.sh
+          python3 tools/sdk_selftest.py --require-pass | tee "$GITHUB_WORKSPACE/v110-evidence/SDK-SELFTEST.json"
+          A_FKRN="$(sha256sum build/FramesKernel.fkrn|awk '{print $1}')"
+          python3 tools/make_esp.py
+          python3 tools/make_desktop_preview_image.py
+          cd "$B"
+          ./tools/build.sh
+          B_FKRN="$(sha256sum build/FramesKernel.fkrn|awk '{print $1}')"
           test "$A_FKRN" = "$B_FKRN"
           printf 'kernel_main=%s\nfkrn=%s\n' "$V110_MAIN_SHA" "$A_FKRN" > "$GITHUB_WORKSPACE/v110-evidence/REPRODUCIBLE-IDENTITY.txt"
-          cd "$A"; python3 tools/verify_release.py > "$GITHUB_WORKSPACE/v110-evidence/RELEASE-VERIFY.log"
+          cd "$A"
+          python3 tools/verify_release.py > "$GITHUB_WORKSPACE/v110-evidence/RELEASE-VERIFY.log"
           echo "V110_FKRN_SHA=$A_FKRN" >> "$GITHUB_ENV"
 
       - name: QEMU OVMF v110 runtime capture
