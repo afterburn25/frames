@@ -145,26 +145,6 @@ def run_direct_transform(label: str, text: str, transform: Path, kernel: Path, e
         raise SystemExit(proc.returncode)
 
 
-def apply_product_splash(product: Path, evidence: Path):
-    script = Path(__file__).with_name('apply_product_boot_splash.py')
-    proc = subprocess.run([sys.executable, str(script), str(product)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    (evidence / 'BOOT-SPLASH-APPLY.log').write_text(proc.stdout)
-    if proc.returncode != 0:
-        print(proc.stdout)
-        raise SystemExit(proc.returncode)
-    boot = product / 'boot/uefi/frames_boot.c'
-    text = boot.read_text()
-    needle = 'static EFI_GRAPHICS_OUTPUT_PROTOCOL *gFramesGop;'
-    if needle in text and 'static void print16(CHAR16 *s);\n' not in text:
-        text = text.replace(needle, 'static void print16(CHAR16 *s);\n' + needle, 1)
-        boot.write_text(text)
-    (evidence / 'BOOT-SPLASH-SOURCE-SHA256.txt').write_text(hashlib.sha256(boot.read_bytes()).hexdigest() + '  boot/uefi/frames_boot.c\n')
-    (evidence / 'BOOT-SPLASH-MARKERS.txt').write_text('\n'.join([
-        'FRAMES_HANDOFF_LOADER_START','FRAMES_SPLASH_KERNEL_LOADED','FRAMES_SPLASH_KERNEL_VERIFIED','FRAMES_SPLASH_SYSTEM_VERIFIED',
-        'FRAMES_SPLASH_KERNEL_EXEC_READY','FRAMES_SPLASH_BOOTINFO_READY','FRAMES_HANDOFF_PRE_EBS','FRAMES_HANDOFF_POST_EBS','FRAMES_HANDOFF_KERNEL_CALL','FRAMES_BOOT_FATAL']) + '\n')
-    print('product GOP splash and serial handoff breadcrumbs applied')
-
-
 def main():
     if len(sys.argv) != 5:
         raise SystemExit('usage: port_architecture_to_product.py LABEL TRANSFORM PRODUCT EVIDENCE')
@@ -179,8 +159,6 @@ def main():
     payload = extract_patch_payload(text)
     if payload is None:
         run_direct_transform(label, text, transform, kernel, evidence)
-        if label == 'v116':
-            apply_product_splash(product, evidence)
         return
 
     (evidence / f'{label}-PORT.patch').write_text(payload)
@@ -197,8 +175,6 @@ def main():
     if proc.returncode != 0:
         print(proc.stdout)
         raise SystemExit(proc.returncode)
-    if label == 'v116':
-        apply_product_splash(product, evidence)
 
 
 if __name__ == '__main__':
