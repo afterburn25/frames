@@ -34,8 +34,18 @@ jobs:
           test -s "$KIT"; unzip -q "$KIT" -d "$RUNNER_TEMP/kit"
           SRCZIP="$(find "$RUNNER_TEMP/kit" -type f -iname '*Source*.zip' -print | sort | head -n1)"
           unzip -q "$SRCZIP" -d "$RUNNER_TEMP/src"
-          PRODUCT="$(find "$RUNNER_TEMP/src" -type f -path '*/kernel/main.nx' -printf '%h\n' | sed 's#/kernel$##' | while read d; do [ "$(cat "$d/VERSION" 2>/dev/null)" = '0.9.91' ] && echo "$d" && break; done)"
-          test -n "$PRODUCT"; test -f "$PRODUCT/boot/uefi/frames_boot.c"; test -s "$PRODUCT/assets/branding/FramesLogo-48.rgba"
+          PRODUCT=""
+          while IFS= read -r vf; do
+            d="${vf%/VERSION}"
+            v="$(tr -d '\r\n' < "$vf")"
+            if [ "$v" = "0.9.91" ] && [ -f "$d/kernel/main.nx" ] && [ -f "$d/boot/uefi/frames_boot.c" ]; then
+              PRODUCT="$d"
+              break
+            fi
+          done < <(find "$RUNNER_TEMP/src" -type f -name VERSION -print | sort)
+          test -n "$PRODUCT"
+          test -f "$PRODUCT/boot/uefi/frames_boot.c"
+          test -s "$PRODUCT/assets/branding/FramesLogo-48.rgba"
           echo "PRODUCT=$PRODUCT" >> "$GITHUB_ENV"
           sha256sum "$PRODUCT/assets/branding/FramesLogo-48.rgba" | tee "$GITHUB_WORKSPACE/integration-evidence/CANONICAL-LOGO-SHA256.txt"
 
