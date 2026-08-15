@@ -1,0 +1,153 @@
+name: Frames 0.9.99 v109 Unified Device Driver Architecture Phase 1
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v109-unified-device-architecture ]
+    paths:
+      - '.github/workflows/frames-v109-architecture-certification.yml'
+      - 'architecture/v109/**'
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_RUNTIME_KIT_SHA256: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
+  EXPECTED_BASE_SOURCE_SHA256: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
+  EXPECTED_PATCHED_KERNEL_MAIN_SHA256: 82594aaea923a2a19c06eadb73d8d985941b392c56b8c613866b5a99523ae806
+  EXPECTED_LOCAL_FKRN_SHA256: 0184534a490cc449ae71ec21ea6fed528a4157816ce9678b1fa9719092cb5c53
+  WORKFLOW_REVISION: v109-unified-device-driver-architecture-phase1
+
+jobs:
+  certify-v109:
+    name: Certify 20-layer unified device and driver architecture
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v109-unified-device-architecture
+
+      - name: Install certification dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf clang lld python3 unzip zip patch mtools dosfstools gdisk file
+
+      - name: Reconstruct sealed v108-r9 source and deterministically apply v109
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/v109-evidence"
+          mkdir -p "$E" "$RUNNER_TEMP/v109-kit" "$RUNNER_TEMP/v109-source"
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip"
+          test "$(sha256sum "$KIT" | awk '{print $1}')" = "$EXPECTED_RUNTIME_KIT_SHA256"
+          unzip -q "$KIT" -d "$RUNNER_TEMP/v109-kit"
+          SRCZIP="$RUNNER_TEMP/v109-kit/Frames-0.9.98-Source-v108.zip"
+          test "$(sha256sum "$SRCZIP" | awk '{print $1}')" = "$EXPECTED_BASE_SOURCE_SHA256"
+          unzip -q "$SRCZIP" -d "$RUNNER_TEMP/v109-source"
+          SRC="$RUNNER_TEMP/v109-source/Frames-0.9.98"
+          test "$(tr -d '\r\n' < "$SRC/VERSION")" = "0.9.98"
+          test "$(tr -d '\r\n' < "$SRC/GUI-REPAIR-REVISION")" = "v108-train"
+          cp "$SRC/kernel/main.nx" "$RUNNER_TEMP/v108-main.nx"
+          base64 -d architecture/v109/make_unified_device_architecture_v109.py.gz.b64 | gzip -dc > "$RUNNER_TEMP/make_v109.py"
+          python3 "$RUNNER_TEMP/make_v109.py" "$SRC/kernel/main.nx"
+          cp architecture/v109/verify_unified_device_architecture_v2.py "$SRC/tools/"
+          cp architecture/v109/verify_unified_device_architecture_runtime.py "$SRC/tools/"
+          mkdir -p "$SRC/docs"
+          cp architecture/v109/UNIFIED-DEVICE-DRIVER-ARCHITECTURE-V2.md "$SRC/docs/"
+          cp architecture/v109/RELEASE-NOTES-0.9.99-CANDIDATE.md "$SRC/docs/"
+          actual_main="$(sha256sum "$SRC/kernel/main.nx" | awk '{print $1}')"
+          test "$actual_main" = "$EXPECTED_PATCHED_KERNEL_MAIN_SHA256"
+          diff -u --label a/kernel/main.nx --label b/kernel/main.nx "$RUNNER_TEMP/v108-main.nx" "$SRC/kernel/main.nx" > "$E/V109-KERNEL.patch" || test $? -eq 1
+          chmod +x "$SRC"/tools/*.sh "$SRC"/tools/*.py "$SRC"/sdk/*.sh 2>/dev/null || true
+          find "$SRC/toolchain" -type f -name nexus -exec chmod +x {} +
+          echo "FRAMES_DIR=$SRC" >> "$GITHUB_ENV"
+          echo "NEXUS=$SRC/toolchain/Nexus-Language-5.20.0/nexus" >> "$GITHUB_ENV"
+          sha256sum "$E/V109-KERNEL.patch" > "$E/V109-KERNEL-PATCH-SHA256.txt"
+          python3 - "$E/SOURCE-REPLAY-EVIDENCE.json" "$actual_main" <<'PY'
+          import json,sys
+          json.dump({'status':'PASS','profile':'frames-v109-sealed-source-deterministic-replay',
+            'workflow_revision':'v109-unified-device-driver-architecture-phase1','base_version':'0.9.98',
+            'base_revision':'v108-train','base_source_sha256':'5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d',
+            'patched_kernel_main_sha256':sys.argv[2]},open(sys.argv[1],'w'),indent=2); open(sys.argv[1],'a').write('\n')
+          PY
+
+      - name: Structural architecture gate
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"
+          python3 tools/verify_unified_device_architecture_v2.py "$GITHUB_WORKSPACE/v109-evidence/ARCHITECTURE-STRUCTURAL.json"
+
+      - name: Full build and deterministic identity gate
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"
+          ./tools/build.sh
+          python3 tools/make_esp.py
+          python3 tools/sdk_selftest.py --require-pass | tee "$GITHUB_WORKSPACE/v109-evidence/SDK-SELFTEST.json"
+          python3 tools/make_desktop_preview_image.py
+          python3 tools/verify_desktop_preview_image.py --image build/Frames-0.9.98-Desktop-Preview.img --require-pass | tee "$GITHUB_WORKSPACE/v109-evidence/DESKTOP-IMAGE-VERIFY.json"
+          python3 tools/verify_release.py | tee "$GITHUB_WORKSPACE/v109-evidence/RELEASE-VERIFY.log"
+          main_sha="$(sha256sum kernel/main.nx | awk '{print $1}')"
+          fkrn_sha="$(sha256sum build/FramesKernel.fkrn | awk '{print $1}')"
+          test "$main_sha" = "$EXPECTED_PATCHED_KERNEL_MAIN_SHA256"
+          test "$fkrn_sha" = "$EXPECTED_LOCAL_FKRN_SHA256"
+          sha256sum kernel/main.nx build/FramesKernel.fkrn build/Frames-0.9.98-ESP.img build/Frames-0.9.98-Desktop-Preview.img > "$GITHUB_WORKSPACE/v109-evidence/BUILD-SHA256.txt"
+
+      - name: Locate OVMF firmware
+        run: |
+          set -euo pipefail
+          code=""; vars=""
+          for p in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd /usr/share/edk2/ovmf/OVMF_CODE.fd; do [ -f "$p" ] && code="$p" && break; done
+          for p in /usr/share/OVMF/OVMF_VARS_4M.fd /usr/share/OVMF/OVMF_VARS.fd /usr/share/edk2/ovmf/OVMF_VARS.fd; do [ -f "$p" ] && vars="$p" && break; done
+          test -n "$code"
+          echo "OVMF_CODE=$code" >> "$GITHUB_ENV"
+          if [ -n "$vars" ]; then echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"; fi
+          printf 'OVMF_CODE=%s\nOVMF_VARS=%s\n' "$code" "$vars" > "$GITHUB_WORKSPACE/v109-evidence/OVMF-IDENTITY.txt"
+
+      - name: QEMU OVMF runtime certification
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"
+          export FRAMES_PREBUILT=1
+          ./tools/qemu_secure_online_services_certify.sh | tee "$GITHUB_WORKSPACE/v109-evidence/QEMU-CERTIFICATION.log"
+          test -s build/secure-online-serial.log
+          cp build/secure-online-serial.log "$GITHUB_WORKSPACE/v109-evidence/secure-online-serial.log"
+          cp build/SECURE-ONLINE-SERVICES-RUNTIME-EVIDENCE.json "$GITHUB_WORKSPACE/v109-evidence/" 2>/dev/null || true
+          cp build/SECURE-ONLINE-SERVICES-VISUAL-EVIDENCE.json "$GITHUB_WORKSPACE/v109-evidence/" 2>/dev/null || true
+          cp build/secure-online.ppm "$GITHUB_WORKSPACE/v109-evidence/" 2>/dev/null || true
+
+      - name: 20-layer runtime marker gate
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"
+          python3 tools/verify_unified_device_architecture_runtime.py --serial build/secure-online-serial.log --require-pass | tee "$GITHUB_WORKSPACE/v109-evidence/ARCHITECTURE-RUNTIME.json"
+
+      - name: Final fail-closed v109 certification
+        run: |
+          set -euo pipefail
+          python3 - "$GITHUB_WORKSPACE/v109-evidence" <<'PY'
+          import json,pathlib,sys
+          e=pathlib.Path(sys.argv[1]); req=['SOURCE-REPLAY-EVIDENCE.json','ARCHITECTURE-STRUCTURAL.json','ARCHITECTURE-RUNTIME.json','BUILD-SHA256.txt','QEMU-CERTIFICATION.log']
+          missing=[x for x in req if not (e/x).is_file()]; checks={'required_evidence_present':not missing}
+          for f in ['SOURCE-REPLAY-EVIDENCE.json','ARCHITECTURE-STRUCTURAL.json','ARCHITECTURE-RUNTIME.json']:
+              checks[f]=(e/f).is_file() and json.loads((e/f).read_text()).get('status')=='PASS'
+          checks['runtime_certification_pass']=(e/'QEMU-CERTIFICATION.log').is_file() and 'CERTIFICATION PASS' in (e/'QEMU-CERTIFICATION.log').read_text(errors='replace')
+          status='PASS' if all(checks.values()) else 'FAIL'
+          out={'status':status,'profile':'frames-0.9.99-v109-unified-device-driver-architecture-phase1','workflow_revision':'v109-unified-device-driver-architecture-phase1',
+               'base_version':'0.9.98','candidate_version':'0.9.99','architecture_layers':20,'checks':checks,'missing':missing,
+               'promotion_allowed':status=='PASS','physical_transport_behavior_changed':False}
+          (e/'FINAL-V109-ARCHITECTURE-CERTIFICATION.json').write_text(json.dumps(out,indent=2)+'\n')
+          if status!='PASS': raise SystemExit(1)
+          PY
+          cd "$GITHUB_WORKSPACE/v109-evidence"
+          find . -maxdepth 1 -type f ! -name EVIDENCE-FILES-SHA256.txt -print0 | sort -z | xargs -0 sha256sum > EVIDENCE-FILES-SHA256.txt
+
+      - name: Upload v109 certification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frames-0.9.99-v109-unified-device-driver-architecture-phase1-evidence
+          path: v109-evidence/**
+          if-no-files-found: error
+          retention-days: 30

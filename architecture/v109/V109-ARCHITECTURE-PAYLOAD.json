@@ -1,0 +1,14 @@
+{
+  "status": "READY_FOR_EXTERNAL_CERTIFICATION",
+  "candidate_target": "Frames 0.9.99",
+  "workflow_revision": "v109-unified-device-driver-architecture-phase1",
+  "base_version": "0.9.98",
+  "base_source_revision": "v108-train",
+  "runtime_kit_sha256": "61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a",
+  "base_source_sha256": "5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d",
+  "expected_patched_kernel_main_sha256": "82594aaea923a2a19c06eadb73d8d985941b392c56b8c613866b5a99523ae806",
+  "expected_local_kernel_fkrn_sha256": "0184534a490cc449ae71ec21ea6fed528a4157816ce9678b1fa9719092cb5c53",
+  "architecture_layers": 20,
+  "physical_transport_behavior_changed": false,
+  "promotion_allowed_only_after_runtime_pass": true
+}
