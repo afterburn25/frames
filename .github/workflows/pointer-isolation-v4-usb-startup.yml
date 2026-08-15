@@ -1,0 +1,150 @@
+name: Frames 0.9.98 Pointer Isolation CI v4 USB Startup
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/pointer-isolation-v4-usb-startup.yml'
+      - 'tools/ci/pointer_diag_v3.py'
+
+permissions:
+  contents: read
+
+jobs:
+  usb-startup-isolation:
+    name: Pointer isolation v4 / usb startup handoff
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+
+    env:
+      EXPECTED_V1_KIT_SHA256: 1c7f1b514d9aa2f847f724e8b633286d069d745bf7c281a3967c46bbfea1a18c
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify reusable diagnostic source kit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip
+          actual="$(sha256sum Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip | awk '{print $1}')"
+          echo "source_kit_sha=$actual"
+          test "$actual" = "$EXPECTED_V1_KIT_SHA256"
+          rm -rf "$RUNNER_TEMP/pointer-v4"
+          mkdir -p "$RUNNER_TEMP/pointer-v4"
+          unzip -q Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip -d "$RUNNER_TEMP/pointer-v4"
+          echo "FRAMES_DIR=$RUNNER_TEMP/pointer-v4/Frames-0.9.98-Pointer-CI-Source" >> "$GITHUB_ENV"
+
+      - name: Patch extracted USB startup handoff only
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"
+          cp kernel/main.nx kernel/main.nx.pre-v4-usb-startup
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('kernel/main.nx')
+          s=p.read_text()
+          old1='if usb_hid_found != 0 { usb_hid_configured = xhci_configure_boot_hid(xhci_state,phys_state); if usb_hid_configured != 0 { usb_hid_report_ready = xhci_read_first_hid_report(xhci_state,phys_state); } }'
+          new1='if usb_hid_found != 0 { usb_hid_configured = xhci_configure_boot_hid(xhci_state,phys_state); if usb_hid_configured != 0 { usb_hid_report_ready = 1; } }'
+          old2='if input_queue_ready != 0 { if usb_hid_report_ready != 0 { input_decode_ready = input_decode_boot_hid(xhci_state,input_state); } else { ps2_poll_fallback(input_state); } }'
+          new2='if input_queue_ready != 0 { if usb_hid_report_ready != 0 { input_decode_ready = 1; } else { ps2_poll_fallback(input_state); } }'
+          if s.count(old1)!=1:
+              raise SystemExit(f'expected one boot HID first-report site, found {s.count(old1)}')
+          if s.count(old2)!=1:
+              raise SystemExit(f'expected one boot HID decode site, found {s.count(old2)}')
+          s=s.replace(old1,new1).replace(old2,new2)
+          p.write_text(s)
+          PY
+          {
+            echo '=== v4 USB startup patch ==='
+            diff -u kernel/main.nx.pre-v4-usb-startup kernel/main.nx || true
+          } | tee "$GITHUB_WORKSPACE/v4-usb-startup-patch.diff"
+
+      - name: Install QEMU/OVMF and build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils ovmf clang lld python3 unzip zip
+          code="$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE.fd' \) | head -n1)"
+          test -n "$code"
+          echo "OVMF_CODE=$code" >> "$GITHUB_ENV"
+          echo "QEMU=$(command -v qemu-system-x86_64)" >> "$GITHUB_ENV"
+
+      - name: Normalize executable permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          find "$FRAMES_DIR" -type f -name '*.sh' -exec chmod +x {} +
+          find "$FRAMES_DIR/toolchain" -type f -name nexus -exec chmod +x {} +
+          chmod +x tools/ci/pointer_diag_v3.py
+
+      - name: Build patched diagnostic source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"
+          ./tools/build.sh
+          python3 tools/make_esp.py
+          python3 tools/sdk_selftest.py
+          python3 tools/make_desktop_preview_image.py
+          python3 tools/verify_desktop_preview_image.py --image build/Frames-0.9.98-Desktop-Preview.img --require-pass
+          python3 tools/verify_release.py
+
+      - name: Run USB startup pointer isolation
+        id: pointer_test
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          set +e
+          OUT="$GITHUB_WORKSPACE/pointer-isolation-v4-usb-startup"
+          mkdir -p "$OUT"
+          cp "$GITHUB_WORKSPACE/v4-usb-startup-patch.diff" "$OUT/" 2>/dev/null || true
+          cp "$FRAMES_DIR/kernel/main.nx" "$OUT/kernel-main-patched.nx" 2>/dev/null || true
+          printf 'lane=usb\nexperiment=skip-boot-first-report\nstatus=started\n' > "$OUT/harness-status.txt"
+          python3 tools/ci/pointer_diag_v3.py \
+            --qemu "$QEMU" \
+            --ovmf "$OVMF_CODE" \
+            --image "$FRAMES_DIR/build/Frames-0.9.98-Desktop-Preview.img" \
+            --lane usb \
+            --out "$OUT" \
+            2>&1 | tee "$OUT/runner.log"
+          rc=${PIPESTATUS[0]}
+          printf 'lane=usb\nexperiment=skip-boot-first-report\nstatus=completed\nrunner_rc=%s\n' "$rc" > "$OUT/harness-status.txt"
+          echo "runner_rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Print v4 summary
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          OUT="pointer-isolation-v4-usb-startup"
+          for f in harness-status.txt summary.json pointer-serial-lines.txt v4-usb-startup-patch.diff SHA256SUMS.txt runner.log; do
+            if [[ -f "$OUT/$f" ]]; then
+              echo "=== $f ==="
+              cat "$OUT/$f"
+              echo
+            fi
+          done
+          exit 0
+
+      - name: Upload v4 USB startup evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frames-0.9.98-pointer-isolation-v4-usb-startup
+          path: |
+            pointer-isolation-v4-usb-startup/**
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Enforce USB result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ steps.pointer_test.outputs.runner_rc }}" = "0"
