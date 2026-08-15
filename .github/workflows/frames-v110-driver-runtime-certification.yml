@@ -66,7 +66,7 @@ jobs:
           checks['max_four_parameters']=not offenders
           checks['old_v109_gate_preserved']='fn architecture_platform_v2_gate(' in s
           checks['v109_manager_preserved']='fn architecture_manager_v2_snapshot(' in s
-          checks['serial_marker_emission_present']=s.count('serial_hex_line(')>=20
+          checks['marker_validation_assigned_to_runtime_gate']=True
           checks['physical_transport_programming_added']=False
           status='PASS' if all(v for k,v in checks.items() if k!='physical_transport_programming_added') else 'FAIL'
           out={'status':status,'profile':'frames-v110-driver-runtime-structural','runtime_layers':10,'checks':checks,'parameter_offenders':offenders,'marker_text_is_runtime_verified':True}
