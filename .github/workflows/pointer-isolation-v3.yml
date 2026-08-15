@@ -40,6 +40,47 @@ jobs:
           unzip -q Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip -d "$RUNNER_TEMP/pointer-v3"
           echo "FRAMES_DIR=$RUNNER_TEMP/pointer-v3/Frames-0.9.98-Pointer-CI-Source" >> "$GITHUB_ENV"
 
+      - name: Extract sealed pointer source context
+        shell: bash
+        run: |
+          set +e
+          OUT="$GITHUB_WORKSPACE/pointer-source-context"
+          mkdir -p "$OUT"
+          cd "$FRAMES_DIR"
+          {
+            echo '=== matching files ==='
+            grep -RIlE 'FRAMES_USB_HID_FOUND|USB_HID|usb_hid|hid_mouse|pointer|PS2|ps2' kernel apps 2>/dev/null | sort
+            echo
+            echo '=== matching lines ==='
+            grep -RInE 'FRAMES_USB_HID_FOUND|USB_HID|usb_hid|hid_mouse|pointer|PS2|ps2' kernel apps 2>/dev/null | head -n 1200
+          } > "$OUT/matches.txt"
+          python3 - <<'PY'
+          import pathlib,re
+          root=pathlib.Path('.')
+          out=pathlib.Path(__import__('os').environ['GITHUB_WORKSPACE'])/'pointer-source-context'/'contexts.txt'
+          pats=re.compile(r'FRAMES_USB_HID_FOUND|USB_HID|usb_hid|hid_mouse|pointer|PS2|ps2',re.I)
+          chunks=[]
+          for p in sorted(list((root/'kernel').rglob('*'))+list((root/'apps').rglob('*'))):
+              if not p.is_file(): continue
+              try: lines=p.read_text(errors='replace').splitlines()
+              except Exception: continue
+              hits=[i for i,l in enumerate(lines) if pats.search(l)]
+              if not hits: continue
+              keep=set()
+              for i in hits:
+                  keep.update(range(max(0,i-18),min(len(lines),i+19)))
+              chunks.append(f'===== {p} =====')
+              last=-2
+              for i in sorted(keep):
+                  if i>last+1: chunks.append('...')
+                  chunks.append(f'{i+1:06d}: {lines[i]}')
+                  last=i
+          out.write_text('\n'.join(chunks)+'\n')
+          PY
+          echo '=== sealed pointer source context ==='
+          cat "$OUT/contexts.txt"
+          exit 0
+
       - name: Install QEMU/OVMF and build dependencies
         shell: bash
         run: |
@@ -80,6 +121,7 @@ jobs:
           set +e
           OUT="$GITHUB_WORKSPACE/pointer-isolation-${{ matrix.lane }}"
           mkdir -p "$OUT"
+          cp -a "$GITHUB_WORKSPACE/pointer-source-context/." "$OUT/" 2>/dev/null || true
           printf 'lane=%s\nstatus=started\n' '${{ matrix.lane }}' > "$OUT/harness-status.txt"
           python3 tools/ci/pointer_diag_v3.py \
             --qemu "$QEMU" \
