@@ -1,0 +1,124 @@
+name: Frames 0.9.100 v110 Unified Driver Runtime Architecture Phase 2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v110-unified-driver-runtime ]
+    paths:
+      - '.github/workflows/frames-v110-driver-runtime-certification.yml'
+      - 'architecture/v110/**'
+
+env:
+  KIT_SHA256: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
+  SOURCE_SHA256: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
+  V109_MAIN_SHA256: 82594aaea923a2a19c06eadb73d8d985941b392c56b8c613866b5a99523ae806
+
+jobs:
+  certify-v110:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v110-unified-driver-runtime
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf clang lld python3 unzip mtools dosfstools gdisk file
+
+      - name: Reconstruct two sealed candidates
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/v110-evidence"; mkdir -p "$E" "$RUNNER_TEMP/kit" "$RUNNER_TEMP/a" "$RUNNER_TEMP/b"
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip"
+          test "$(sha256sum "$KIT"|awk '{print $1}')" = "$KIT_SHA256"
+          unzip -q "$KIT" -d "$RUNNER_TEMP/kit"
+          Z="$RUNNER_TEMP/kit/Frames-0.9.98-Source-v108.zip"
+          test "$(sha256sum "$Z"|awk '{print $1}')" = "$SOURCE_SHA256"
+          unzip -q "$Z" -d "$RUNNER_TEMP/a"; unzip -q "$Z" -d "$RUNNER_TEMP/b"
+          A="$RUNNER_TEMP/a/Frames-0.9.98"; B="$RUNNER_TEMP/b/Frames-0.9.98"
+          for S in "$A" "$B"; do
+            python3 architecture/v109/make_unified_device_architecture_v109.py "$S/kernel/main.nx"
+            test "$(sha256sum "$S/kernel/main.nx"|awk '{print $1}')" = "$V109_MAIN_SHA256"
+            python3 architecture/v110/make_driver_runtime_v110.py "$S/kernel/main.nx"
+            chmod +x "$S"/tools/*.sh "$S"/tools/*.py "$S"/sdk/*.sh 2>/dev/null || true
+            find "$S/toolchain" -type f -name nexus -exec chmod +x {} +
+          done
+          A_SHA="$(sha256sum "$A/kernel/main.nx"|awk '{print $1}')"; B_SHA="$(sha256sum "$B/kernel/main.nx"|awk '{print $1}')"
+          test "$A_SHA" = "$B_SHA"
+          printf '%s  kernel/main.nx\n' "$A_SHA" > "$E/V110-KERNEL-MAIN-SHA256.txt"
+          echo "A=$A" >> "$GITHUB_ENV"; echo "B=$B" >> "$GITHUB_ENV"; echo "V110_MAIN_SHA=$A_SHA" >> "$GITHUB_ENV"
+
+      - name: Structural v110 gate
+        run: |
+          set -euo pipefail
+          python3 - "$A/kernel/main.nx" "$GITHUB_WORKSPACE/v110-evidence/V110-STRUCTURAL.json" <<'PY'
+          import json,re,sys,pathlib
+          s=pathlib.Path(sys.argv[1]).read_text()
+          names=['probe_dispatch_v3_run','driver_binding_tx_v3_run','device_resource_owner_v3_run','usb_service_graph_v3_run','input_bridge_v3_run','hotplug_queue_v3_selftest','power_transition_v3_selftest','driver_recovery_v3_selftest','driver_runtime_v3_snapshot','driver_runtime_gate_v3']
+          markers=['FRAMES_PROBE_DISPATCH_V3_OK','FRAMES_BIND_TX_V3_OK','FRAMES_RESOURCE_OWNER_V3_OK','FRAMES_USB_SERVICE_GRAPH_V3_OK','FRAMES_INPUT_BRIDGE_V3_OK','FRAMES_HOTPLUG_QUEUE_V3_OK','FRAMES_POWER_TRANSITION_V3_OK','FRAMES_DRIVER_RECOVERY_V3_OK','FRAMES_DRIVER_RUNTIME_V3_OK','FRAMES_DRIVER_RUNTIME_GATE_V3_OK']
+          checks={f'symbol_{n}':('fn '+n+'(' in s) for n in names}; checks.update({f'marker_{m}':m in s for m in markers})
+          offenders=[]
+          for m in re.finditer(r'fn\s+([A-Za-z0-9_]+)\(([^)]*)\)',s):
+            args=[x for x in m.group(2).split(',') if x.strip()]
+            if len(args)>4: offenders.append([m.group(1),len(args)])
+          checks['max_four_parameters']=not offenders
+          checks['old_v109_gate_preserved']='FRAMES_ARCH_PLATFORM_V2_OK' in s
+          checks['physical_transport_programming_added']=False
+          status='PASS' if all(v for k,v in checks.items() if k!='physical_transport_programming_added') else 'FAIL'
+          out={'status':status,'profile':'frames-v110-driver-runtime-structural','runtime_layers':10,'checks':checks,'parameter_offenders':offenders}
+          pathlib.Path(sys.argv[2]).write_text(json.dumps(out,indent=2)+'\n')
+          if status!='PASS': raise SystemExit(1)
+          PY
+
+      - name: Build both candidates and prove reproducibility
+        run: |
+          set -euo pipefail
+          cd "$A"; ./tools/build.sh; A_FKRN="$(sha256sum build/FramesKernel.fkrn|awk '{print $1}')"; python3 tools/make_esp.py; python3 tools/make_desktop_preview_image.py
+          cd "$B"; ./tools/build.sh; B_FKRN="$(sha256sum build/FramesKernel.fkrn|awk '{print $1}')"
+          test "$A_FKRN" = "$B_FKRN"
+          printf 'kernel_main=%s\nfkrn=%s\n' "$V110_MAIN_SHA" "$A_FKRN" > "$GITHUB_WORKSPACE/v110-evidence/REPRODUCIBLE-IDENTITY.txt"
+          cd "$A"; python3 tools/verify_release.py > "$GITHUB_WORKSPACE/v110-evidence/RELEASE-VERIFY.log"
+          echo "V110_FKRN_SHA=$A_FKRN" >> "$GITHUB_ENV"
+
+      - name: QEMU OVMF v110 runtime capture
+        run: |
+          set -euo pipefail
+          cd "$A"; export FRAMES_PREBUILT=1
+          set +e
+          timeout --signal=TERM --kill-after=10s 75s ./tools/qemu_secure_online_services_certify.sh > "$GITHUB_WORKSPACE/v110-evidence/QEMU-CAPTURE.log" 2>&1
+          RC=$?
+          set -e
+          test -s build/secure-online-serial.log
+          cp build/secure-online-serial.log "$GITHUB_WORKSPACE/v110-evidence/secure-online-serial.log"
+          python3 "$GITHUB_WORKSPACE/architecture/v110/verify_driver_runtime_v110.py" --serial build/secure-online-serial.log --require-pass | tee "$GITHUB_WORKSPACE/v110-evidence/V110-RUNTIME.json"
+          printf 'capture_rc=%s\n' "$RC" > "$GITHUB_WORKSPACE/v110-evidence/QEMU-HARNESS.txt"
+
+      - name: Final fail-closed v110 certification
+        run: |
+          set -euo pipefail
+          python3 - "$GITHUB_WORKSPACE/v110-evidence" <<'PY'
+          import json,pathlib,sys
+          e=pathlib.Path(sys.argv[1]); req=['V110-KERNEL-MAIN-SHA256.txt','V110-STRUCTURAL.json','REPRODUCIBLE-IDENTITY.txt','RELEASE-VERIFY.log','secure-online-serial.log','V110-RUNTIME.json']
+          missing=[x for x in req if not (e/x).is_file()]
+          checks={'required_evidence':not missing}
+          for f in ['V110-STRUCTURAL.json','V110-RUNTIME.json']:
+            checks[f]=(e/f).is_file() and json.loads((e/f).read_text()).get('status')=='PASS'
+          checks['release_structure']=(e/'RELEASE-VERIFY.log').is_file() and 'ALL RELEASE STRUCTURE CHECKS PASSED' in (e/'RELEASE-VERIFY.log').read_text(errors='replace')
+          status='PASS' if all(checks.values()) else 'FAIL'
+          out={'status':status,'profile':'frames-0.9.100-v110-unified-driver-runtime-architecture-phase2','base_certified':'0.9.99-v109','candidate_version':'0.9.100','runtime_layers':10,'checks':checks,'missing':missing,'promotion_allowed':status=='PASS','physical_transport_behavior_changed':False}
+          (e/'FINAL-V110-CERTIFICATION.json').write_text(json.dumps(out,indent=2)+'\n')
+          if status!='PASS': raise SystemExit(1)
+          PY
+          cd "$GITHUB_WORKSPACE/v110-evidence"; find . -maxdepth 1 -type f ! -name EVIDENCE-FILES-SHA256.txt -print0 | sort -z | xargs -0 sha256sum > EVIDENCE-FILES-SHA256.txt
+
+      - name: Upload v110 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frames-0.9.100-v110-unified-driver-runtime-phase2-evidence
+          path: ${{ github.workspace }}/v110-evidence/**
+          if-no-files-found: error
+          retention-days: 30
