@@ -6,6 +6,7 @@ on:
     branches: [ v116-full-product-v101-integration ]
     paths:
       - '.github/workflows/frames-v116-full-product-v101-integration.yml'
+      - 'architecture/integration/**'
       - 'architecture/v109/**'
       - 'architecture/v110/**'
       - 'architecture/v111/**'
@@ -62,44 +63,25 @@ jobs:
           find "$PRODUCT" -maxdepth 2 -type f -printf '%P %s bytes\n' | sort > "$GITHUB_WORKSPACE/integration-evidence/V101-SOURCE-TOPLEVEL-INVENTORY.txt"
           find "$PRODUCT/tools" -maxdepth 1 -type f -printf '%f\n' 2>/dev/null | sort > "$GITHUB_WORKSPACE/integration-evidence/V101-TOOLS-INVENTORY.txt" || true
 
-      - name: Port v109 through v116 architecture patches onto product kernel
+      - name: Semantically port v109 through v116 onto product kernel
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          import base64, gzip, os, re, subprocess, hashlib
-          workspace = Path(os.environ['GITHUB_WORKSPACE'])
-          product = Path(os.environ['PRODUCT'])
-          evidence = workspace / 'integration-evidence'
-          report = []
-          transforms = [
-              ('v109', 'architecture/v109/make_unified_device_architecture_v109.py'),
-              ('v110', 'architecture/v110/make_driver_runtime_v110.py'),
-              ('v111', 'architecture/v111/make_async_io_service_runtime_v111.py'),
-              ('v112', 'architecture/v112/make_device_service_integration_v112.py'),
-              ('v113', 'architecture/v113/make_driver_execution_hal_v113.py'),
-              ('v114', 'architecture/v114/make_kernel_concurrency_driver_scheduling_v114.py'),
-              ('v115', 'architecture/v115/make_driver_migration_unified_input_v115.py'),
-              ('v116', 'architecture/v116/make_usb_core_xhci_migration_v116.py'),
-          ]
-          for label, rel in transforms:
-              text = (workspace / rel).read_text()
-              m = re.search(r'base64\.b64decode\(\s*"""(.*?)"""\s*\)', text, re.S)
-              if not m: raise SystemExit(f'{label}: embedded patch payload not found')
-              payload = gzip.decompress(base64.b64decode(m.group(1))).decode('utf-8')
-              (evidence / f'{label}-PORT.patch').write_text(payload)
-              proc = subprocess.run(['patch','-p1','--forward','--batch','--fuzz=3'], cwd=product, input=payload, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-              (evidence / f'{label}-PORT.log').write_text(proc.stdout)
-              kernel_hash = hashlib.sha256((product/'kernel/main.nx').read_bytes()).hexdigest()
-              report.append(f'{label} rc={proc.returncode} kernel_sha256={kernel_hash}')
-              if proc.returncode != 0:
-                  (evidence / 'PORT-FAILURE.txt').write_text('\n'.join(report) + '\n')
-                  print(proc.stdout)
-                  raise SystemExit(f'{label}: patch did not apply cleanly to v101 product kernel')
-          (evidence / 'PORT-SUCCESS.txt').write_text('\n'.join(report) + '\n')
-          print('\n'.join(report))
-          PY
+          PORT="$GITHUB_WORKSPACE/architecture/integration/port_architecture_to_product.py"
+          chmod +x "$PORT"
+          : > "$GITHUB_WORKSPACE/integration-evidence/PORT-SUCCESS.txt"
+          while read -r label rel; do
+            python3 "$PORT" "$label" "$GITHUB_WORKSPACE/$rel" "$PRODUCT" "$GITHUB_WORKSPACE/integration-evidence" | tee -a "$GITHUB_WORKSPACE/integration-evidence/PORT-SUCCESS.txt"
+          done <<'EOF'
+          v109 architecture/v109/make_unified_device_architecture_v109.py
+          v110 architecture/v110/make_driver_runtime_v110.py
+          v111 architecture/v111/make_async_io_service_runtime_v111.py
+          v112 architecture/v112/make_device_service_integration_v112.py
+          v113 architecture/v113/make_driver_execution_hal_v113.py
+          v114 architecture/v114/make_kernel_concurrency_driver_scheduling_v114.py
+          v115 architecture/v115/make_driver_migration_unified_input_v115.py
+          v116 architecture/v116/make_usb_core_xhci_migration_v116.py
+          EOF
           sha256sum "$PRODUCT/kernel/main.nx" | tee "$GITHUB_WORKSPACE/integration-evidence/V116-PRODUCT-KERNEL-MAIN-SHA256-AFTER.txt"
 
       - name: Build complete product using v101 build system
@@ -146,7 +128,7 @@ jobs:
           cp build/System.fex "$ROOT/FRAMES/System.fex"
           cp "$ESP" "$ROOT/FRAMES/Product-ESP.img"
           find build -maxdepth 1 -type f \( -iname '*Desktop*.img' -o -iname '*.fthm' -o -iname '*.cfg' -o -iname '*.fapp' \) -exec cp -t "$ROOT/FRAMES" {} + 2>/dev/null || true
-          printf '%s\n' 'Frames v116 Full Product Integration Test Boot' 'Product shell: Frames 0.9.91 Integrated Connected Services v101' 'Kernel additions: v109-v116 architecture/runtime/HAL/concurrency/input/xHCI port' 'This is an integration test image, not a new certified release promotion.' > "$ROOT/README.TXT"
+          printf '%s\n' 'Frames v116 Full Product Integration Test Boot' 'Product shell: Frames 0.9.91 Integrated Connected Services v101' 'Kernel additions: certified v109-v116 architecture port' 'Integration test image; not a new release promotion.' > "$ROOT/README.TXT"
           OUT="$GITHUB_WORKSPACE/Frames-v116-Full-Product-v101-Integrated-UEFI.iso"
           xorriso -as mkisofs -iso-level 3 -R -J -V FRAMES_FULL -append_partition 2 0xef "$EFI_IMG" -appended_part_as_gpt -e --interval:appended_partition_2:all:: -no-emul-boot -o "$OUT" "$ROOT" 2>&1 | tee "$GITHUB_WORKSPACE/integration-evidence/XORRISO.log"
           test -s "$OUT"
