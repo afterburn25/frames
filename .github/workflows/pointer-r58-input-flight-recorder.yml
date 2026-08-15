@@ -1,0 +1,201 @@
+name: Frames 0.9.98 r58 Persistent Physical Input Flight Recorder USB Image
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ r56-linux-input-architecture ]
+    paths:
+      - '.github/workflows/pointer-r58-input-flight-recorder.yml'
+      - 'tools/ci/make_r58_input_flight_recorder.py'
+      - 'tools/ci/decode_r58_ptrlog.py'
+      - 'tools/ci/make_r57_persistent_xhci_trace.py'
+      - 'tools/ci/make_r56_linux_input_architecture.py'
+      - 'tools/ci/make_r55_physical_protocol_probe.py'
+      - 'tools/ci/make_r54_usb_multiport_hid.py'
+      - 'tools/ci/make_r53b_input_protocol_id.py'
+      - 'tools/ci/make_r50_ps2_phase_fix.py'
+      - 'tools/ci/make_r49_ps2_phase.py'
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_PARENT_SHA256: 1c7f1b514d9aa2f847f724e8b633286d069d745bf7c281a3967c46bbfea1a18c
+  EXPECTED_R46_KERNEL_MAIN_SHA256: e5ccd3d4a453184f620e2ed5f928599bc8a7fa6959098f3aeff4916f6dcff165
+
+jobs:
+  build-r58:
+    name: Build r58 persistent input flight recorder Rufus image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: r56-linux-input-architecture
+
+      - name: Initialize evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf r58-out
+          mkdir -p r58-out
+          printf 'status=started\nrevision=r58\nstrategy=persistent-physical-input-flight-recorder\n' > r58-out/BUILD-STATUS.txt
+
+      - name: Reconstruct exact protected r46 base
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent_sha="$(sha256sum Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip | awk '{print $1}')"
+          echo "protected_parent_sha256=$parent_sha" > r58-out/PARENT-IDENTITY.txt
+          test "$parent_sha" = "$EXPECTED_PARENT_SHA256"
+          rm -rf "$RUNNER_TEMP/r58"; mkdir -p "$RUNNER_TEMP/r58"
+          unzip -q Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip -d "$RUNNER_TEMP/r58"
+          SRC="$RUNNER_TEMP/r58/Frames-0.9.98-Pointer-CI-Source"
+          python3 - "$SRC/kernel/main.nx" <<'PY'
+          from pathlib import Path
+          import sys
+          p=Path(sys.argv[1]); s=p.read_text()
+          a='if usb_hid_found != 0 { usb_hid_configured = xhci_configure_boot_hid(xhci_state,phys_state); if usb_hid_configured != 0 { usb_hid_report_ready = xhci_read_first_hid_report(xhci_state,phys_state); } }'
+          b='if usb_hid_found != 0 { usb_hid_configured = xhci_configure_boot_hid(xhci_state,phys_state); if usb_hid_configured != 0 { usb_hid_report_ready = 1; } }'
+          c='if input_queue_ready != 0 { if usb_hid_report_ready != 0 { input_decode_ready = input_decode_boot_hid(xhci_state,input_state); } else { ps2_poll_fallback(input_state); } }'
+          d='if input_queue_ready != 0 { if usb_hid_report_ready != 0 { input_decode_ready = 1; } else { ps2_poll_fallback(input_state); } }'
+          assert s.count(a)==1 and s.count(c)==1
+          p.write_text(s.replace(a,b).replace(c,d))
+          PY
+          r46_sha="$(sha256sum "$SRC/kernel/main.nx" | awk '{print $1}')"
+          echo "r46_kernel_main_sha256=$r46_sha" > r58-out/R46-BASE-IDENTITY.txt
+          test "$r46_sha" = "$EXPECTED_R46_KERNEL_MAIN_SHA256"
+          echo "FRAMES_DIR=$SRC" >> "$GITHUB_ENV"
+
+      - name: Apply r58 persistent flight recorder
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "$FRAMES_DIR/kernel/main.nx" r58-out/kernel-main-before-r58.nx
+          python3 tools/ci/make_r58_input_flight_recorder.py "$FRAMES_DIR/kernel/main.nx"
+          cp "$FRAMES_DIR/kernel/main.nx" r58-out/kernel-main-r58.nx
+          diff -u r58-out/kernel-main-before-r58.nx r58-out/kernel-main-r58.nx > r58-out/R58-FLIGHT-RECORDER.patch || true
+          grep -q 'R58' "$FRAMES_DIR/kernel/main.nx"
+          grep -q 'ptrtrace_save_usb' "$FRAMES_DIR/kernel/main.nx"
+          grep -q 'usb_msc_bot_write10' "$FRAMES_DIR/kernel/main.nx"
+          grep -q 'PTRLOG' "$FRAMES_DIR/kernel/main.nx"
+          sha256sum "$FRAMES_DIR/kernel/main.nx" | tee r58-out/R58-KERNEL-SHA256.txt
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 unzip zip mtools dosfstools
+          find "$FRAMES_DIR" -type f -name '*.sh' -exec chmod +x {} +
+          find "$FRAMES_DIR/toolchain" -type f -name nexus -exec chmod +x {} +
+
+      - name: Build base raw USB image
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"
+          ./tools/build.sh
+          python3 tools/make_esp.py
+          python3 tools/sdk_selftest.py
+          python3 tools/make_desktop_preview_image.py
+          python3 tools/verify_desktop_preview_image.py --image build/Frames-0.9.98-Desktop-Preview.img --require-pass
+          python3 tools/verify_release.py
+
+      - name: Preallocate bounded PTRLOG.BIN on the ESP
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMG="$FRAMES_DIR/build/Frames-0.9.98-Desktop-Preview.img"
+          truncate -s 1048576 r58-out/PTRLOG.BIN
+          OFFSET="$(python3 - "$IMG" <<'PY'
+          from pathlib import Path
+          import struct,sys
+          p=Path(sys.argv[1])
+          with p.open('rb') as f:
+              f.seek(2*512)
+              e=f.read(128)
+          start=struct.unpack_from('<Q',e,32)[0]
+          if start<34: raise SystemExit('invalid GPT ESP start')
+          print(start*512)
+          PY
+          )"
+          mcopy -o -i "$IMG@@$OFFSET" r58-out/PTRLOG.BIN ::PTRLOG.BIN
+          mdir -i "$IMG@@$OFFSET" :: > r58-out/ESP-DIRECTORY.txt
+          grep -q 'PTRLOG' r58-out/ESP-DIRECTORY.txt
+
+      - name: Verify PTRLOG is preallocated and contiguous
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMG="$FRAMES_DIR/build/Frames-0.9.98-Desktop-Preview.img"
+          python3 - "$IMG" <<'PY' | tee r58-out/PTRLOG-LAYOUT.txt
+          from pathlib import Path
+          import struct,sys
+          p=Path(sys.argv[1]); f=p.open('rb')
+          def sec(lba): f.seek(lba*512); return f.read(512)
+          e=sec(2)[:128]; part=struct.unpack_from('<Q',e,32)[0]
+          b=sec(part); bps=struct.unpack_from('<H',b,11)[0]; spc=b[13]; reserved=struct.unpack_from('<H',b,14)[0]; fats=b[16]; fatsecs=struct.unpack_from('<I',b,36)[0]; root=struct.unpack_from('<I',b,44)[0]&0x0fffffff
+          assert bps==512 and spc==1
+          fat_start=part+reserved; data_start=fat_start+fats*fatsecs
+          def next_cluster(c):
+              bo=c*4; d=sec(fat_start+bo//512); return struct.unpack_from('<I',d,bo%512)[0]&0x0fffffff
+          c=root; found=None
+          for _ in range(128):
+              d=sec(data_start+(c-2))
+              for off in range(0,512,32):
+                  if d[off]==0: break
+                  if d[off:off+11]==b'PTRLOG  BIN':
+                      hi=struct.unpack_from('<H',d,off+20)[0]; lo=struct.unpack_from('<H',d,off+26)[0]; fc=(hi<<16)|lo; size=struct.unpack_from('<I',d,off+28)[0]; found=(fc,size); break
+              if found: break
+              c=next_cluster(c)
+              if c>=0x0ffffff8: break
+          assert found, 'PTRLOG.BIN missing'
+          fc,size=found; assert size==1048576
+          clusters=size//512; c=fc
+          for i in range(clusters-1):
+              n=next_cluster(c)
+              assert n==c+1, f'PTRLOG fragmented at cluster {c}->{n}'
+              c=n
+          first_lba=data_start+(fc-2)
+          print(f'partition_lba={part}')
+          print(f'ptrlog_first_cluster={fc}')
+          print(f'ptrlog_first_lba={first_lba}')
+          print(f'ptrlog_bytes={size}')
+          print(f'ptrlog_clusters={clusters}')
+          print('ptrlog_contiguous=PASS')
+          PY
+
+      - name: Package final r58 image and decoder
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMG="$FRAMES_DIR/build/Frames-0.9.98-Desktop-Preview.img"
+          cp "$IMG" r58-out/Frames-0.9.98-r58-Persistent-Input-Flight-Recorder-Rufus.img
+          cp tools/ci/decode_r58_ptrlog.py r58-out/decode-r58-ptrlog.py
+          cat > r58-out/HANDS-ON-TEST.txt <<'EOF'
+          1. Write the r58 IMG directly with Rufus/raw image mode.
+          2. Plug the physical USB mouse in BEFORE boot and leave it connected.
+          3. Boot and confirm PTR DIAG R58.
+          4. Exercise USB mouse and touchpad normally for at least 15 seconds.
+          5. Watch SAVE on the panel. SAVE=1 means writing; SAVE=2 means PTRLOG.BIN was persisted and flushed; SAVE=3 means persistence failed.
+          6. Once SAVE=2, power off cleanly. Mount the USB on another computer and upload PTRLOG.BIN from the root of the Frames EFI partition.
+
+          PTRLOG.BIN is preallocated to 1 MiB and verified contiguous at build time. Runtime logging never allocates/free FAT clusters or changes directory metadata; it overwrites only reserved PTRLOG.BIN sectors via USB MSC WRITE(10), then issues SYNCHRONIZE CACHE.
+
+          Binary header contains record count/drop count plus xHCI stage/failure/completion, selected port/VID, core/PS2/USB/AUX totals and save TSC. Each 32-byte record is {tsc, kind, a, b}; kinds include raw PS/2 bytes, decoded PS/2 packets, Generic Pointer relative events, raw USB HID report snapshots, and save boundary.
+
+          Diagnostic-only. Do not promote r58.
+          EOF
+          img_sha="$(sha256sum r58-out/Frames-0.9.98-r58-Persistent-Input-Flight-Recorder-Rufus.img | awk '{print $1}')"
+          printf 'status=PASS\nrevision=r58\nimage_sha256=%s\n' "$img_sha" > r58-out/BUILD-STATUS.txt
+          sha256sum r58-out/* > r58-out/SHA256SUMS.txt
+
+      - name: Upload r58 image, decoder, and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frames-0.9.98-r58-persistent-input-flight-recorder-rufus-image
+          path: r58-out/**
+          if-no-files-found: error
+          retention-days: 14
