@@ -1,0 +1,94 @@
+name: Frames 0.9.98 Pointer Diagnostics CI v1
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip'
+
+permissions:
+  contents: read
+
+jobs:
+  pointer-diagnostics:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      EXPECTED_KIT_SHA256: 1c7f1b514d9aa2f847f724e8b633286d069d745bf7c281a3967c46bbfea1a18c
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify diagnostic kit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip
+          actual="$(sha256sum Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip | awk '{print $1}')"
+          echo "kit_sha=$actual"
+          test "$actual" = "$EXPECTED_KIT_SHA256"
+          rm -rf "$RUNNER_TEMP/pointer-ci"
+          mkdir -p "$RUNNER_TEMP/pointer-ci"
+          unzip -q Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip -d "$RUNNER_TEMP/pointer-ci"
+          echo "FRAMES_DIR=$RUNNER_TEMP/pointer-ci/Frames-0.9.98-Pointer-CI-Source" >> "$GITHUB_ENV"
+          echo "CI_DIR=$RUNNER_TEMP/pointer-ci" >> "$GITHUB_ENV"
+
+      - name: Install QEMU/OVMF and build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf clang lld python3 unzip zip
+          code="$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE.fd' \) | head -n1)"
+          test -n "$code"
+          echo "OVMF_CODE=$code" >> "$GITHUB_ENV"
+          echo "QEMU=$(command -v qemu-system-x86_64)" >> "$GITHUB_ENV"
+
+      - name: Normalize executable permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          find "$FRAMES_DIR" -type f -name '*.sh' -exec chmod +x {} +
+          find "$FRAMES_DIR/toolchain" -type f -name nexus -exec chmod +x {} +
+          chmod +x "$CI_DIR/pointer_qmp_test.py"
+
+      - name: Build diagnostic source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"
+          ./tools/build.sh
+          python3 tools/make_esp.py
+          python3 tools/sdk_selftest.py
+          python3 tools/make_desktop_preview_image.py
+          python3 tools/verify_desktop_preview_image.py --image build/Frames-0.9.98-Desktop-Preview.img --require-pass
+          python3 tools/verify_release.py
+
+      - name: Run deterministic PS/2/QMP input trace
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/pointer-evidence"
+          python3 "$CI_DIR/pointer_qmp_test.py"             "$QEMU" "$OVMF_CODE"             "$FRAMES_DIR/build/Frames-0.9.98-Desktop-Preview.img"             "$GITHUB_WORKSPACE/pointer-evidence"
+
+      - name: Summarize evidence
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          echo "=== serial tail ==="
+          tail -n 200 pointer-evidence/serial.log 2>/dev/null || true
+          echo "=== qmp transcript tail ==="
+          tail -n 100 pointer-evidence/qmp-transcript.jsonl 2>/dev/null || true
+          sha256sum pointer-evidence/* 2>/dev/null || true
+
+      - name: Upload pointer evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frames-0.9.98-pointer-diagnostics-ci-v1
+          path: |
+            pointer-evidence/**
+            ${{ env.FRAMES_DIR }}/build/input-*.serial.log
+          if-no-files-found: warn
