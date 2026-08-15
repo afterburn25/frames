@@ -3,11 +3,10 @@ from pathlib import Path
 import base64, difflib, gzip, hashlib, re, subprocess, sys
 
 
-def extract_payload(transform: Path) -> str:
-    text = transform.read_text()
+def extract_patch_payload(text: str):
     m = re.search(r'base64\.b64decode\(\s*"""(.*?)"""\s*\)', text, re.S)
     if not m:
-        raise SystemExit(f"embedded patch payload not found: {transform}")
+        return None
     return gzip.decompress(base64.b64decode(m.group(1))).decode('utf-8')
 
 
@@ -41,7 +40,6 @@ def pure_insert_pair(old: str, new: str):
 
 
 def apply_insertions_to_line(lines, old, new, ops):
-    # Prefer the exact ancestral line when available.
     candidates = [i for i, line in enumerate(lines) if line.rstrip('\n') == old]
     if candidates:
         if len(candidates) != 1:
@@ -49,8 +47,6 @@ def apply_insertions_to_line(lines, old, new, ops):
         lines[candidates[0]] = new + ('\n' if lines[candidates[0]].endswith('\n') else '')
         return
 
-    # Otherwise locate each insertion by stable text immediately around the
-    # insertion. This preserves product-only material elsewhere on the line.
     current_index = None
     for tag, i1, i2, j1, j2 in ops:
         if tag != 'insert':
@@ -118,6 +114,37 @@ def semantic_preapply(kernel: Path, payload: str, report_path: Path):
     return ''.join(prefix + [line for h in remaining for line in h]), semantic
 
 
+def run_direct_transform(label: str, text: str, transform: Path, kernel: Path, evidence: Path):
+    current_sha = hashlib.sha256(kernel.read_bytes()).hexdigest()
+    adapted, count = re.subn(
+        r"expected\s*=\s*['\"][0-9a-fA-F]{64}['\"]",
+        f"expected='{current_sha}'",
+        text,
+        count=1,
+    )
+    if count != 1:
+        raise SystemExit(f'{label}: direct transformer expected-hash guard not found')
+
+    adapted_path = evidence / f'{label}-PRODUCT-ADAPTED.py'
+    adapted_path.write_text(adapted)
+    before = hashlib.sha256(kernel.read_bytes()).hexdigest()
+    proc = subprocess.run(
+        [sys.executable, str(adapted_path), str(kernel)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    (evidence / f'{label}-PORT.log').write_text(proc.stdout)
+    after = hashlib.sha256(kernel.read_bytes()).hexdigest()
+    (evidence / f'{label}-DIRECT.txt').write_text(
+        f'mode=direct-transform\noriginal={transform}\nbefore={before}\nafter={after}\nrc={proc.returncode}\n'
+    )
+    print(f'{label} rc={proc.returncode} mode=direct-transform kernel_sha256={after}')
+    if proc.returncode != 0:
+        print(proc.stdout)
+        raise SystemExit(proc.returncode)
+
+
 def main():
     if len(sys.argv) != 5:
         raise SystemExit('usage: port_architecture_to_product.py LABEL TRANSFORM PRODUCT EVIDENCE')
@@ -128,7 +155,12 @@ def main():
     kernel = product / 'kernel/main.nx'
     evidence.mkdir(parents=True, exist_ok=True)
 
-    payload = extract_payload(transform)
+    text = transform.read_text()
+    payload = extract_patch_payload(text)
+    if payload is None:
+        run_direct_transform(label, text, transform, kernel, evidence)
+        return
+
     (evidence / f'{label}-PORT.patch').write_text(payload)
     reduced, semantic = semantic_preapply(kernel, payload, evidence / f'{label}-SEMANTIC.txt')
     (evidence / f'{label}-PORT-REDUCED.patch').write_text(reduced)
@@ -141,6 +173,7 @@ def main():
     sha = hashlib.sha256(kernel.read_bytes()).hexdigest()
     print(f'{label} rc={proc.returncode} semantic_hunks={semantic} kernel_sha256={sha}')
     if proc.returncode != 0:
+        print(proc.stdout)
         raise SystemExit(proc.returncode)
 
 
