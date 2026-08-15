@@ -1,0 +1,40 @@
+name: Frames v72 GUI Gate Inspection
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v116-full-product-v101-integration ]
+    paths:
+      - '.github/workflows/frames-v72-gui-gate-inspection.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v116-full-product-v101-integration
+      - name: Extract v72 and inspect GUI/gate control flow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/v72-inspect"
+          mkdir -p "$RUNNER_TEMP/v72-inspect" "$GITHUB_WORKSPACE/v72-gui-gate-evidence"
+          unzip -q "$GITHUB_WORKSPACE/Frames-0.9.62-Source-v72-r1.zip" -d "$RUNNER_TEMP/v72-inspect"
+          SRC="$(find "$RUNNER_TEMP/v72-inspect" -type f -name VERSION -print | while read -r f; do [ "$(tr -d '\r\n' < "$f")" = '0.9.62' ] && dirname "$f" && break; done)"
+          test -n "$SRC"
+          K="$SRC/kernel/main.nx"
+          echo "source=$SRC" > "$GITHUB_WORKSPACE/v72-gui-gate-evidence/IDENTITY.txt"
+          grep -n -C 16 -E 'PHYSICAL_BOOT_BLOCKED|diagnostic-only|hardware_gate_ready|gui_app_phase1_compose|desktop_ready|window_manager_ready|serial_marker_desktop_cert_fail' "$K" > "$GITHUB_WORKSPACE/v72-gui-gate-evidence/GATE-AND-GUI-SNIPPETS.txt" || true
+          grep -n -E '^fn .*gui|^fn .*desktop|^fn .*window|^fn .*compose|gui_app_phase1_compose|desktop_shell|window_manager' "$K" > "$GITHUB_WORKSPACE/v72-gui-gate-evidence/GUI-FUNCTION-INDEX.txt" || true
+          grep -n -C 10 -E 'return;|return 0|return 1' "$K" | grep -B12 -A12 -E 'hardware_gate|diagnostic|desktop_ready|gui_app_phase1_compose' > "$GITHUB_WORKSPACE/v72-gui-gate-evidence/RETURN-PATHS.txt" || true
+          sed -n '5080,5205p' "$K" > "$GITHUB_WORKSPACE/v72-gui-gate-evidence/MAIN-GUI-REGION.txt"
+      - name: Upload inspection evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v72-GUI-Gate-Inspection
+          path: v72-gui-gate-evidence/
+          if-no-files-found: error
