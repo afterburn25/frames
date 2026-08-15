@@ -1,0 +1,122 @@
+name: Frames 0.9.98 r51 Physical PS2 Delta Stabilization USB Image
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/pointer-r51-physical-ps2-stabilize.yml'
+      - 'tools/ci/make_r51_ps2_delta_stabilize.py'
+      - 'tools/ci/make_r50_ps2_phase_fix.py'
+      - 'tools/ci/make_r49_ps2_phase.py'
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_PARENT_SHA256: 1c7f1b514d9aa2f847f724e8b633286d069d745bf7c281a3967c46bbfea1a18c
+  EXPECTED_R46_KERNEL_MAIN_SHA256: e5ccd3d4a453184f620e2ed5f928599bc8a7fa6959098f3aeff4916f6dcff165
+
+jobs:
+  build-r51:
+    name: Build r51 Rufus-compatible physical PS2 stabilization image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf r51-out
+          mkdir -p r51-out
+          printf 'status=started\nrevision=r51\n' > r51-out/BUILD-STATUS.txt
+
+      - name: Reconstruct exact certified r46 base
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent_sha="$(sha256sum Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip | awk '{print $1}')"
+          echo "protected_parent_sha256=$parent_sha" > r51-out/PARENT-IDENTITY.txt
+          test "$parent_sha" = "$EXPECTED_PARENT_SHA256"
+          rm -rf "$RUNNER_TEMP/r51"; mkdir -p "$RUNNER_TEMP/r51"
+          unzip -q Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip -d "$RUNNER_TEMP/r51"
+          SRC="$RUNNER_TEMP/r51/Frames-0.9.98-Pointer-CI-Source"
+          python3 - "$SRC/kernel/main.nx" <<'PY'
+          from pathlib import Path
+          import sys
+          p=Path(sys.argv[1]); s=p.read_text()
+          a='if usb_hid_found != 0 { usb_hid_configured = xhci_configure_boot_hid(xhci_state,phys_state); if usb_hid_configured != 0 { usb_hid_report_ready = xhci_read_first_hid_report(xhci_state,phys_state); } }'
+          b='if usb_hid_found != 0 { usb_hid_configured = xhci_configure_boot_hid(xhci_state,phys_state); if usb_hid_configured != 0 { usb_hid_report_ready = 1; } }'
+          c='if input_queue_ready != 0 { if usb_hid_report_ready != 0 { input_decode_ready = input_decode_boot_hid(xhci_state,input_state); } else { ps2_poll_fallback(input_state); } }'
+          d='if input_queue_ready != 0 { if usb_hid_report_ready != 0 { input_decode_ready = 1; } else { ps2_poll_fallback(input_state); } }'
+          assert s.count(a)==1 and s.count(c)==1
+          p.write_text(s.replace(a,b).replace(c,d))
+          PY
+          r46_sha="$(sha256sum "$SRC/kernel/main.nx" | awk '{print $1}')"
+          echo "r46_kernel_main_sha256=$r46_sha" > r51-out/R46-BASE-IDENTITY.txt
+          test "$r46_sha" = "$EXPECTED_R46_KERNEL_MAIN_SHA256"
+          cp "$SRC/kernel/main.nx" r51-out/kernel-main-r46.nx
+          echo "FRAMES_DIR=$SRC" >> "$GITHUB_ENV"
+
+      - name: Apply r51 stabilization repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "$FRAMES_DIR/kernel/main.nx" r51-out/kernel-main-before-r51.nx
+          python3 tools/ci/make_r51_ps2_delta_stabilize.py "$FRAMES_DIR/kernel/main.nx"
+          cp "$FRAMES_DIR/kernel/main.nx" r51-out/kernel-main-r51.nx
+          diff -u r51-out/kernel-main-before-r51.nx r51-out/kernel-main-r51.nx > r51-out/R51-STABILIZATION.patch || true
+          grep -q 'R51' "$FRAMES_DIR/kernel/main.nx"
+          grep -q 'overflow_bad' "$FRAMES_DIR/kernel/main.nx"
+          grep -q 'big_delta' "$FRAMES_DIR/kernel/main.nx"
+          sha256sum "$FRAMES_DIR/kernel/main.nx" | tee r51-out/R51-KERNEL-SHA256.txt
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 unzip zip mtools dosfstools
+          find "$FRAMES_DIR" -type f -name '*.sh' -exec chmod +x {} +
+          find "$FRAMES_DIR/toolchain" -type f -name nexus -exec chmod +x {} +
+
+      - name: Build and verify raw USB image
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"
+          ./tools/build.sh
+          python3 tools/make_esp.py
+          python3 tools/sdk_selftest.py
+          python3 tools/make_desktop_preview_image.py
+          python3 tools/verify_desktop_preview_image.py --image build/Frames-0.9.98-Desktop-Preview.img --require-pass
+          python3 tools/verify_release.py
+          cp build/Frames-0.9.98-Desktop-Preview.img "$GITHUB_WORKSPACE/r51-out/Frames-0.9.98-r51-Physical-PS2-Delta-Stabilization-Rufus.img"
+
+      - name: Record hands-on instructions and hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          img="r51-out/Frames-0.9.98-r51-Physical-PS2-Delta-Stabilization-Rufus.img"
+          img_sha="$(sha256sum "$img" | awk '{print $1}')"
+          cat > r51-out/HANDS-ON-TEST.txt <<'EOF'
+          Write Frames-0.9.98-r51-Physical-PS2-Delta-Stabilization-Rufus.img directly to USB with Rufus/raw image mode.
+          Boot in UEFI mode and confirm PTR DIAG R51.
+          Move the touchpad slowly in all four directions, then circles, then pause and resume.
+          Expected result: cursor movement should remain continuous without large chaotic jumps. BADP counts rejected corrupt/implausible packets; OVRF counts PS/2 overflow-bit rejects; SGNM counts sign/raw-byte contradictions; BIGD counts decoded deltas above 96; SHFT/LOCK retain phase acquisition diagnostics.
+          Photograph the full panel if movement is still unstable, especially SRC CORE TRNS CLMP JNUM JHDR JPDX JPDY JXMG PSTA PCNT BADP OVRF SGNM BIGD SHFT LOCK.
+          Experimental physical repair build; do not promote until hands-on success plus PS/2 and USB regression certification.
+          EOF
+          printf 'status=PASS\nrevision=r51\nimage_sha256=%s\n' "$img_sha" > r51-out/BUILD-STATUS.txt
+          sha256sum r51-out/* > r51-out/SHA256SUMS.txt
+
+      - name: Upload r51 USB image and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frames-0.9.98-r51-physical-ps2-delta-stabilization-rufus-image
+          path: r51-out/**
+          if-no-files-found: error
+          retention-days: 14
