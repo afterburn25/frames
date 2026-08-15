@@ -30,11 +30,14 @@ jobs:
           test -n "$SRC"
           K="$SRC/kernel/main.nx"
           echo "source=$SRC" > "$OUT/IDENTITY.txt"
-          grep -n -C 80 'FRAMES_DESKTOP_CERT_FAIL' "$K" > "$OUT/CERT-FAIL-CONTEXT.txt" || true
-          grep -n -C 40 -E 'desktop_cert|desktop.*ready|cert.*desktop|PRE1_PROMOTION_BLOCKED|PRE1_SNAPSHOT_READY|DESKTOP_POLICY_OK|DESKTOP_WRITE_LOCK_OK' "$K" > "$OUT/DESKTOP-CERT-SYMBOLS.txt" || true
-          grep -n -E 'let .*desktop|var .*desktop|desktop_.*=' "$K" > "$OUT/DESKTOP-ASSIGNMENTS.txt" || true
-          test -s "$OUT/CERT-FAIL-CONTEXT.txt"
+          grep -n -C 100 -E 'serial_marker_desktop_cert_fail|desktop_cert|desktop_ready|desktop.*cert|cert.*desktop' "$K" > "$OUT/CERT-FAIL-CONTEXT.txt" || true
+          grep -n -C 50 -E 'serial_marker_pre1_promotion_blocked|serial_marker_pre1_snapshot_ready|serial_marker_desktop_policy_ok|serial_marker_desktop_write_lock_ok|serial_marker_desktop_phase1_ok|serial_marker_integrated_gui_ok' "$K" > "$OUT/DESKTOP-MARKER-CONTEXT.txt" || true
+          grep -n -E 'let .*desktop|var .*desktop|desktop_[A-Za-z0-9_]*\s*=|.*_ready\s*=' "$K" > "$OUT/DESKTOP-ASSIGNMENTS.txt" || true
+          grep -n -C 25 -E 'if .*desktop|if .*cert|promotion|snapshot|gui_app_phase1_compose|desktop_ready' "$K" > "$OUT/DESKTOP-BRANCHES.txt" || true
+          wc -c "$OUT"/*.txt | tee "$OUT/SIZES.txt"
+          test -s "$OUT/CERT-FAIL-CONTEXT.txt" || test -s "$OUT/DESKTOP-MARKER-CONTEXT.txt"
       - name: Upload inspection
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Frames-v72-Desktop-Cert-Predicate-Inspection
