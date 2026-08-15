@@ -125,11 +125,21 @@ jobs:
           )"
           ESP="r63-out/UEFI-ESP.part.img"
           dd if="$IMG" of="$ESP" bs=512 skip="$ESP_START" count="$ESP_SECTORS" status=none
-          fsck.fat -n "$ESP" | tee r63-out/UEFI-FAT32-VERIFY.txt
+          set +e
+          fsck.fat -n "$ESP" > r63-out/UEFI-FAT32-VERIFY.txt 2>&1
+          FAT_RC=$?
+          set -e
+          cat r63-out/UEFI-FAT32-VERIFY.txt
+          if [ "$FAT_RC" -gt 1 ]; then
+            echo "fatal FAT verification failure: rc=$FAT_RC" >&2
+            exit "$FAT_RC"
+          fi
           mdir -i "$ESP" ::/EFI/BOOT/BOOTX64.EFI | tee r63-out/UEFI-BOOTX64-VERIFY.txt
           mcopy -i "$ESP" ::/EFI/BOOT/BOOTX64.EFI r63-out/BOOTX64.EFI
           test -s r63-out/BOOTX64.EFI
-          printf 'uefi_bootability=PASS\nesp_gpt_type_guid=C12A7328-F81F-11D2-BA4B-00A0C93EC93B\nfilesystem=FAT\nremovable_media_path=EFI/BOOT/BOOTX64.EFI\n' > r63-out/UEFI-BOOT-STATUS.txt
+          file r63-out/BOOTX64.EFI | tee r63-out/UEFI-BOOTX64-FILE.txt
+          grep -qi 'PE32+ executable.*EFI application.*x86-64' r63-out/UEFI-BOOTX64-FILE.txt
+          printf 'uefi_bootability=PASS\nesp_gpt_type_guid=C12A7328-F81F-11D2-BA4B-00A0C93EC93B\nfilesystem=FAT\nfat_fsck_rc=%s\nremovable_media_path=EFI/BOOT/BOOTX64.EFI\n' "$FAT_RC" > r63-out/UEFI-BOOT-STATUS.txt
           rm -f "$ESP"
 
       - name: Package r63 evidence
