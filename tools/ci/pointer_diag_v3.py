@@ -131,7 +131,7 @@ def classify(expected_delta,actual_delta):
     return "direction-or-sign-mismatch"
 
 def run(a,out):
-    p,q=start(a)
+    p,q=start(a,out)
     report={"schema":"frames-pointer-isolation-v3","lane":a.lane,"checkpoints":[],"assertions":[]}
     try:
         report["query_mice"]=q.cmd("query-mice")
@@ -181,6 +181,9 @@ def run(a,out):
         lines=[ln for ln in txt.splitlines() if "PTR" in ln.upper() or "POINTER" in ln.upper() or "HID" in ln.upper() or "PS2" in ln.upper()]
         (out/"pointer-serial-lines.txt").write_text("\n".join(lines)+("\n" if lines else ""))
         report["pointer_serial_line_count"]=len(lines)
+    else:
+        (out/"pointer-serial-lines.txt").write_text("")
+        report["pointer_serial_line_count"]=0
     (out/"summary.json").write_text(json.dumps(report,indent=2,sort_keys=True)+"\n")
     sums=[]
     for f in sorted(out.iterdir()):
