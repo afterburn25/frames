@@ -4,52 +4,76 @@ import sys
 
 product = Path(sys.argv[1])
 p = product / 'boot/uefi/frames_boot.c'
-s = p.read_text()
+logo = product / 'assets/branding/FramesLogo-48.rgba'
+if not logo.is_file():
+    raise SystemExit(f'canonical logo missing: {logo}')
+raw = logo.read_bytes()
+if len(raw) != 48 * 48 * 4:
+    raise SystemExit(f'unexpected FramesLogo-48.rgba size: {len(raw)}')
+logo_sha = __import__('hashlib').sha256(raw).hexdigest()
+logo_bytes = ','.join(f'0x{x:02x}' for x in raw)
 
+s = p.read_text()
 anchor = 'static EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *gConOut;\n'
 if anchor not in s:
     raise SystemExit('loader global anchor missing')
 
-helpers = r'''static EFI_GRAPHICS_OUTPUT_PROTOCOL *gFramesGop;
+helpers = f'''static EFI_GRAPHICS_OUTPUT_PROTOCOL *gFramesGop;
 static int gFramesSplashActive;
+static const char gFramesCanonicalLogoIdentity[] = "FRAMES_CANONICAL_LOGO_48_RGBA_SHA256={logo_sha}";
+static const uint8_t gFramesCanonicalLogo48[48*48*4] = {{{logo_bytes}}};
 
-static inline void frames_out8(uint16_t port,uint8_t value){ __asm__ __volatile__("outb %0,%1"::"a"(value),"Nd"(port)); }
-static inline uint8_t frames_in8(uint16_t port){ uint8_t v; __asm__ __volatile__("inb %1,%0":"=a"(v):"Nd"(port)); return v; }
-static void frames_serial_init(void){
+static inline void frames_out8(uint16_t port,uint8_t value){{ __asm__ __volatile__("outb %0,%1"::"a"(value),"Nd"(port)); }}
+static inline uint8_t frames_in8(uint16_t port){{ uint8_t v; __asm__ __volatile__("inb %1,%0":"=a"(v):"Nd"(port)); return v; }}
+static void frames_serial_init(void){{
     frames_out8(0x3f8+1,0x00); frames_out8(0x3f8+3,0x80); frames_out8(0x3f8+0,0x03); frames_out8(0x3f8+1,0x00);
     frames_out8(0x3f8+3,0x03); frames_out8(0x3f8+2,0xc7); frames_out8(0x3f8+4,0x0b);
-}
-static void frames_serial_putc(char c){ for(uint32_t i=0;i<100000;i++){ if(frames_in8(0x3f8+5)&0x20){ frames_out8(0x3f8,c); return; } } }
-static void frames_serial_write(const char *s){ if(!s)return; while(*s)frames_serial_putc(*s++); }
+}}
+static void frames_serial_putc(char c){{ for(uint32_t i=0;i<100000;i++){{ if(frames_in8(0x3f8+5)&0x20){{ frames_out8(0x3f8,c); return; }} }} }}
+static void frames_serial_write(const char *s){{ if(!s)return; while(*s)frames_serial_putc(*s++); }}
 
-static uint32_t frames_rgb(uint8_t r,uint8_t g,uint8_t b){
+static uint32_t frames_rgb(uint8_t r,uint8_t g,uint8_t b){{
     if(!gFramesGop || !gFramesGop->Mode || !gFramesGop->Mode->Info) return 0;
     return gFramesGop->Mode->Info->PixelFormat==1 ? ((uint32_t)b<<16)|((uint32_t)g<<8)|r : ((uint32_t)r<<16)|((uint32_t)g<<8)|b;
-}
-static void frames_rect(uint32_t x,uint32_t y,uint32_t w,uint32_t h,uint32_t c){
+}}
+static void frames_rect(uint32_t x,uint32_t y,uint32_t w,uint32_t h,uint32_t c){{
     if(!gFramesGop || !gFramesGop->Mode || !gFramesGop->Mode->Info || !gFramesGop->Mode->FrameBufferBase)return;
     uint32_t sw=gFramesGop->Mode->Info->HorizontalResolution, sh=gFramesGop->Mode->Info->VerticalResolution, stride=gFramesGop->Mode->Info->PixelsPerScanLine;
     if(x>=sw||y>=sh)return; if(x+w>sw)w=sw-x; if(y+h>sh)h=sh-y;
     volatile uint32_t *fb=(volatile uint32_t*)(uintptr_t)gFramesGop->Mode->FrameBufferBase;
     for(uint32_t yy=0;yy<h;yy++) for(uint32_t xx=0;xx<w;xx++) fb[(uint64_t)(y+yy)*stride+x+xx]=c;
-}
-static void frames_splash(uint32_t pct){
+}}
+static void frames_logo(uint32_t cx,uint32_t cy,uint32_t scale){{
+    if(!gFramesGop || !gFramesGop->Mode || !gFramesGop->Mode->Info || !gFramesGop->Mode->FrameBufferBase)return;
+    if(scale<1)scale=1; if(scale>6)scale=6;
+    uint32_t sw=gFramesGop->Mode->Info->HorizontalResolution, sh=gFramesGop->Mode->Info->VerticalResolution, stride=gFramesGop->Mode->Info->PixelsPerScanLine;
+    uint32_t lw=48*scale, lh=48*scale; int32_t ox=(int32_t)cx-(int32_t)lw/2, oy=(int32_t)cy-(int32_t)lh/2;
+    volatile uint32_t *fb=(volatile uint32_t*)(uintptr_t)gFramesGop->Mode->FrameBufferBase;
+    for(uint32_t sy=0;sy<48;sy++) for(uint32_t sx=0;sx<48;sx++){{
+        const uint8_t *q=&gFramesCanonicalLogo48[(sy*48+sx)*4]; uint8_t a=q[3]; if(a<8)continue;
+        uint32_t c=frames_rgb(q[0],q[1],q[2]);
+        for(uint32_t yy=0;yy<scale;yy++) for(uint32_t xx=0;xx<scale;xx++){{
+            int32_t dx=ox+(int32_t)(sx*scale+xx), dy=oy+(int32_t)(sy*scale+yy);
+            if(dx>=0 && dy>=0 && (uint32_t)dx<sw && (uint32_t)dy<sh) fb[(uint64_t)(uint32_t)dy*stride+(uint32_t)dx]=c;
+        }}
+    }}
+}}
+static void frames_splash(uint32_t pct){{
     if(!gFramesGop || !gFramesGop->Mode || !gFramesGop->Mode->Info)return;
     uint32_t w=gFramesGop->Mode->Info->HorizontalResolution, h=gFramesGop->Mode->Info->VerticalResolution;
     if(w<320||h<240)return;
-    uint32_t bg=frames_rgb(8,13,24), fg=frames_rgb(240,246,255), accent=frames_rgb(52,142,255), track=frames_rgb(39,48,66);
+    uint32_t bg=frames_rgb(8,13,24), accent=frames_rgb(52,142,255), track=frames_rgb(39,48,66);
     frames_rect(0,0,w,h,bg);
-    uint32_t logo_h=h/5, stroke=logo_h/7, logo_w=logo_h*3/4, lx=(w-logo_w)/2, ly=h/3-logo_h/2;
-    frames_rect(lx,ly,stroke,logo_h,fg); frames_rect(lx,ly,logo_w,stroke,fg); frames_rect(lx,ly+logo_h/2-stroke/2,logo_w*3/4,stroke,fg);
+    uint32_t scale=h>=900?5:(h>=700?4:3); frames_logo(w/2,h*38/100,scale);
     uint32_t bw=w*44/100, bh=h/70; if(bh<8)bh=8; if(bh>18)bh=18; uint32_t bx=(w-bw)/2, by=h*68/100;
     frames_rect(bx-2,by-2,bw+4,bh+4,track); frames_rect(bx,by,bw,bh,frames_rgb(17,24,37));
     if(pct>100)pct=100; frames_rect(bx,by,(bw*pct)/100,bh,accent);
     gFramesSplashActive=1;
-}
-static void frames_stage(uint32_t pct,const char *marker,CHAR16 *fallback){
+}}
+static void frames_stage(uint32_t pct,const char *marker,CHAR16 *fallback){{
     frames_serial_write(marker);
     if(gFramesGop) frames_splash(pct); else if(fallback) print16(fallback);
-}
+}}
 '''
 s = s.replace(anchor, anchor + helpers, 1)
 
@@ -70,7 +94,6 @@ for a,b in repls.items():
     if a not in s: raise SystemExit('stage anchor missing: '+a[:60])
     s=s.replace(a,b,1)
 
-# Reuse GOP already located at loader entry instead of redeclaring it.
 old_gop='    EFI_GRAPHICS_OUTPUT_PROTOCOL *gop=0; bs->LocateProtocol(&gGraphicsOutputProtocolGuid,0,(void**)&gop);'
 if old_gop not in s: raise SystemExit('late GOP anchor missing')
 s=s.replace(old_gop,'    if(!gop) bs->LocateProtocol(&gGraphicsOutputProtocolGuid,0,(void**)&gop); if(gop) gFramesGop=gop;',1)
@@ -80,7 +103,6 @@ new_tail='''    if(EFI_ERROR(s)) { frames_serial_write("FRAMES_HANDOFF_EBS_FAILE
 if old_tail not in s: raise SystemExit('handoff tail anchor missing')
 s=s.replace(old_tail,new_tail,1)
 
-# Make fatal paths visible and serial-traceable even if splash mode was active.
 old_fatal='''static void fatal(CHAR16 *s, EFI_STATUS st) {\n    (void)st;\n    print16(L"\\r\\nFRAMES BOOT ERROR: "); print16(s); print16(L"\\r\\nSystem halted.\\r\\n");\n'''
 new_fatal='''static void fatal(CHAR16 *s, EFI_STATUS st) {\n    (void)st; frames_serial_write("FRAMES_BOOT_FATAL\\n"); gFramesSplashActive=0;\n    if(gConOut && gConOut->ClearScreen) gConOut->ClearScreen(gConOut);\n    print16(L"\\r\\nFRAMES BOOT ERROR: "); print16(s); print16(L"\\r\\nSystem halted.\\r\\n");\n'''
 if old_fatal not in s: raise SystemExit('fatal anchor missing')
@@ -88,3 +110,4 @@ s=s.replace(old_fatal,new_fatal,1)
 
 p.write_text(s)
 print('patched',p)
+print('canonical_logo_sha256',logo_sha)
