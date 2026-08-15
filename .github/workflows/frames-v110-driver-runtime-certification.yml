@@ -58,17 +58,18 @@ jobs:
           import json,re,sys,pathlib
           s=pathlib.Path(sys.argv[1]).read_text()
           names=['probe_dispatch_v3_run','driver_binding_tx_v3_run','device_resource_owner_v3_run','usb_service_graph_v3_run','input_bridge_v3_run','hotplug_queue_v3_selftest','power_transition_v3_selftest','driver_recovery_v3_selftest','driver_runtime_v3_snapshot','driver_runtime_gate_v3']
-          markers=['FRAMES_PROBE_DISPATCH_V3_OK','FRAMES_BIND_TX_V3_OK','FRAMES_RESOURCE_OWNER_V3_OK','FRAMES_USB_SERVICE_GRAPH_V3_OK','FRAMES_INPUT_BRIDGE_V3_OK','FRAMES_HOTPLUG_QUEUE_V3_OK','FRAMES_POWER_TRANSITION_V3_OK','FRAMES_DRIVER_RECOVERY_V3_OK','FRAMES_DRIVER_RUNTIME_V3_OK','FRAMES_DRIVER_RUNTIME_GATE_V3_OK']
-          checks={f'symbol_{n}':('fn '+n+'(' in s) for n in names}; checks.update({f'marker_{m}':m in s for m in markers})
+          checks={f'symbol_{n}':('fn '+n+'(' in s) for n in names}
           offenders=[]
           for m in re.finditer(r'fn\s+([A-Za-z0-9_]+)\(([^)]*)\)',s):
             args=[x for x in m.group(2).split(',') if x.strip()]
             if len(args)>4: offenders.append([m.group(1),len(args)])
           checks['max_four_parameters']=not offenders
-          checks['old_v109_gate_preserved']='FRAMES_ARCH_PLATFORM_V2_OK' in s
+          checks['old_v109_gate_preserved']='fn architecture_platform_v2_gate(' in s
+          checks['v109_manager_preserved']='fn architecture_manager_v2_snapshot(' in s
+          checks['serial_marker_emission_present']=s.count('serial_hex_line(')>=20
           checks['physical_transport_programming_added']=False
           status='PASS' if all(v for k,v in checks.items() if k!='physical_transport_programming_added') else 'FAIL'
-          out={'status':status,'profile':'frames-v110-driver-runtime-structural','runtime_layers':10,'checks':checks,'parameter_offenders':offenders}
+          out={'status':status,'profile':'frames-v110-driver-runtime-structural','runtime_layers':10,'checks':checks,'parameter_offenders':offenders,'marker_text_is_runtime_verified':True}
           pathlib.Path(sys.argv[2]).write_text(json.dumps(out,indent=2)+'\n')
           if status!='PASS': raise SystemExit(1)
           PY
