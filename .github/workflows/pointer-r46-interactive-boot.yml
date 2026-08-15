@@ -1,4 +1,4 @@
-name: Frames 0.9.98 r46 Interactive Pointer Boot
+name: Frames 0.9.98 r46 Interactive Pointer ISO
 
 on:
   workflow_dispatch:
@@ -16,8 +16,8 @@ env:
   EXPECTED_R46_KERNEL_MAIN_SHA256: e5ccd3d4a453184f620e2ed5f928599bc8a7fa6959098f3aeff4916f6dcff165
 
 jobs:
-  build-interactive-boot:
-    name: Build certified r46 hands-on boot image
+  build-interactive-iso:
+    name: Build certified r46 hands-on UEFI ISO
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -52,14 +52,13 @@ jobs:
           python3 - "$SRC/kernel/main.nx" <<'PY'
           from pathlib import Path
           import sys
-          p=Path(sys.argv[1])
-          s=p.read_text()
+          p=Path(sys.argv[1]); s=p.read_text()
           old1='if usb_hid_found != 0 { usb_hid_configured = xhci_configure_boot_hid(xhci_state,phys_state); if usb_hid_configured != 0 { usb_hid_report_ready = xhci_read_first_hid_report(xhci_state,phys_state); } }'
           new1='if usb_hid_found != 0 { usb_hid_configured = xhci_configure_boot_hid(xhci_state,phys_state); if usb_hid_configured != 0 { usb_hid_report_ready = 1; } }'
           old2='if input_queue_ready != 0 { if usb_hid_report_ready != 0 { input_decode_ready = input_decode_boot_hid(xhci_state,input_state); } else { ps2_poll_fallback(input_state); } }'
           new2='if input_queue_ready != 0 { if usb_hid_report_ready != 0 { input_decode_ready = 1; } else { ps2_poll_fallback(input_state); } }'
-          assert s.count(old1)==1, f'boot first-report site count={s.count(old1)}'
-          assert s.count(old2)==1, f'boot HID decode site count={s.count(old2)}'
+          assert s.count(old1)==1
+          assert s.count(old2)==1
           p.write_text(s.replace(old1,new1).replace(old2,new2))
           PY
           cp "$SRC/kernel/main.nx" boot-out/kernel-main-after.nx
@@ -67,28 +66,19 @@ jobs:
           kernel_sha="$(sha256sum "$SRC/kernel/main.nx" | awk '{print $1}')"
           echo "patched_kernel_main_sha256=$kernel_sha" | tee boot-out/R46-SOURCE-IDENTITY.txt
           echo "certified_r46_archive_sha256=$CERTIFIED_R46_ARCHIVE_SHA256" >> boot-out/R46-SOURCE-IDENTITY.txt
-          echo "identity_rule=exact protected parent + exact two-site USB startup patch + exact patched kernel/main.nx SHA-256" >> boot-out/R46-SOURCE-IDENTITY.txt
           test "$kernel_sha" = "$EXPECTED_R46_KERNEL_MAIN_SHA256"
-          if grep -Fq 'usb_hid_report_ready = xhci_read_first_hid_report(xhci_state,phys_state)' "$SRC/kernel/main.nx"; then
-            echo 'old synchronous first-report call still present' >&2
-            exit 1
-          fi
-          if grep -Fq 'input_decode_ready = input_decode_boot_hid(xhci_state,input_state)' "$SRC/kernel/main.nx"; then
-            echo 'old one-off boot HID decode still present' >&2
-            exit 1
-          fi
           echo "FRAMES_DIR=$SRC" >> "$GITHUB_ENV"
 
-      - name: Install build dependencies
+      - name: Install build and ISO dependencies
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y clang lld python3 unzip zip
+          sudo apt-get install -y clang lld python3 unzip zip xorriso mtools dosfstools
           find "$FRAMES_DIR" -type f -name '*.sh' -exec chmod +x {} +
           find "$FRAMES_DIR/toolchain" -type f -name nexus -exec chmod +x {} +
 
-      - name: Build and verify interactive image
+      - name: Build and verify certified r46 image
         shell: bash
         run: |
           set -euo pipefail
@@ -101,43 +91,67 @@ jobs:
           python3 tools/verify_release.py
           cp build/Frames-0.9.98-Desktop-Preview.img "$GITHUB_WORKSPACE/boot-out/Frames-0.9.98-r46-Certified-Pointer-Interactive-Boot.img"
 
-      - name: Record hands-on boot identity
+      - name: Create UEFI bootable ISO from certified ESP
         shell: bash
         run: |
           set -euo pipefail
-          image_sha="$(sha256sum boot-out/Frames-0.9.98-r46-Certified-Pointer-Interactive-Boot.img | awk '{print $1}')"
-          cat > boot-out/BOOT-IDENTITY.txt <<EOF
+          cd "$FRAMES_DIR"
+          ESP="build/esp.img"
+          if [ ! -f "$ESP" ]; then
+            ESP="$(find build -maxdepth 2 -type f \( -iname '*esp*.img' -o -iname '*efi*.img' \) | head -n1)"
+          fi
+          test -n "$ESP" -a -f "$ESP"
+          cp "$ESP" "$GITHUB_WORKSPACE/boot-out/Frames-0.9.98-r46-UEFI-ESP.img"
+          mkdir -p "$RUNNER_TEMP/r46-iso-root"
+          cat > "$RUNNER_TEMP/r46-iso-root/README.TXT" <<'EOF'
           Frames 0.9.98 r46 Certified Pointer Interactive Boot
-          certified_candidate_archive=Frames-0.9.98-Pointer-USB-Startup-Fix-r46-Candidate.zip
+          UEFI hands-on pointer verification image.
+          EOF
+          cp "$ESP" "$RUNNER_TEMP/r46-iso-root/efiboot.img"
+          xorriso -as mkisofs \
+            -R -J -V 'FRAMES_R46' \
+            -eltorito-alt-boot \
+            -e efiboot.img \
+            -no-emul-boot \
+            -o "$GITHUB_WORKSPACE/boot-out/Frames-0.9.98-r46-Certified-Pointer-Interactive-Boot.iso" \
+            "$RUNNER_TEMP/r46-iso-root"
+          test -s "$GITHUB_WORKSPACE/boot-out/Frames-0.9.98-r46-Certified-Pointer-Interactive-Boot.iso"
+          xorriso -indev "$GITHUB_WORKSPACE/boot-out/Frames-0.9.98-r46-Certified-Pointer-Interactive-Boot.iso" -report_el_torito plain > "$GITHUB_WORKSPACE/boot-out/ISO-ELTORITO-REPORT.txt" 2>&1
+          grep -qi 'UEFI\|EFI' "$GITHUB_WORKSPACE/boot-out/ISO-ELTORITO-REPORT.txt"
+
+      - name: Record ISO identity and test instructions
+        shell: bash
+        run: |
+          set -euo pipefail
+          iso_sha="$(sha256sum boot-out/Frames-0.9.98-r46-Certified-Pointer-Interactive-Boot.iso | awk '{print $1}')"
+          img_sha="$(sha256sum boot-out/Frames-0.9.98-r46-Certified-Pointer-Interactive-Boot.img | awk '{print $1}')"
+          cat > boot-out/BOOT-IDENTITY.txt <<EOF
+          Frames 0.9.98 r46 Certified Pointer Interactive Boot ISO
           certified_candidate_archive_sha256=$CERTIFIED_R46_ARCHIVE_SHA256
           protected_parent_sha256=$EXPECTED_PARENT_SHA256
           patched_kernel_main_sha256=$EXPECTED_R46_KERNEL_MAIN_SHA256
-          image=Frames-0.9.98-r46-Certified-Pointer-Interactive-Boot.img
-          image_sha256=$image_sha
+          iso=Frames-0.9.98-r46-Certified-Pointer-Interactive-Boot.iso
+          iso_sha256=$iso_sha
+          raw_image_sha256=$img_sha
           certification=Frames 0.9.98 Pointer Regression CI v5 PASS
           ps2_regression=PASS
           usb_regression=PASS
-          purpose=hands-on interactive pointer verification; source-equivalent reconstruction from certified parent and patch
           EOF
           cat > boot-out/HANDS-ON-TEST.txt <<'EOF'
-          1. Boot this image using the same UEFI/VM setup used for prior Frames pointer hands-on tests.
-          2. As soon as Pointer Diagnostic Mode is visible, move the mouse immediately to the right, then left, down, and up.
-          3. Verify the very first movement is visible; there should be no initial dead/short USB motion.
-          4. Move continuously for several seconds and confirm the cursor follows smoothly.
-          5. Stop moving for 5-10 seconds, then resume and confirm movement resumes immediately.
-          6. If available, test primary/secondary buttons and dragging.
-          7. Report: boot success/failure, cursor first-motion result, continuous-motion result, idle/resume result, button result, and whether the mouse was USB or PS/2.
+          Boot the ISO in UEFI mode using the same setup as prior Frames hands-on tests.
+          When Pointer Diagnostic Mode appears, immediately move right, left, down, and up.
+          Confirm first motion, continuous motion, 5-10 second idle/resume, then buttons/dragging if available.
+          Report whether the cursor moves and whether the mouse path is USB or PS/2.
           EOF
-          printf 'status=PASS\nimage_sha256=%s\n' "$image_sha" > boot-out/BUILD-STATUS.txt
+          printf 'status=PASS\niso_sha256=%s\n' "$iso_sha" > boot-out/BUILD-STATUS.txt
           sha256sum boot-out/* > boot-out/SHA256SUMS.txt
           cat boot-out/BOOT-IDENTITY.txt
-          cat boot-out/HANDS-ON-TEST.txt
 
-      - name: Upload r46 hands-on boot and diagnostics
+      - name: Upload certified r46 UEFI ISO
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: frames-0.9.98-r46-certified-pointer-interactive-boot
+          name: frames-0.9.98-r46-certified-pointer-uefi-iso
           path: boot-out/**
           if-no-files-found: error
           retention-days: 14
