@@ -1,0 +1,42 @@
+name: Frames v72 Desktop Cert Predicate Inspection
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v116-full-product-v101-integration ]
+    paths:
+      - '.github/workflows/frames-v72-desktop-cert-predicate-inspection.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v116-full-product-v101-integration
+      - name: Extract v72 desktop certification predicate
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/v72-desktop-cert-inspection"
+          TMP="$RUNNER_TEMP/v72-cert-inspect"
+          rm -rf "$OUT" "$TMP"
+          mkdir -p "$OUT" "$TMP"
+          unzip -q "$GITHUB_WORKSPACE/Frames-0.9.62-Source-v72-r1.zip" -d "$TMP"
+          SRC="$(find "$TMP" -type f -name VERSION -print | while read -r f; do [ "$(tr -d '\r\n' < "$f")" = '0.9.62' ] && dirname "$f" && break; done)"
+          test -n "$SRC"
+          K="$SRC/kernel/main.nx"
+          echo "source=$SRC" > "$OUT/IDENTITY.txt"
+          grep -n -C 80 'FRAMES_DESKTOP_CERT_FAIL' "$K" > "$OUT/CERT-FAIL-CONTEXT.txt" || true
+          grep -n -C 40 -E 'desktop_cert|desktop.*ready|cert.*desktop|PRE1_PROMOTION_BLOCKED|PRE1_SNAPSHOT_READY|DESKTOP_POLICY_OK|DESKTOP_WRITE_LOCK_OK' "$K" > "$OUT/DESKTOP-CERT-SYMBOLS.txt" || true
+          grep -n -E 'let .*desktop|var .*desktop|desktop_.*=' "$K" > "$OUT/DESKTOP-ASSIGNMENTS.txt" || true
+          test -s "$OUT/CERT-FAIL-CONTEXT.txt"
+      - name: Upload inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v72-Desktop-Cert-Predicate-Inspection
+          path: v72-desktop-cert-inspection/
+          if-no-files-found: error
