@@ -17,7 +17,12 @@ s=s.replace(old_gp,new_gp)"""
 if text.count(old) != 1:
     raise SystemExit(f'r58 fixer: expected one source hook block, found {text.count(old)}')
 fixed = text.replace(old, new)
-with tempfile.NamedTemporaryFile('w', suffix='.py', delete=False) as f:
+# Keep the generated transformer beside the chained r57/r56/r55 helpers so
+# Path(__file__).with_name(...) inside the transformer resolves correctly.
+with tempfile.NamedTemporaryFile('w', suffix='.py', prefix='r58-fixed-', dir=here, delete=False) as f:
     f.write(fixed)
     temp = f.name
-subprocess.check_call([sys.executable, temp, sys.argv[1]])
+try:
+    subprocess.check_call([sys.executable, temp, sys.argv[1]])
+finally:
+    Path(temp).unlink(missing_ok=True)
