@@ -4,10 +4,10 @@ import sys
 
 p=Path(sys.argv[1]); s=p.read_text()
 
-def rep(old,new,label):
-    n=s.count(old)
+def rep(current,old,new,label):
+    n=current.count(old)
     if n!=1: raise SystemExit(f'{label}: expected 1 site, found {n}')
-    return s.replace(old,new)
+    return current.replace(old,new)
 
 # Diagnostic title R47 -> R48.
 s=rep(s,
