@@ -1,0 +1,117 @@
+name: Frames 0.9.98 r49 Physical PS2 Frame Assembler USB Image
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/pointer-r49-physical-ps2-phase.yml'
+      - 'tools/ci/make_r49_ps2_phase.py'
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_PARENT_SHA256: 1c7f1b514d9aa2f847f724e8b633286d069d745bf7c281a3967c46bbfea1a18c
+  EXPECTED_R46_KERNEL_MAIN_SHA256: e5ccd3d4a453184f620e2ed5f928599bc8a7fa6959098f3aeff4916f6dcff165
+
+jobs:
+  build-r49:
+    name: Build r49 Rufus-compatible raw USB image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf r49-out
+          mkdir -p r49-out
+          printf 'status=started\nrevision=r49\n' > r49-out/BUILD-STATUS.txt
+
+      - name: Reconstruct exact certified r46 base
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent_sha="$(sha256sum Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip | awk '{print $1}')"
+          echo "protected_parent_sha256=$parent_sha" > r49-out/PARENT-IDENTITY.txt
+          test "$parent_sha" = "$EXPECTED_PARENT_SHA256"
+          rm -rf "$RUNNER_TEMP/r49"; mkdir -p "$RUNNER_TEMP/r49"
+          unzip -q Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip -d "$RUNNER_TEMP/r49"
+          SRC="$RUNNER_TEMP/r49/Frames-0.9.98-Pointer-CI-Source"
+          python3 - "$SRC/kernel/main.nx" <<'PY'
+          from pathlib import Path
+          import sys
+          p=Path(sys.argv[1]); s=p.read_text()
+          a='if usb_hid_found != 0 { usb_hid_configured = xhci_configure_boot_hid(xhci_state,phys_state); if usb_hid_configured != 0 { usb_hid_report_ready = xhci_read_first_hid_report(xhci_state,phys_state); } }'
+          b='if usb_hid_found != 0 { usb_hid_configured = xhci_configure_boot_hid(xhci_state,phys_state); if usb_hid_configured != 0 { usb_hid_report_ready = 1; } }'
+          c='if input_queue_ready != 0 { if usb_hid_report_ready != 0 { input_decode_ready = input_decode_boot_hid(xhci_state,input_state); } else { ps2_poll_fallback(input_state); } }'
+          d='if input_queue_ready != 0 { if usb_hid_report_ready != 0 { input_decode_ready = 1; } else { ps2_poll_fallback(input_state); } }'
+          assert s.count(a)==1 and s.count(c)==1
+          p.write_text(s.replace(a,b).replace(c,d))
+          PY
+          r46_sha="$(sha256sum "$SRC/kernel/main.nx" | awk '{print $1}')"
+          echo "r46_kernel_main_sha256=$r46_sha" > r49-out/R46-BASE-IDENTITY.txt
+          test "$r46_sha" = "$EXPECTED_R46_KERNEL_MAIN_SHA256"
+          cp "$SRC/kernel/main.nx" r49-out/kernel-main-r46.nx
+          echo "FRAMES_DIR=$SRC" >> "$GITHUB_ENV"
+
+      - name: Apply diagnostic-only r49 frame assembler telemetry
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "$FRAMES_DIR/kernel/main.nx" r49-out/kernel-main-before-r49.nx
+          python3 tools/ci/make_r49_ps2_phase.py "$FRAMES_DIR/kernel/main.nx"
+          cp "$FRAMES_DIR/kernel/main.nx" r49-out/kernel-main-r49.nx
+          diff -u r49-out/kernel-main-before-r49.nx r49-out/kernel-main-r49.nx > r49-out/R49-INSTRUMENTATION.patch || true
+          sha256sum "$FRAMES_DIR/kernel/main.nx" | tee r49-out/R49-KERNEL-SHA256.txt
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 unzip zip mtools dosfstools
+          find "$FRAMES_DIR" -type f -name '*.sh' -exec chmod +x {} +
+          find "$FRAMES_DIR/toolchain" -type f -name nexus -exec chmod +x {} +
+
+      - name: Build and verify raw USB image
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"
+          ./tools/build.sh
+          python3 tools/make_esp.py
+          python3 tools/sdk_selftest.py
+          python3 tools/make_desktop_preview_image.py
+          python3 tools/verify_desktop_preview_image.py --image build/Frames-0.9.98-Desktop-Preview.img --require-pass
+          python3 tools/verify_release.py
+          cp build/Frames-0.9.98-Desktop-Preview.img "$GITHUB_WORKSPACE/r49-out/Frames-0.9.98-r49-Physical-PS2-Frame-Assembler-Rufus.img"
+
+      - name: Record hands-on instructions and hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          img="r49-out/Frames-0.9.98-r49-Physical-PS2-Frame-Assembler-Rufus.img"
+          img_sha="$(sha256sum "$img" | awk '{print $1}')"
+          cat > r49-out/HANDS-ON-TEST.txt <<'EOF'
+          Write Frames-0.9.98-r49-Physical-PS2-Frame-Assembler-Rufus.img directly to USB with Rufus/raw image mode.
+          Boot in UEFI mode and confirm PTR DIAG R49.
+          Move the touchpad continuously in circles and all four directions for 10-15 seconds, then stop and take one clear photo.
+          Focus on PSTA, PCNT, S0SC, S1SC, S2SC, WINS, SHFT, LOCK plus P2IR, P2PK, PRAW, AUXN, SYNC, GOOD, GPEN, SRC, CORE, TRNS.
+          PSTA=input_state+3032 phase-lock state; PCNT=current 12-byte acquisition count; S0SC/S1SC/S2SC=header-bit scores for three candidate phases; WINS=number of phases scoring 4/4; SHFT=failed 12-byte windows shifted; LOCK=successful phase locks.
+          Diagnostic-only build; do not promote.
+          EOF
+          printf 'status=PASS\nrevision=r49\nimage_sha256=%s\n' "$img_sha" > r49-out/BUILD-STATUS.txt
+          sha256sum r49-out/* > r49-out/SHA256SUMS.txt
+
+      - name: Upload r49 USB image and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frames-0.9.98-r49-ps2-frame-assembler-rufus-image
+          path: r49-out/**
+          if-no-files-found: error
+          retention-days: 14
