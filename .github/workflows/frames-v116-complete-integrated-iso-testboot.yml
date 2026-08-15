@@ -88,10 +88,11 @@ jobs:
           DESK_MTOOLS="$DESK@@$DESK_OFFSET"
           printf 'desktop_partition_first_sector=%s\ndesktop_partition_byte_offset=%s\n' "$FIRST_SECTOR" "$DESK_OFFSET" > "$GITHUB_WORKSPACE/iso-evidence/DESKTOP-PARTITION.txt"
           mdir -i "$DESK_MTOOLS" :: > "$GITHUB_WORKSPACE/iso-evidence/DESKTOP-ROOT-DIRECTORY.txt"
+          mdir -i "$DESK_MTOOLS" ::/FRAMES > "$GITHUB_WORKSPACE/iso-evidence/DESKTOP-FRAMES-DIRECTORY.txt"
 
           mkdir -p "$RUNNER_TEMP/desktop-files"
           for f in DESKTOP.CFG HELLO.FAP THEME.FTH APPEAR.CFG; do
-            mcopy -o -i "$DESK_MTOOLS" "::/$f" "$RUNNER_TEMP/desktop-files/$f"
+            mcopy -o -i "$DESK_MTOOLS" "::/FRAMES/$f" "$RUNNER_TEMP/desktop-files/$f"
             test -s "$RUNNER_TEMP/desktop-files/$f"
             mcopy -o -i "$ESP" "$RUNNER_TEMP/desktop-files/$f" "::/$f"
           done
@@ -180,7 +181,7 @@ jobs:
           python3 - "$GITHUB_WORKSPACE/iso-evidence" <<'PY'
           import json,pathlib,sys
           e=pathlib.Path(sys.argv[1])
-          req=['CERTIFIED-V116-IDENTITY.txt','COMPLETE-PACKAGE-SHA256.txt','ISO-SHA256.txt','EL-TORITO-REPORT.txt','ISO-CONTENTS.txt','ESP-ROOT-DIRECTORY.txt','DESKTOP-PARTITION.txt','DESKTOP-ROOT-DIRECTORY.txt','ISO-BOOT-SERIAL.log','QEMU-ISO-BOOT.txt','RELEASE-VERIFY.log']
+          req=['CERTIFIED-V116-IDENTITY.txt','COMPLETE-PACKAGE-SHA256.txt','ISO-SHA256.txt','EL-TORITO-REPORT.txt','ISO-CONTENTS.txt','ESP-ROOT-DIRECTORY.txt','DESKTOP-PARTITION.txt','DESKTOP-ROOT-DIRECTORY.txt','DESKTOP-FRAMES-DIRECTORY.txt','ISO-BOOT-SERIAL.log','QEMU-ISO-BOOT.txt','RELEASE-VERIFY.log']
           missing=[x for x in req if not (e/x).is_file()]
           serial=(e/'ISO-BOOT-SERIAL.log').read_text(errors='replace') if (e/'ISO-BOOT-SERIAL.log').is_file() else ''
           checks={
