@@ -46,7 +46,7 @@ jobs:
           find toolchain -type f -name nexus -exec chmod +x {} + 2>/dev/null || true
           ./tools/build.sh 2>&1 | tee "$GITHUB_WORKSPACE/v72-desktop-proof/BUILD.log"
           python3 tools/make_esp.py 2>&1 | tee "$GITHUB_WORKSPACE/v72-desktop-proof/MAKE-ESP.log"
-          ESP="$(find build -maxdepth 1 -type f -iname '*ESP*.img' -print | sort | head -n1)"
+          ESP="$(find "$SRC/build" -maxdepth 1 -type f -iname '*ESP*.img' -print | sort | head -n1)"
           test -s "$ESP"
           echo "ESP=$ESP" >> "$GITHUB_ENV"
       - name: Boot desktop mode in QEMU and prove real GUI markers
