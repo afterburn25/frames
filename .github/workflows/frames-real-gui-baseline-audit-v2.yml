@@ -1,0 +1,179 @@
+name: Frames Real GUI Baseline Audit v2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v116-full-product-v101-integration ]
+    paths:
+      - '.github/workflows/frames-real-gui-baseline-audit-v2.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit-real-gui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v116-full-product-v101-integration
+
+      - name: Install audit tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 unzip gdisk mtools dosfstools qemu-system-x86 ovmf netcat-openbsd binutils
+
+      - name: Audit v72 v94 v101 as supplied
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE/real-gui-audit-v2"
+          mkdir -p "$ROOT"
+
+          extract_candidate() {
+            label="$1"; ver="$2"; direct="$3"; kit="$4"
+            base="$RUNNER_TEMP/$label"; rm -rf "$base"; mkdir -p "$base/kit" "$base/src" "$ROOT/$label"
+            if [ -n "$direct" ]; then
+              zip="$GITHUB_WORKSPACE/$direct"
+            else
+              unzip -q "$GITHUB_WORKSPACE/$kit" -d "$base/kit"
+              zip="$(find "$base/kit" -type f \( -iname "*${ver}*Source*.zip" -o -iname 'Frames-*Source*.zip' -o -iname '*Source*.zip' \) -print | sort | head -n1 || true)"
+            fi
+            test -n "$zip"; test -s "$zip"
+            sha256sum "$zip" > "$ROOT/$label/SOURCE-SHA256.txt"
+            unzip -q "$zip" -d "$base/src"
+            src=""
+            while IFS= read -r vf; do
+              d="${vf%/VERSION}"; v="$(tr -d '\r\n' < "$vf")"
+              if [ "$v" = "$ver" ] && [ -f "$d/kernel/main.nx" ]; then src="$d"; break; fi
+            done < <(find "$base/src" -type f -name VERSION -print | sort)
+            test -n "$src"
+            printf '%s\n' "$src"
+          }
+
+          audit_one() {
+            label="$1"; ver="$2"; direct="$3"; kit="$4"
+            out="$ROOT/$label"
+            src="$(extract_candidate "$label" "$ver" "$direct" "$kit")"
+            echo "label=$label version=$ver source=$src" | tee "$out/IDENTITY.txt"
+
+            grep -RniE 'compositor|desktop_runtime|gui_runtime|render_desktop|desktop_ready|shell_runtime|System\.fex|launch.*System' "$src" --exclude-dir=build | head -800 > "$out/GUI-SOURCE-SURVEY.txt" || true
+            cd "$src"
+            chmod +x tools/*.sh tools/*.py sdk/*.sh 2>/dev/null || true
+            find toolchain -type f -name nexus -exec chmod +x {} + 2>/dev/null || true
+
+            set +e
+            ./tools/build.sh > "$out/BUILD.log" 2>&1
+            brc=$?
+            set -e
+            echo "build_rc=$brc" > "$out/BUILD-STATUS.txt"
+            if [ "$brc" -ne 0 ]; then
+              echo "classification=BUILD_FAILED" > "$out/CLASSIFICATION.txt"
+              return
+            fi
+
+            if [ -f tools/make_esp.py ]; then python3 tools/make_esp.py > "$out/MAKE-ESP.log" 2>&1 || true; fi
+            if [ -f tools/sdk_selftest.py ]; then python3 tools/sdk_selftest.py > "$out/SDK-SELFTEST.log" 2>&1 || true; fi
+            if [ -f tools/make_desktop_preview_image.py ]; then python3 tools/make_desktop_preview_image.py > "$out/DESKTOP-PREVIEW.log" 2>&1 || true; fi
+            if [ -f tools/verify_release.py ]; then python3 tools/verify_release.py > "$out/VERIFY-RELEASE.log" 2>&1 || true; fi
+
+            find build -maxdepth 2 -type f -printf '%P %s bytes\n' | sort > "$out/BUILD-INVENTORY.txt" || true
+            [ -f build/System.fex ] && stat -c '%s' build/System.fex > "$out/SYSTEM-FEX-BYTES.txt" || echo 0 > "$out/SYSTEM-FEX-BYTES.txt"
+            strings -a build/System.fex 2>/dev/null | grep -Eai 'desktop|gui|compositor|shell|system service|Frames' | head -300 > "$out/SYSTEM-FEX-STRINGS.txt" || true
+            grep -Eai 'policy:|decision:|gui_runtime|desktop|compositor|system service|runtime authority' "$out/BUILD.log" "$out/VERIFY-RELEASE.log" 2>/dev/null | tail -500 > "$out/POLICY-GUI-SUMMARY.txt" || true
+
+            esp="$(find build -maxdepth 1 -type f -iname '*ESP*.img' -print | sort | head -n1 || true)"
+            if [ -z "$esp" ] || [ ! -s "$esp" ]; then
+              echo "classification=NO_BOOTABLE_ESP" > "$out/CLASSIFICATION.txt"
+              return
+            fi
+
+            code=""; vars=""
+            for p in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd; do [ -f "$p" ] && code="$p" && break; done
+            for p in /usr/share/OVMF/OVMF_VARS_4M.fd /usr/share/OVMF/OVMF_VARS.fd; do [ -f "$p" ] && vars="$p" && break; done
+            cp "$vars" "$base-vars.fd"
+            mon="$RUNNER_TEMP/$label-mon.sock"; serial="$out/SERIAL.log"; shot="$out/FRAMEBUFFER.ppm"
+            rm -f "$mon"
+            qemu-system-x86_64 -machine q35 -m 1024 -smp 2 \
+              -drive if=pflash,format=raw,readonly=on,file="$code" \
+              -drive if=pflash,format=raw,file="$base-vars.fd" \
+              -drive if=virtio,format=raw,file="$esp" -boot menu=off \
+              -serial file:"$serial" -monitor unix:"$mon",server=on,wait=off \
+              -display none -vga std -no-reboot &
+            pid=$!
+            for i in $(seq 1 25); do [ -S "$mon" ] && break; sleep 1; done
+            sleep 25
+            printf 'screendump %s\ninfo status\nquit\n' "$shot" | nc -U "$mon" > "$out/QEMU-MONITOR.txt" 2>&1 || true
+            wait "$pid" || true
+            grep -Eai 'GUI|DESKTOP|COMPOS|SHELL|SYSTEM|FRAMES_' "$serial" | tail -600 > "$out/RUNTIME-GUI-MARKERS.txt" || true
+
+            python3 - "$out" <<'PY'
+from pathlib import Path
+import re, sys
+out=Path(sys.argv[1])
+fex=int((out/'SYSTEM-FEX-BYTES.txt').read_text().strip() or '0')
+policy=((out/'POLICY-GUI-SUMMARY.txt').read_text(errors='ignore') if (out/'POLICY-GUI-SUMMARY.txt').exists() else '').lower()
+serial=((out/'SERIAL.log').read_text(errors='ignore') if (out/'SERIAL.log').exists() else '').lower()
+survey=((out/'GUI-SOURCE-SURVEY.txt').read_text(errors='ignore') if (out/'GUI-SOURCE-SURVEY.txt').exists() else '').lower()
+colors=0
+ppm=out/'FRAMEBUFFER.ppm'
+if ppm.exists():
+    data=ppm.read_bytes()
+    m=re.match(br'P6\s+(?:#.*\s+)*(\d+)\s+(\d+)\s+255\s', data)
+    if m:
+        pix=data[m.end():]
+        colors=len({pix[i:i+3] for i in range(0,min(len(pix),3*1024*768),3)})
+legacy=('diagnostic-only' in policy or 'decision: blocked' in policy)
+runtime=any(x in serial for x in ['desktop_ready','gui_ready','compositor_ready','desktop ready','compositor'])
+source=any(x in survey for x in ['compositor','desktop_runtime','render_desktop','gui_runtime'])
+substantial=fex >= 4096
+if runtime and substantial and not legacy:
+    cls='REAL_GUI_RUNTIME_CONFIRMED'
+elif substantial and source and not legacy:
+    cls='GUI_SOURCE_PRESENT_RUNTIME_UNCONFIRMED'
+elif legacy:
+    cls='DIAGNOSTIC_ONLY'
+elif fex < 512:
+    cls='STUB_SYSTEM_PAYLOAD'
+else:
+    cls='NO_GUI_RUNTIME_PROOF'
+(out/'CLASSIFICATION.txt').write_text(f'classification={cls}\nsystem_fex_bytes={fex}\nframebuffer_unique_colors={colors}\nruntime_gui_marker={str(runtime).lower()}\ngui_source_present={str(source).lower()}\nlegacy_diagnostic_policy={str(legacy).lower()}\n')
+PY
+          }
+
+          audit_one v72 0.9.62 'Frames-0.9.62-Source-v72-r1.zip' ''
+          audit_one v94 0.9.84 '' 'Frames-0.9.84-Integrated-System-Services-Certification-Kit-v94.zip'
+          audit_one v101 0.9.91 '' 'Frames-0.9.91-Integrated-Connected-Services-Certification-Kit-v101.zip'
+
+          cd "$GITHUB_WORKSPACE"
+          {
+            echo 'FRAMES REAL GUI BASELINE AUDIT v2'
+            for x in v72 v94 v101; do echo "--- $x ---"; cat "$ROOT/$x/CLASSIFICATION.txt"; done
+          } | tee "$ROOT/FINAL-SUMMARY.txt"
+
+          python3 - "$ROOT" <<'PY'
+from pathlib import Path
+import sys
+root=Path(sys.argv[1])
+rank={'REAL_GUI_RUNTIME_CONFIRMED':5,'GUI_SOURCE_PRESENT_RUNTIME_UNCONFIRMED':4,'NO_GUI_RUNTIME_PROOF':3,'STUB_SYSTEM_PAYLOAD':2,'DIAGNOSTIC_ONLY':1,'BUILD_FAILED':0,'NO_BOOTABLE_ESP':0}
+best=None
+for name in ['v72','v94','v101']:
+    p=root/name/'CLASSIFICATION.txt'
+    txt=p.read_text() if p.exists() else 'classification=BUILD_FAILED\n'
+    cls=next((line.split('=',1)[1] for line in txt.splitlines() if line.startswith('classification=')),'BUILD_FAILED')
+    score=rank.get(cls,0)
+    if best is None or score>best[0]: best=(score,name,cls)
+(root/'SELECTED-BASELINE.txt').write_text(f'selected={best[1]}\nclassification={best[2]}\nscore={best[0]}\n')
+print((root/'SELECTED-BASELINE.txt').read_text())
+PY
+
+      - name: Upload complete GUI audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-Real-GUI-Baseline-Audit-v2
+          path: real-gui-audit-v2/
+          if-no-files-found: error
+          retention-days: 30
