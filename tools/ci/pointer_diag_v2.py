@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Frames 0.9.98 Pointer Diagnostics CI v2
+Frames 0.9.98 Pointer Diagnostics CI v2.1
 
 Deterministic QEMU pointer tester:
 - PS/2 relative mouse lane
@@ -196,28 +196,99 @@ def scenario(args,out,assertions=True):
         (out/"start.ppm").write_bytes((out/f"bootprobe-{idx}.ppm").read_bytes()); report["start"]=start
         x0,y0=start["cursor"]; expected=[x0,y0]; core0=start["fields"]["CORE"]; p2pk0=start["fields"]["P2PK"]; good0=start["fields"]["GOOD"]; usbr0=start["fields"]["USBR"]; clmp0=start["fields"]["CLMP"]; commands=0
         def check(label,dxsum=0,dysum=0,delay=.45):
+            # QMP screendump can pause the vCPU between backend report accounting
+            # and pointer_diag_apply_relative() in the same guest loop. v2.0
+            # falsely failed the first USB checkpoint with USBR/CORE=10 while
+            # GUIX/crosshair reflected only 9 reports. Never judge a checkpoint
+            # from a single asynchronous framebuffer sample.
             nonlocal expected
-            expected[0]=clamp(expected[0]+2*dxsum,0,start["width"]-1); expected[1]=clamp(expected[1]+2*dysum,0,start["height"]-1)
-            time.sleep(delay); snap=stable_snapshot(q,out,label,essential); snap["name"]=label; snap["expected"]=expected.copy()
-            snap["coordinate_pass"]=(snap["cursor"]==expected and snap["fields"]["GUIX"]==expected[0] and snap["fields"]["GUIY"]==expected[1]); report["checkpoints"].append(snap)
-            if assertions and not snap["coordinate_pass"]: raise AssertionError(f"{label}: expected {expected}, cursor={snap['cursor']}, GUI=({snap['fields']['GUIX']},{snap['fields']['GUIY']})")
-            return snap
-        phases=[("right",[(4,0)]*10),("left",[(-4,0)]*10),("down",[(0,4)]*10),("up",[(0,-4)]*10),("diag_out",[(3,2)]*5),("diag_back",[(-3,-2)]*5)]
+            expected[0]=clamp(expected[0]+2*dxsum,0,start["width"]-1)
+            expected[1]=clamp(expected[1]+2*dysum,0,start["height"]-1)
+            time.sleep(delay)
+            deadline=time.time()+4.0
+            last=None
+            previous_key=None
+            settle_index=0
+            while time.time()<deadline:
+                probe=f"{label}-settle-{settle_index}"
+                snap=stable_snapshot(q,out,probe,essential,retries=3)
+                snap["name"]=label
+                snap["expected"]=expected.copy()
+                snap["coordinate_pass"]=(snap["cursor"]==expected and
+                                         snap["fields"]["GUIX"]==expected[0] and
+                                         snap["fields"]["GUIY"]==expected[1])
+                key=(tuple(snap["cursor"]),snap["fields"]["GUIX"],snap["fields"]["GUIY"],
+                     snap["fields"]["CORE"],snap["fields"]["P2PK"],snap["fields"]["USBR"],
+                     snap["fields"]["GOOD"],snap["fields"]["BTNS"])
+                # Require two consecutive identical guest states at the expected
+                # coordinate. This makes the checkpoint quiescent rather than
+                # merely OCR-clean.
+                if snap["coordinate_pass"] and key==previous_key:
+                    source=out/f"{probe}.ppm"
+                    target=out/f"{label}.ppm"
+                    if source.exists():
+                        target.write_bytes(source.read_bytes())
+                    snap["settled_samples"]=2
+                    report["checkpoints"].append(snap)
+                    return snap
+                previous_key=key
+                last=snap
+                settle_index+=1
+                time.sleep(.08)
+            if last is None:
+                raise AssertionError(f"{label}: no stable framebuffer sample")
+            last["coordinate_pass"]=(last["cursor"]==expected and
+                                     last["fields"]["GUIX"]==expected[0] and
+                                     last["fields"]["GUIY"]==expected[1])
+            last["settled_samples"]=0
+            report["checkpoints"].append(last)
+            if assertions:
+                raise AssertionError(
+                    f"{label}: expected settled {expected}, cursor={last['cursor']}, "
+                    f"GUI=({last['fields']['GUIX']},{last['fields']['GUIY']}), "
+                    f"CORE={last['fields']['CORE']}, P2PK={last['fields']['P2PK']}, "
+                    f"USBR={last['fields']['USBR']}"
+                )
+            return last
+
+        # Exact directional checkpoints.
+        phases=[
+            ("right",[(4,0)]*10),
+            ("left",[(-4,0)]*10),
+            ("down",[(0,4)]*10),
+            ("up",[(0,-4)]*10),
+            ("diag_out",[(3,2)]*5),
+            ("diag_back",[(-3,-2)]*5),
+        ]
         for label,events in phases:
             sx=sy=0
-            for dx,dy in events: send_rel(q,dx,dy); commands+=1; sx+=dx; sy+=dy; time.sleep(.012)
+            for dx,dy in events:
+                send_rel(q,dx,dy); commands+=1; sx+=dx; sy+=dy; time.sleep(.012)
             check(label,sx,sy)
-        send_button(q,True); commands+=1; time.sleep(.06); snap_down=check("button_down",0,0,.25)
-        if assertions and snap_down["fields"]["BTNS"]&1 != 1: raise AssertionError(f"button_down: BTNS={snap_down['fields']['BTNS']:x}")
-        send_button(q,False); commands+=1; time.sleep(.06); snap_up=check("button_up",0,0,.25)
-        if assertions and snap_up["fields"]["BTNS"]&1 != 0: raise AssertionError(f"button_up: BTNS={snap_up['fields']['BTNS']:x}")
-        send_rel(q,120,0); commands+=1; check("clamp_positive",96,0,.3)
-        send_rel(q,-120,0); commands+=1; check("clamp_negative",-96,0,.3)
+
+        # Button transitions should never move the cursor.
+        send_button(q,True); commands+=1; time.sleep(.06)
+        snap_down=check("button_down",0,0,.25)
+        if assertions and snap_down["fields"]["BTNS"]&1 != 1:
+            raise AssertionError(f"button_down: BTNS={snap_down['fields']['BTNS']:x}")
+        send_button(q,False); commands+=1; time.sleep(.06)
+        snap_up=check("button_up",0,0,.25)
+        if assertions and snap_up["fields"]["BTNS"]&1 != 0:
+            raise AssertionError(f"button_up: BTNS={snap_up['fields']['BTNS']:x}")
+
+        # Clamp/edge packet pair: +120 then -120 should return exactly and increment CLMP by 2.
+        send_rel(q,120,0); commands+=1
+        check("clamp_positive",96,0,.3)
+        send_rel(q,-120,0); commands+=1
+        check("clamp_negative",-96,0,.3)
+
+        # Deterministic stress/fuzz: paired random movements guarantee net zero.
         rng=random.Random(report["seed"]); sx=sy=0
         for i in range(250):
             dx=rng.randint(-8,8); dy=rng.randint(-8,8)
             if dx==0 and dy==0: dx=1
-            send_rel(q,dx,dy); commands+=1; sx+=dx; sy+=dy; send_rel(q,-dx,-dy); commands+=1; sx-=dx; sy-=dy
+            send_rel(q,dx,dy); commands+=1; sx+=dx; sy+=dy
+            send_rel(q,-dx,-dy); commands+=1; sx-=dx; sy-=dy
             time.sleep(.02 if i%25==0 else .004)
         final=check("stress_fuzz",sx,sy,.8); report["commands_sent"]=commands; f=final["fields"]
         inv=[("GPEN==1",f["GPEN"]==1),("CORE advanced",f["CORE"]>core0),("DROP==0",f["DROP"]==0),("P2ER==0",f["P2ER"]==0),("RING==0",f["RING"]==0),("BHDR==0",f["BHDR"]==0),("OVFL==0",f["OVFL"]==0),("CLMP exactly +2",f["CLMP"]==clmp0+2),("final coordinate returned",final["cursor"]==[x0,y0])]
