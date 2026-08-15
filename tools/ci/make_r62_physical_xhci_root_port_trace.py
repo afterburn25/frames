@@ -70,7 +70,6 @@ if s.count(old)!=1:
     raise SystemExit(f'r62 trace call: expected 1 site, found {s.count(old)}')
 s=s.replace(old,new,1)
 
-# Disable full persistence while root-port enumeration is isolated.
 old='if flight_saved==0 && read_tsc()>=flight_save_at { flight_saved=1; ptrtrace_save_usb(input_state,xhci,phys_state); pointer_diag_panel(surface,input_state,gui_state); display_shadow_present_rect(surface,(8*65536)+8,(960*65536)+258); }'
 new='if flight_saved==0 && read_tsc()>=flight_save_at { flight_saved=1; let r62_diag=volatile_read64(input_state+3976); if r62_diag!=0 { unsafe { volatile_write64(r62_diag+632,2); } } pointer_diag_panel(surface,input_state,gui_state); display_shadow_present_rect(surface,(8*65536)+8,(960*65536)+258); }'
 if s.count(old)!=1:
@@ -78,7 +77,7 @@ if s.count(old)!=1:
 s=s.replace(old,new,1)
 
 old='pointer_diag_row(surface,(330*65536)+230,82+(69*256)+(67*65536)+(83*16777216),r58_recs);                                  // RECS\n'
-new='pointer_diag_row(surface,(330*65536)+230,82+(69*256)+(67*65536)+(83*16777216),r58_recs);                                  // RECS\n    var r62i:u64=0; while r62i<8 { let rv=if diag!=0 { volatile_read64(diag+704+(r62i*8)) } else { 0 }; let lab=80+((49+r62i)*256)+(32*65536)+(32*16777216); pointer_diag_row(surface,(330*65536)+242+(r62i*12),lab,rv); r62i=r62i+1; }\n    var dp:u64=0; var dps:u64=0; var dv:u64=0; var ds:u64=0; var dt:u64=0; if diag!=0 { dp=volatile_read64(diag+768); dps=volatile_read64(diag+776); dv=volatile_read64(diag+784); ds=volatile_read64(diag+792); dt=volatile_read64(diag+800); }\n    pointer_diag_row(surface,(330*65536)+338,68+(80*256)+(82*65536)+(84*16777216),dp); // DPRT\n    pointer_diag_row(surface,(330*65536)+350,80+(83*256)+(67*65536)+(32*16777216),dps); // PSC \n    pointer_diag_row(surface,(330*65536)+362,68+(86*256)+(73*65536)+(68*16777216),dv); // DVID\n    pointer_diag_row(surface,(330*65536)+374,68+(83*256)+(67*65536)+(67*16777216),ds); // DSCC\n    pointer_diag_row(surface,(330*65536)+386,80+(67*256)+(78*65536)+(84*16777216),dt); // PCNT\n'
+new='pointer_diag_row(surface,(330*65536)+230,82+(69*256)+(67*65536)+(83*16777216),r58_recs);                                  // RECS\n    var r62i:u64=0; while r62i<8 { var rv:u64=0; if diag!=0 { rv=volatile_read64(diag+704+(r62i*8)); } let lab=80+((49+r62i)*256)+(32*65536)+(32*16777216); pointer_diag_row(surface,(330*65536)+242+(r62i*12),lab,rv); r62i=r62i+1; }\n    var dp:u64=0; var dps:u64=0; var dv:u64=0; var ds:u64=0; var dt:u64=0; if diag!=0 { dp=volatile_read64(diag+768); dps=volatile_read64(diag+776); dv=volatile_read64(diag+784); ds=volatile_read64(diag+792); dt=volatile_read64(diag+800); }\n    pointer_diag_row(surface,(330*65536)+338,68+(80*256)+(82*65536)+(84*16777216),dp); // DPRT\n    pointer_diag_row(surface,(330*65536)+350,80+(83*256)+(67*65536)+(32*16777216),dps); // PSC \n    pointer_diag_row(surface,(330*65536)+362,68+(86*256)+(73*65536)+(68*16777216),dv); // DVID\n    pointer_diag_row(surface,(330*65536)+374,68+(83*256)+(67*65536)+(67*16777216),ds); // DSCC\n    pointer_diag_row(surface,(330*65536)+386,80+(67*256)+(78*65536)+(84*16777216),dt); // PCNT\n'
 if s.count(old)!=1:
     raise SystemExit(f'r62 rows: expected 1 site, found {s.count(old)}')
 s=s.replace(old,new,1)
