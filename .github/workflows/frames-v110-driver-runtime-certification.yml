@@ -92,6 +92,17 @@ jobs:
           python3 tools/verify_release.py > "$GITHUB_WORKSPACE/v110-evidence/RELEASE-VERIFY.log"
           echo "V110_FKRN_SHA=$A_FKRN" >> "$GITHUB_ENV"
 
+      - name: Locate OVMF firmware
+        run: |
+          set -euo pipefail
+          code=""; vars=""
+          for p in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd /usr/share/edk2/ovmf/OVMF_CODE.fd; do [ -f "$p" ] && code="$p" && break; done
+          for p in /usr/share/OVMF/OVMF_VARS_4M.fd /usr/share/OVMF/OVMF_VARS.fd /usr/share/edk2/ovmf/OVMF_VARS.fd; do [ -f "$p" ] && vars="$p" && break; done
+          test -n "$code"
+          echo "OVMF_CODE=$code" >> "$GITHUB_ENV"
+          if [ -n "$vars" ]; then echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"; fi
+          printf 'OVMF_CODE=%s\nOVMF_VARS=%s\n' "$code" "$vars" > "$GITHUB_WORKSPACE/v110-evidence/OVMF-IDENTITY.txt"
+
       - name: QEMU OVMF v110 runtime capture
         run: |
           set -euo pipefail
@@ -100,6 +111,7 @@ jobs:
           timeout --signal=TERM --kill-after=10s 75s ./tools/qemu_secure_online_services_certify.sh > "$GITHUB_WORKSPACE/v110-evidence/QEMU-CAPTURE.log" 2>&1
           RC=$?
           set -e
+          cat "$GITHUB_WORKSPACE/v110-evidence/QEMU-CAPTURE.log" || true
           test -s build/secure-online-serial.log
           cp build/secure-online-serial.log "$GITHUB_WORKSPACE/v110-evidence/secure-online-serial.log"
           python3 "$GITHUB_WORKSPACE/architecture/v110/verify_driver_runtime_v110.py" --serial build/secure-online-serial.log --require-pass | tee "$GITHUB_WORKSPACE/v110-evidence/V110-RUNTIME.json"
