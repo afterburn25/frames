@@ -1,0 +1,129 @@
+name: Frames 0.9.98 Pointer Hands-On r47
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/pointer-hands-on-r47.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  package-certified-pointer-build:
+    name: Package certified r46 hands-on image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      CERT_RUN_ID: 31865010191
+      EXPECTED_CANDIDATE_SHA256: 0be1fefaeb5a3fa6438ded01321ef197e2873a49b6bb98defdecad3384cb7eff
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download exact certified r46 candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: frames-0.9.98-pointer-usb-startup-fix-r46-candidate
+          path: certified-candidate
+          repository: afterburn25/frames
+          run-id: ${{ env.CERT_RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download v5 final certification
+        uses: actions/download-artifact@v4
+        with:
+          name: frames-0.9.98-pointer-regression-v5-certification
+          path: certified-evidence
+          repository: afterburn25/frames
+          run-id: ${{ env.CERT_RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify exact promoted source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate="$(find certified-candidate -type f -name 'Frames-0.9.98-Pointer-USB-Startup-Fix-r46-Candidate.zip' | head -n1)"
+          test -n "$candidate"
+          actual="$(sha256sum "$candidate" | awk '{print $1}')"
+          echo "candidate_sha256=$actual"
+          test "$actual" = "$EXPECTED_CANDIDATE_SHA256"
+          python3 - <<'PY'
+          import json
+          p='certified-evidence/FINAL-POINTER-CERTIFICATION.json'
+          d=json.load(open(p))
+          assert d['status']=='PASS'
+          assert d['promotion_allowed'] is True
+          assert d['ps2_pass'] is True and d['usb_pass'] is True
+          assert d['candidate_sha256']=='0be1fefaeb5a3fa6438ded01321ef197e2873a49b6bb98defdecad3384cb7eff'
+          print('final_pointer_certification=PASS')
+          PY
+          rm -rf "$RUNNER_TEMP/r47"
+          mkdir -p "$RUNNER_TEMP/r47"
+          unzip -q "$candidate" -d "$RUNNER_TEMP/r47"
+          src="$(find "$RUNNER_TEMP/r47" -maxdepth 2 -type f -path '*/kernel/main.nx' -printf '%h\n' | sed 's#/kernel$##' | head -n1)"
+          test -n "$src"
+          echo "FRAMES_DIR=$src" >> "$GITHUB_ENV"
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 unzip zip
+
+      - name: Build exact certified source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"
+          find . -type f -name '*.sh' -exec chmod +x {} +
+          find toolchain -type f -name nexus -exec chmod +x {} +
+          ./tools/build.sh
+          python3 tools/make_esp.py
+          python3 tools/sdk_selftest.py
+          python3 tools/make_desktop_preview_image.py
+          python3 tools/verify_desktop_preview_image.py --image build/Frames-0.9.98-Desktop-Preview.img --require-pass
+          python3 tools/verify_release.py
+
+      - name: Package hands-on verification build
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/Frames-0.9.98-Pointer-r46-HandsOn"
+          rm -rf "$OUT"
+          mkdir -p "$OUT"
+          cp "$FRAMES_DIR/build/Frames-0.9.98-Desktop-Preview.img" "$OUT/"
+          cp certified-evidence/FINAL-POINTER-CERTIFICATION.json "$OUT/"
+          cp certified-evidence/SOURCE-IDENTITY.txt "$OUT/" 2>/dev/null || true
+          cat > "$OUT/HANDS-ON-TEST.txt" <<'EOF'
+          Frames 0.9.98 Pointer r46 Hands-On Verification
+
+          This image is built from the exact v5-certified r46 source candidate.
+          Candidate SHA-256: 0be1fefaeb5a3fa6438ded01321ef197e2873a49b6bb98defdecad3384cb7eff
+
+          Verify interactively:
+          1. Boot the supplied Desktop Preview image in the same environment used for prior pointer testing.
+          2. Move the mouse slowly right, left, down and up.
+          3. Confirm visible cursor movement begins immediately, with no lost initial movement.
+          4. Confirm continued movement remains smooth and directional.
+          5. Test primary click, secondary click, and dragging if exposed by this diagnostic image.
+          6. Record whether the device is PS/2 or USB HID and any visible pointer diagnostics.
+
+          CI certification already proves exact relative movement for both PS/2 and USB HID in QEMU.
+          This hands-on step is intentionally a separate interactive/physical-environment validation gate.
+          EOF
+          (cd "$OUT" && sha256sum * > SHA256SUMS.txt)
+          zip -qr Frames-0.9.98-Pointer-r46-HandsOn.zip "$OUT"
+          sha256sum Frames-0.9.98-Pointer-r46-HandsOn.zip | tee HANDS-ON-ARCHIVE-SHA256.txt
+
+      - name: Upload r46 hands-on package
+        uses: actions/upload-artifact@v4
+        with:
+          name: frames-0.9.98-pointer-r46-hands-on
+          path: |
+            Frames-0.9.98-Pointer-r46-HandsOn.zip
+            HANDS-ON-ARCHIVE-SHA256.txt
+          if-no-files-found: error
+          retention-days: 30
