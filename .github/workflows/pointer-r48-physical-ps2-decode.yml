@@ -1,0 +1,140 @@
+name: Frames 0.9.98 r48 Physical PS2 Decode Boundary ISO
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/pointer-r48-physical-ps2-decode.yml'
+      - 'tools/ci/make_r48_ps2_decode.py'
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_PARENT_SHA256: 1c7f1b514d9aa2f847f724e8b633286d069d745bf7c281a3967c46bbfea1a18c
+  EXPECTED_R46_KERNEL_MAIN_SHA256: e5ccd3d4a453184f620e2ed5f928599bc8a7fa6959098f3aeff4916f6dcff165
+
+jobs:
+  build-r48:
+    name: Build r48 physical PS2 decode-boundary UEFI ISO
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize fail-safe evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf r48-out
+          mkdir -p r48-out
+          printf 'status=started\nrevision=r48\n' > r48-out/BUILD-STATUS.txt
+
+      - name: Reconstruct exact certified r46 base
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent_sha="$(sha256sum Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip | awk '{print $1}')"
+          echo "protected_parent_sha256=$parent_sha" > r48-out/PARENT-IDENTITY.txt
+          test "$parent_sha" = "$EXPECTED_PARENT_SHA256"
+          rm -rf "$RUNNER_TEMP/r48"; mkdir -p "$RUNNER_TEMP/r48"
+          unzip -q Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip -d "$RUNNER_TEMP/r48"
+          SRC="$RUNNER_TEMP/r48/Frames-0.9.98-Pointer-CI-Source"
+          python3 - "$SRC/kernel/main.nx" <<'PY'
+          from pathlib import Path
+          import sys
+          p=Path(sys.argv[1]); s=p.read_text()
+          a='if usb_hid_found != 0 { usb_hid_configured = xhci_configure_boot_hid(xhci_state,phys_state); if usb_hid_configured != 0 { usb_hid_report_ready = xhci_read_first_hid_report(xhci_state,phys_state); } }'
+          b='if usb_hid_found != 0 { usb_hid_configured = xhci_configure_boot_hid(xhci_state,phys_state); if usb_hid_configured != 0 { usb_hid_report_ready = 1; } }'
+          c='if input_queue_ready != 0 { if usb_hid_report_ready != 0 { input_decode_ready = input_decode_boot_hid(xhci_state,input_state); } else { ps2_poll_fallback(input_state); } }'
+          d='if input_queue_ready != 0 { if usb_hid_report_ready != 0 { input_decode_ready = 1; } else { ps2_poll_fallback(input_state); } }'
+          assert s.count(a)==1 and s.count(c)==1
+          p.write_text(s.replace(a,b).replace(c,d))
+          PY
+          r46_sha="$(sha256sum "$SRC/kernel/main.nx" | awk '{print $1}')"
+          printf 'r46_kernel_main_sha256=%s\n' "$r46_sha" > r48-out/R46-BASE-IDENTITY.txt
+          test "$r46_sha" = "$EXPECTED_R46_KERNEL_MAIN_SHA256"
+          cp "$SRC/kernel/main.nx" r48-out/kernel-main-r46.nx
+          echo "FRAMES_DIR=$SRC" >> "$GITHUB_ENV"
+
+      - name: Apply diagnostic-only r48 instrumentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "$FRAMES_DIR/kernel/main.nx" r48-out/kernel-main-before-r48.nx
+          python3 tools/ci/make_r48_ps2_decode.py "$FRAMES_DIR/kernel/main.nx"
+          cp "$FRAMES_DIR/kernel/main.nx" r48-out/kernel-main-r48.nx
+          diff -u r48-out/kernel-main-before-r48.nx r48-out/kernel-main-r48.nx > r48-out/R48-INSTRUMENTATION.patch || true
+          r48_sha="$(sha256sum "$FRAMES_DIR/kernel/main.nx" | awk '{print $1}')"
+          cat > r48-out/R48-SOURCE-IDENTITY.txt <<EOF
+          revision=r48
+          base=r46-certified
+          base_kernel_main_sha256=$EXPECTED_R46_KERNEL_MAIN_SHA256
+          r48_diagnostic_kernel_main_sha256=$r48_sha
+          behavior_change=none intended; diagnostic state writes and display only
+          telemetry=RHDR RXBY RYBY HVAL PDIN DXMG DYMG EMIT
+          EOF
+
+      - name: Install build and ISO dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 unzip zip xorriso mtools dosfstools
+          find "$FRAMES_DIR" -type f -name '*.sh' -exec chmod +x {} +
+          find "$FRAMES_DIR/toolchain" -type f -name nexus -exec chmod +x {} +
+
+      - name: Build and verify r48 image
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"
+          ./tools/build.sh
+          python3 tools/make_esp.py
+          python3 tools/sdk_selftest.py
+          python3 tools/make_desktop_preview_image.py
+          python3 tools/verify_desktop_preview_image.py --image build/Frames-0.9.98-Desktop-Preview.img --require-pass
+          python3 tools/verify_release.py
+          cp build/Frames-0.9.98-Desktop-Preview.img "$GITHUB_WORKSPACE/r48-out/Frames-0.9.98-r48-Physical-PS2-Decode-Boundary.img"
+
+      - name: Package and verify UEFI ISO
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"
+          ESP=build/esp.img
+          if [ ! -f "$ESP" ]; then ESP="$(find build -maxdepth 2 -type f \( -iname '*esp*.img' -o -iname '*efi*.img' \) | head -n1)"; fi
+          test -n "$ESP" -a -f "$ESP"
+          cp "$ESP" "$GITHUB_WORKSPACE/r48-out/Frames-0.9.98-r48-UEFI-ESP.img"
+          rm -rf "$RUNNER_TEMP/r48-iso"; mkdir -p "$RUNNER_TEMP/r48-iso"
+          cp "$ESP" "$RUNNER_TEMP/r48-iso/efiboot.img"
+          printf 'Frames 0.9.98 r48 physical PS2 decode-boundary diagnostic\n' > "$RUNNER_TEMP/r48-iso/README.TXT"
+          xorriso -as mkisofs -R -J -V FRAMES_R48 -eltorito-alt-boot -e efiboot.img -no-emul-boot \
+            -o "$GITHUB_WORKSPACE/r48-out/Frames-0.9.98-r48-Physical-PS2-Decode-Boundary.iso" "$RUNNER_TEMP/r48-iso"
+          xorriso -indev "$GITHUB_WORKSPACE/r48-out/Frames-0.9.98-r48-Physical-PS2-Decode-Boundary.iso" -report_el_torito plain > "$GITHUB_WORKSPACE/r48-out/ISO-ELTORITO-REPORT.txt" 2>&1
+          grep -qi 'UEFI\|EFI' "$GITHUB_WORKSPACE/r48-out/ISO-ELTORITO-REPORT.txt"
+
+      - name: Record hands-on instructions and hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > r48-out/HANDS-ON-TEST.txt <<'EOF'
+          Boot Frames-0.9.98-r48-Physical-PS2-Decode-Boundary.iso in the same UEFI setup as the prior hands-on test.
+          Confirm the title is PTR DIAG R48. Move the mouse right, left, down, and up for several seconds, then take one clear photo of the whole panel.
+          Focus fields: RHDR=raw header, RXBY=raw X byte, RYBY=raw Y byte, HVAL=header valid, PDIN=packet decoder entries, DXMG/DYMG=decoded signed magnitudes (0x200 sign bit), EMIT=PS2 calls to generic_pointer_emit_relative.
+          Keep SRC, CORE, TRNS, P2IR, P2PK, PRAW, SYNC, GOOD, GPEN and BHDR visible too.
+          Diagnostic-only build; do not promote.
+          EOF
+          iso_sha="$(sha256sum r48-out/Frames-0.9.98-r48-Physical-PS2-Decode-Boundary.iso | awk '{print $1}')"
+          printf 'status=PASS\nrevision=r48\niso_sha256=%s\n' "$iso_sha" > r48-out/BUILD-STATUS.txt
+          sha256sum r48-out/* > r48-out/SHA256SUMS.txt
+
+      - name: Upload r48 ISO and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frames-0.9.98-r48-physical-ps2-decode-boundary-iso
+          path: r48-out/**
+          if-no-files-found: error
+          retention-days: 14
