@@ -77,15 +77,19 @@ jobs:
         continue-on-error: true
         run: |
           set -uo pipefail
+          set +e
           OUT="$GITHUB_WORKSPACE/pointer-isolation-${{ matrix.lane }}"
           mkdir -p "$OUT"
+          printf 'lane=%s\nstatus=started\n' '${{ matrix.lane }}' > "$OUT/harness-status.txt"
           python3 tools/ci/pointer_diag_v3.py \
             --qemu "$QEMU" \
             --ovmf "$OVMF_CODE" \
             --image "$FRAMES_DIR/build/Frames-0.9.98-Desktop-Preview.img" \
             --lane "${{ matrix.lane }}" \
-            --out "$OUT"
-          rc=$?
+            --out "$OUT" \
+            2>&1 | tee "$OUT/runner.log"
+          rc=${PIPESTATUS[0]}
+          printf 'lane=%s\nstatus=completed\nrunner_rc=%s\n' '${{ matrix.lane }}' "$rc" > "$OUT/harness-status.txt"
           echo "runner_rc=$rc" >> "$GITHUB_OUTPUT"
           exit 0
 
@@ -94,13 +98,15 @@ jobs:
         shell: bash
         run: |
           set +e
-          cat "pointer-isolation-${{ matrix.lane }}/summary.json"
-          echo
-          echo "=== machine-readable pointer serial lines ==="
-          cat "pointer-isolation-${{ matrix.lane }}/pointer-serial-lines.txt"
-          echo
-          echo "=== hashes ==="
-          cat "pointer-isolation-${{ matrix.lane }}/SHA256SUMS.txt"
+          OUT="pointer-isolation-${{ matrix.lane }}"
+          for f in harness-status.txt summary.json pointer-serial-lines.txt SHA256SUMS.txt runner.log; do
+            if [[ -f "$OUT/$f" ]]; then
+              echo "=== $f ==="
+              cat "$OUT/$f"
+              echo
+            fi
+          done
+          exit 0
 
       - name: Upload v3 pointer isolation evidence
         if: always()
