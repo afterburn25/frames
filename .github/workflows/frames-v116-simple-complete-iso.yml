@@ -72,6 +72,7 @@ jobs:
           cd "$S"
           ./tools/build.sh
           test "$(sha256sum build/FramesKernel.fkrn | awk '{print $1}')" = "$V116_FKRN_SHA256"
+          python3 tools/make_esp.py
           python3 tools/make_desktop_preview_image.py
           python3 tools/verify_release.py
 
