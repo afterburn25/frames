@@ -1,0 +1,49 @@
+name: Frames v101 Canonical Logo Discovery
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v116-full-product-v101-integration ]
+    paths:
+      - '.github/workflows/frames-v101-brand-logo-discovery.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  discover-logo:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v116-full-product-v101-integration
+      - name: Extract v101 product and collect logo candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.91-Integrated-Connected-Services-Certification-Kit-v101.zip"
+          mkdir -p "$RUNNER_TEMP/kit" "$RUNNER_TEMP/source" "$GITHUB_WORKSPACE/logo-discovery"
+          unzip -q "$KIT" -d "$RUNNER_TEMP/kit"
+          SRCZIP="$(find "$RUNNER_TEMP/kit" -type f -iname '*0.9.91*Source*.zip' -print | sort | head -n1)"
+          unzip -q "$SRCZIP" -d "$RUNNER_TEMP/source"
+          PRODUCT="$(find "$RUNNER_TEMP/source" -type f -name VERSION -print | while read -r f; do [ "$(tr -d '\r\n' < "$f")" = '0.9.91' ] && dirname "$f" && break; done)"
+          test -n "$PRODUCT"
+          find "$PRODUCT" -type f -printf '%P\n' | sort | grep -Ei '(logo|brand|icon|splash|theme|appear|wallpaper|desktop)' > "$GITHUB_WORKSPACE/logo-discovery/CANDIDATES.txt" || true
+          grep -RniE 'logo|48x48|brand|splash' "$PRODUCT" --exclude='*.fkrn' --exclude='*.fex' --exclude='*.img' > "$GITHUB_WORKSPACE/logo-discovery/REFERENCES.txt" || true
+          while IFS= read -r rel; do
+            src="$PRODUCT/$rel"
+            [ -f "$src" ] || continue
+            case "$src" in
+              *.png|*.PNG|*.bmp|*.BMP|*.ppm|*.PPM|*.svg|*.SVG|*.ico|*.ICO|*.jpg|*.JPG|*.jpeg|*.JPEG|*.webp|*.WEBP|*.fthm|*.FTHM|*.cfg|*.CFG)
+                mkdir -p "$GITHUB_WORKSPACE/logo-discovery/files/$(dirname "$rel")"
+                cp "$src" "$GITHUB_WORKSPACE/logo-discovery/files/$rel" || true
+                ;;
+            esac
+          done < "$GITHUB_WORKSPACE/logo-discovery/CANDIDATES.txt"
+          find "$GITHUB_WORKSPACE/logo-discovery/files" -type f -exec sha256sum {} + > "$GITHUB_WORKSPACE/logo-discovery/SHA256.txt" 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frames-v101-canonical-logo-discovery
+          path: logo-discovery/
+          if-no-files-found: error
+          retention-days: 7
