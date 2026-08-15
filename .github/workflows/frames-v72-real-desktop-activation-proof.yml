@@ -6,6 +6,7 @@ on:
     branches: [ v116-full-product-v101-integration ]
     paths:
       - '.github/workflows/frames-v72-real-desktop-activation-proof.yml'
+      - 'architecture/integration/enable_v72_desktop_policy.py'
 
 permissions:
   contents: read
@@ -34,31 +35,7 @@ jobs:
           test -n "$SRC"
           echo "SRC=$SRC" >> "$GITHUB_ENV"
           grep -Rni -C 4 'boot_policy_flags' "$SRC/boot" > "$GITHUB_WORKSPACE/v72-desktop-proof/BOOT-POLICY-BEFORE.txt" || true
-          python3 - "$SRC/boot/uefi/frames_boot.c" <<'PY'
-from pathlib import Path
-import re,sys
-p=Path(sys.argv[1]); s=p.read_text()
-patterns=[
-    r'(boot_policy_flags\s*=\s*)(\d+)(\s*;)',
-    r'(boot_policy_flags\s*:\s*u64\s*=\s*)(\d+)(\s*;)',
-]
-found=[]
-for pat in patterns:
-    for m in re.finditer(pat,s): found.append((m.start(),m.end(),m.group(1),int(m.group(2)),m.group(3)))
-# Prefer assignments in efi_main / BootInfo setup with small default flags.
-found=[x for x in found if x[3] < 2048]
-if not found:
-    print('No patchable boot_policy_flags assignment found')
-    for i,line in enumerate(s.splitlines(),1):
-        if 'boot_policy_flags' in line: print(i,line)
-    raise SystemExit(2)
-# Patch the last small numeric assignment; loader setup is after declarations.
-start,end,prefix,old,suffix=found[-1]
-new=old | 1 | 2048
-s=s[:start]+prefix+str(new)+suffix+s[end:]
-p.write_text(s)
-print(f'patched boot_policy_flags {old} -> {new}')
-PY
+          python3 "$GITHUB_WORKSPACE/architecture/integration/enable_v72_desktop_policy.py" "$SRC/boot/uefi/frames_boot.c" | tee "$GITHUB_WORKSPACE/v72-desktop-proof/PATCH.log"
           grep -Rni -C 4 'boot_policy_flags' "$SRC/boot" > "$GITHUB_WORKSPACE/v72-desktop-proof/BOOT-POLICY-AFTER.txt" || true
       - name: Build supplied v72 with desktop policy enabled
         shell: bash
@@ -80,14 +57,11 @@ PY
           for p in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd; do [ -f "$p" ] && CODE="$p" && break; done
           for p in /usr/share/OVMF/OVMF_VARS_4M.fd /usr/share/OVMF/OVMF_VARS.fd; do [ -f "$p" ] && VARS="$p" && break; done
           cp "$VARS" "$RUNNER_TEMP/v72-vars.fd"
-          MON="$RUNNER_TEMP/v72-desktop-mon.sock"; SERIAL="$GITHUB_WORKSPACE/v72-desktop-proof/SERIAL.log"; SHOT="$GITHUB_WORKSPACE/v72-desktop-proof/FRAMEBUFFER.ppm"
+          MON="$RUNNER_TEMP/v72-desktop-mon.sock"
+          SERIAL="$GITHUB_WORKSPACE/v72-desktop-proof/SERIAL.log"
+          SHOT="$GITHUB_WORKSPACE/v72-desktop-proof/FRAMEBUFFER.ppm"
           rm -f "$MON"
-          qemu-system-x86_64 -machine q35 -m 1024 -smp 2 \
-            -drive if=pflash,format=raw,readonly=on,file="$CODE" \
-            -drive if=pflash,format=raw,file="$RUNNER_TEMP/v72-vars.fd" \
-            -drive if=virtio,format=raw,file="$ESP" -boot menu=off \
-            -serial file:"$SERIAL" -monitor unix:"$MON",server=on,wait=off \
-            -display none -vga std -no-reboot &
+          qemu-system-x86_64 -machine q35 -m 1024 -smp 2 -drive if=pflash,format=raw,readonly=on,file="$CODE" -drive if=pflash,format=raw,file="$RUNNER_TEMP/v72-vars.fd" -drive if=virtio,format=raw,file="$ESP" -boot menu=off -serial file:"$SERIAL" -monitor unix:"$MON",server=on,wait=off -display none -vga std -no-reboot &
           PID=$!
           for i in $(seq 1 30); do [ -S "$MON" ] && break; sleep 1; done
           sleep 30
