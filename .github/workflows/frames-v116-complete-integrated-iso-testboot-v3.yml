@@ -1,0 +1,200 @@
+name: Frames 0.9.106 v116 Complete Integrated ISO Test Boot v3
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v116-complete-integrated-iso-testboot ]
+    paths:
+      - '.github/workflows/frames-v116-complete-integrated-iso-testboot-v3.yml'
+
+env:
+  KIT_SHA256: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
+  SOURCE_SHA256: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
+  V109_MAIN_SHA256: 82594aaea923a2a19c06eadb73d8d985941b392c56b8c613866b5a99523ae806
+  V110_MAIN_SHA256: 788f456bc334fac55c14b2f4c4b04bd39d84822d42a2d655bcb2f5b8d982bdc7
+  V111_MAIN_SHA256: e1dfef88b17199311da98d7474673a16b3aa54826c3d95284e35b74c83c49f23
+  V112_MAIN_SHA256: 40acf98479fbf81122411b01afa7192b99b44ba6ab1dbb188f7d8f14c1f74085
+  V113_MAIN_SHA256: e35ad1a66701653cf95db6517425facbe2743680f368d86ff23d076da23b3d59
+  V114_MAIN_SHA256: 1cebf3df01fbce86edf41e45c49f4a52c64b982526733c8d0f6060ac011bd925
+  V115_MAIN_SHA256: 7ff384e9f2213214ab2b84a4d82492477e922cc96766197f89056101552bfe1e
+  V116_MAIN_SHA256: a8c569ca5c6b9facd85176a0fe97c8b369f9e4bbf50153f41a1b7777636a3ed5
+  V116_FKRN_SHA256: 7bb3d2455b63373826dd4fc7ce38c3244441241d49796a11a46aa8fe298795d7
+
+jobs:
+  build-test-iso:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v116-complete-integrated-iso-testboot
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf clang lld python3 unzip mtools dosfstools gdisk file xorriso
+
+      - name: Reconstruct exact certified v116 source
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/iso-evidence-v3"
+          mkdir -p "$E" "$RUNNER_TEMP/kit" "$RUNNER_TEMP/src"
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip"
+          test "$(sha256sum "$KIT" | awk '{print $1}')" = "$KIT_SHA256"
+          unzip -q "$KIT" -d "$RUNNER_TEMP/kit"
+          Z="$RUNNER_TEMP/kit/Frames-0.9.98-Source-v108.zip"
+          test "$(sha256sum "$Z" | awk '{print $1}')" = "$SOURCE_SHA256"
+          unzip -q "$Z" -d "$RUNNER_TEMP/src"
+          S="$RUNNER_TEMP/src/Frames-0.9.98"
+          python3 architecture/v109/make_unified_device_architecture_v109.py "$S/kernel/main.nx"
+          test "$(sha256sum "$S/kernel/main.nx" | awk '{print $1}')" = "$V109_MAIN_SHA256"
+          python3 architecture/v110/make_driver_runtime_v110.py "$S/kernel/main.nx"
+          test "$(sha256sum "$S/kernel/main.nx" | awk '{print $1}')" = "$V110_MAIN_SHA256"
+          python3 architecture/v111/make_async_io_service_runtime_v111.py "$S/kernel/main.nx"
+          test "$(sha256sum "$S/kernel/main.nx" | awk '{print $1}')" = "$V111_MAIN_SHA256"
+          python3 architecture/v112/make_device_service_integration_v112.py "$S/kernel/main.nx"
+          test "$(sha256sum "$S/kernel/main.nx" | awk '{print $1}')" = "$V112_MAIN_SHA256"
+          python3 architecture/v113/make_driver_execution_hal_v113.py "$S/kernel/main.nx"
+          test "$(sha256sum "$S/kernel/main.nx" | awk '{print $1}')" = "$V113_MAIN_SHA256"
+          python3 architecture/v114/make_kernel_concurrency_driver_scheduling_v114.py "$S/kernel/main.nx"
+          test "$(sha256sum "$S/kernel/main.nx" | awk '{print $1}')" = "$V114_MAIN_SHA256"
+          python3 architecture/v115/make_driver_migration_unified_input_v115.py "$S/kernel/main.nx"
+          test "$(sha256sum "$S/kernel/main.nx" | awk '{print $1}')" = "$V115_MAIN_SHA256"
+          python3 architecture/v116/make_usb_core_xhci_migration_v116.py "$S/kernel/main.nx"
+          test "$(sha256sum "$S/kernel/main.nx" | awk '{print $1}')" = "$V116_MAIN_SHA256"
+          chmod +x "$S"/tools/*.sh "$S"/tools/*.py "$S"/sdk/*.sh 2>/dev/null || true
+          find "$S/toolchain" -type f -name nexus -exec chmod +x {} +
+          echo "S=$S" >> "$GITHUB_ENV"
+          printf 'kernel_main=%s\n' "$V116_MAIN_SHA256" > "$E/CERTIFIED-V116-IDENTITY.txt"
+
+      - name: Build complete v116 package
+        run: |
+          set -euo pipefail
+          cd "$S"
+          ./tools/build.sh
+          test "$(sha256sum build/FramesKernel.fkrn | awk '{print $1}')" = "$V116_FKRN_SHA256"
+          python3 tools/sdk_selftest.py --require-pass > "$GITHUB_WORKSPACE/iso-evidence-v3/SDK-SELFTEST.json"
+          python3 tools/make_esp.py
+          python3 tools/make_desktop_preview_image.py
+          python3 tools/verify_release.py > "$GITHUB_WORKSPACE/iso-evidence-v3/RELEASE-VERIFY.log"
+
+      - name: Extract FAT ESP and merge GUI payload
+        run: |
+          set -euo pipefail
+          cd "$S"
+          E="$GITHUB_WORKSPACE/iso-evidence-v3"
+          ESP="build/Frames-0.9.98-ESP.img"
+          DESK="build/Frames-0.9.98-Desktop-Preview.img"
+          ESP_FIRST="$(sgdisk -i 1 "$ESP" | awk -F: '/First sector/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); split($2,a," "); print a[1]; exit}')"
+          ESP_LAST="$(sgdisk -i 1 "$ESP" | awk -F: '/Last sector/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); split($2,a," "); print a[1]; exit}')"
+          DESK_FIRST="$(sgdisk -i 1 "$DESK" | awk -F: '/First sector/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); split($2,a," "); print a[1]; exit}')"
+          test -n "$ESP_FIRST"; test -n "$ESP_LAST"; test -n "$DESK_FIRST"
+          ESP_COUNT=$((ESP_LAST - ESP_FIRST + 1))
+          DESK_OFFSET=$((DESK_FIRST * 512))
+          EFI_BOOT="$RUNNER_TEMP/efiboot.img"
+          dd if="$ESP" of="$EFI_BOOT" bs=512 skip="$ESP_FIRST" count="$ESP_COUNT" status=none
+          test -s "$EFI_BOOT"
+          mdir -i "$EFI_BOOT" :: > "$E/EFI-FAT-ROOT-BEFORE.txt"
+          DESK_MTOOLS="$DESK@@$DESK_OFFSET"
+          mdir -i "$DESK_MTOOLS" ::/FRAMES > "$E/DESKTOP-FRAMES-DIRECTORY.txt"
+          mmd -i "$EFI_BOOT" ::/FRAMES 2>/dev/null || true
+          mkdir -p "$RUNNER_TEMP/desktop-files"
+          for f in DESKTOP.CFG HELLO.FAP THEME.FTH APPEAR.CFG; do
+            mcopy -o -i "$DESK_MTOOLS" "::/FRAMES/$f" "$RUNNER_TEMP/desktop-files/$f"
+            test -s "$RUNNER_TEMP/desktop-files/$f"
+            mcopy -o -i "$EFI_BOOT" "$RUNNER_TEMP/desktop-files/$f" "::/FRAMES/$f"
+            mcopy -o -i "$EFI_BOOT" "$RUNNER_TEMP/desktop-files/$f" "::/$f"
+          done
+          mdir -i "$EFI_BOOT" :: > "$E/EFI-FAT-ROOT-AFTER.txt"
+          mdir -i "$EFI_BOOT" ::/FRAMES > "$E/EFI-FAT-FRAMES-AFTER.txt"
+          mdir -i "$EFI_BOOT" ::/EFI/BOOT/BOOTX64.EFI >/dev/null
+          printf 'esp_first=%s\nesp_last=%s\nesp_count=%s\ndesktop_first=%s\ndesktop_offset=%s\n' "$ESP_FIRST" "$ESP_LAST" "$ESP_COUNT" "$DESK_FIRST" "$DESK_OFFSET" > "$E/PARTITION-LAYOUT.txt"
+          cp "$EFI_BOOT" "$E/efiboot.img"
+          echo "EFI_BOOT=$EFI_BOOT" >> "$GITHUB_ENV"
+
+      - name: Create UEFI El Torito ISO
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/iso-evidence-v3"
+          ROOT="$RUNNER_TEMP/iso-root-v3"
+          mkdir -p "$ROOT/EFI" "$ROOT/FRAMES"
+          cp "$EFI_BOOT" "$ROOT/EFI/efiboot.img"
+          cp "$S/build/FramesKernel.fkrn" "$ROOT/FRAMES/FramesKernel.fkrn"
+          cp "$S/build/System.fex" "$ROOT/FRAMES/System.fex"
+          cp "$S/build/BOOTX64.EFI" "$ROOT/FRAMES/BOOTX64.EFI"
+          cp "$S/build/Frames-0.9.98-Desktop-Preview.img" "$ROOT/FRAMES/Desktop-Preview.img"
+          cp "$E/CERTIFIED-V116-IDENTITY.txt" "$ROOT/FRAMES/CERTIFIED-V116-IDENTITY.txt"
+          printf '%s\n' 'Frames 0.9.106 v116 Complete Integrated Test Boot' 'Certified v116 runtime plus desktop GUI/theme payload.' 'Packaging test only; no new architecture promotion.' > "$ROOT/README.TXT"
+          OUT="$GITHUB_WORKSPACE/Frames-0.9.106-v116-Complete-Integrated-Test-Boot-UEFI.iso"
+          xorriso -as mkisofs -iso-level 3 -R -J -V FRAMES_V116 -eltorito-alt-boot -e EFI/efiboot.img -no-emul-boot -o "$OUT" "$ROOT"
+          test -s "$OUT"
+          sha256sum "$OUT" | tee "$E/ISO-SHA256.txt"
+          xorriso -indev "$OUT" -report_el_torito plain > "$E/EL-TORITO-REPORT.txt" 2>&1
+          xorriso -indev "$OUT" -find / -maxdepth 3 -type f -exec lsdl > "$E/ISO-CONTENTS.txt" 2>&1
+
+      - name: Locate OVMF firmware
+        run: |
+          set -euo pipefail
+          code=""; vars=""
+          for p in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd /usr/share/edk2/ovmf/OVMF_CODE.fd; do [ -f "$p" ] && code="$p" && break; done
+          for p in /usr/share/OVMF/OVMF_VARS_4M.fd /usr/share/OVMF/OVMF_VARS.fd /usr/share/edk2/ovmf/OVMF_VARS.fd; do [ -f "$p" ] && vars="$p" && break; done
+          test -n "$code"; test -n "$vars"
+          echo "OVMF_CODE=$code" >> "$GITHUB_ENV"
+          echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"
+
+      - name: Boot ISO under QEMU OVMF
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/iso-evidence-v3"
+          ISO="$GITHUB_WORKSPACE/Frames-0.9.106-v116-Complete-Integrated-Test-Boot-UEFI.iso"
+          cp "$OVMF_VARS" "$RUNNER_TEMP/OVMF_VARS.fd"
+          SERIAL="$E/ISO-BOOT-SERIAL.log"
+          set +e
+          timeout --signal=TERM --kill-after=10s 60s qemu-system-x86_64 -machine q35 -m 1024 -smp 2 -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" -drive if=pflash,format=raw,file="$RUNNER_TEMP/OVMF_VARS.fd" -cdrom "$ISO" -boot d -serial file:"$SERIAL" -display none -no-reboot
+          RC=$?
+          set -e
+          printf 'qemu_rc=%s\n' "$RC" > "$E/QEMU-ISO-BOOT.txt"
+          test -s "$SERIAL"
+          grep -q 'FRAMES_USB_MIGRATION_GATE_V9_OK' "$SERIAL"
+          grep -q 'FRAMES_INPUT_MIGRATION_GATE_V8_OK' "$SERIAL"
+          grep -q 'FRAMES_CONCURRENCY_GATE_V7_OK' "$SERIAL"
+          grep -q 'FRAMES_HAL_RUNTIME_GATE_V6_OK' "$SERIAL"
+          grep -q 'FRAMES_SCHEDULER_SUSTAINED' "$SERIAL"
+
+      - name: Final ISO test gate
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/iso-evidence-v3"
+          test -s "$E/CERTIFIED-V116-IDENTITY.txt"
+          test -s "$E/efiboot.img"
+          test -s "$E/EFI-FAT-FRAMES-AFTER.txt"
+          test -s "$E/EL-TORITO-REPORT.txt"
+          test -s "$E/ISO-BOOT-SERIAL.log"
+          grep -qi 'DESKTOP' "$E/EFI-FAT-FRAMES-AFTER.txt"
+          grep -q 'FRAMES_USB_MIGRATION_GATE_V9_OK' "$E/ISO-BOOT-SERIAL.log"
+          grep -q 'FRAMES_INPUT_MIGRATION_GATE_V8_OK' "$E/ISO-BOOT-SERIAL.log"
+          grep -q 'FRAMES_CONCURRENCY_GATE_V7_OK' "$E/ISO-BOOT-SERIAL.log"
+          grep -q 'FRAMES_HAL_RUNTIME_GATE_V6_OK' "$E/ISO-BOOT-SERIAL.log"
+          grep -q 'FRAMES_SCHEDULER_SUSTAINED' "$E/ISO-BOOT-SERIAL.log"
+          printf '{"status":"PASS","base":"Frames 0.9.106 v116 certified","packaging_only":true,"format":"UEFI El Torito ISO with extracted FAT ESP","gui_payload":true}\n' > "$E/FINAL-ISO-TESTBOOT.json"
+          cd "$E"
+          find . -maxdepth 1 -type f ! -name EVIDENCE-FILES-SHA256.txt -print0 | sort -z | xargs -0 sha256sum > EVIDENCE-FILES-SHA256.txt
+
+      - name: Upload complete ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-0.9.106-v116-Complete-Integrated-Test-Boot-UEFI-ISO-v3
+          path: ${{ github.workspace }}/Frames-0.9.106-v116-Complete-Integrated-Test-Boot-UEFI.iso
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Upload ISO evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-0.9.106-v116-Complete-Integrated-Test-Boot-Evidence-v3
+          path: ${{ github.workspace }}/iso-evidence-v3/**
+          if-no-files-found: error
+          retention-days: 30
