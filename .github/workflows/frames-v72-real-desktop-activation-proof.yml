@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/frames-v72-real-desktop-activation-proof.yml'
       - 'architecture/integration/enable_v72_desktop_policy.py'
+      - 'architecture/integration/decouple_v72_network_from_filesystem.py'
 
 permissions:
   contents: read
@@ -24,7 +25,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y clang lld python3 unzip qemu-system-x86 ovmf netcat-openbsd mtools dosfstools
-      - name: Extract v72 and activate only desktop boot-policy bit
+      - name: Extract v72, enable desktop mode, and repair gate dependency
         shell: bash
         run: |
           set -euo pipefail
@@ -35,9 +36,12 @@ jobs:
           test -n "$SRC"
           echo "SRC=$SRC" >> "$GITHUB_ENV"
           grep -Rni -C 4 'boot_policy_flags' "$SRC/boot" > "$GITHUB_WORKSPACE/v72-desktop-proof/BOOT-POLICY-BEFORE.txt" || true
-          python3 "$GITHUB_WORKSPACE/architecture/integration/enable_v72_desktop_policy.py" "$SRC/boot/uefi/frames_boot.c" | tee "$GITHUB_WORKSPACE/v72-desktop-proof/PATCH.log"
+          python3 "$GITHUB_WORKSPACE/architecture/integration/enable_v72_desktop_policy.py" "$SRC/boot/uefi/frames_boot.c" | tee "$GITHUB_WORKSPACE/v72-desktop-proof/PATCH-DESKTOP-POLICY.log"
+          python3 "$GITHUB_WORKSPACE/architecture/integration/decouple_v72_network_from_filesystem.py" "$SRC/kernel/main.nx" | tee "$GITHUB_WORKSPACE/v72-desktop-proof/PATCH-NETWORK-GATE.log"
           grep -Rni -C 4 'boot_policy_flags' "$SRC/boot" > "$GITHUB_WORKSPACE/v72-desktop-proof/BOOT-POLICY-AFTER.txt" || true
-      - name: Build supplied v72 with desktop policy enabled
+          grep -n -C 2 'fn network_core_gate' "$SRC/kernel/main.nx" > "$GITHUB_WORKSPACE/v72-desktop-proof/NETWORK-GATE-AFTER.txt" || true
+          grep -q 'score==9' "$SRC/kernel/main.nx"
+      - name: Build supplied v72 with desktop path enabled
         shell: bash
         run: |
           set -euo pipefail
@@ -67,8 +71,9 @@ jobs:
           sleep 30
           printf 'screendump %s\ninfo status\nquit\n' "$SHOT" | nc -U "$MON" > "$GITHUB_WORKSPACE/v72-desktop-proof/QEMU-MONITOR.txt" 2>&1 || true
           wait "$PID" || true
-          grep -E 'FRAMES_DESKTOP|FRAMES_INTEGRATED_GUI|FRAMES_READY' "$SERIAL" | tee "$GITHUB_WORKSPACE/v72-desktop-proof/DESKTOP-MARKERS.txt" || true
+          grep -E 'FRAMES_(FILESYSTEM|NETWORK_CORE|DISPLAY|DESKTOP|INTEGRATED_GUI|GUI_|READY)' "$SERIAL" | tee "$GITHUB_WORKSPACE/v72-desktop-proof/DESKTOP-MARKERS.txt" || true
           grep -q 'FRAMES_DESKTOP_POLICY_OK' "$SERIAL"
+          grep -q 'FRAMES_NETWORK_CORE_OK' "$SERIAL"
           grep -q 'FRAMES_DESKTOP_PHASE1_OK' "$SERIAL"
           grep -q 'FRAMES_INTEGRATED_GUI_OK' "$SERIAL"
           test -s "$SHOT"
