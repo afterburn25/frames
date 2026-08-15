@@ -1,0 +1,108 @@
+name: Frames v72 Real Desktop Activation Proof
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v116-full-product-v101-integration ]
+    paths:
+      - '.github/workflows/frames-v72-real-desktop-activation-proof.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  prove-desktop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v116-full-product-v101-integration
+      - name: Install tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 unzip qemu-system-x86 ovmf netcat-openbsd mtools dosfstools
+      - name: Extract v72 and activate only desktop boot-policy bit
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/v72-desktop"
+          mkdir -p "$RUNNER_TEMP/v72-desktop" "$GITHUB_WORKSPACE/v72-desktop-proof"
+          unzip -q "$GITHUB_WORKSPACE/Frames-0.9.62-Source-v72-r1.zip" -d "$RUNNER_TEMP/v72-desktop"
+          SRC="$(find "$RUNNER_TEMP/v72-desktop" -type f -name VERSION -print | while read -r f; do [ "$(tr -d '\r\n' < "$f")" = '0.9.62' ] && dirname "$f" && break; done)"
+          test -n "$SRC"
+          echo "SRC=$SRC" >> "$GITHUB_ENV"
+          grep -Rni -C 4 'boot_policy_flags' "$SRC/boot" > "$GITHUB_WORKSPACE/v72-desktop-proof/BOOT-POLICY-BEFORE.txt" || true
+          python3 - "$SRC/boot/uefi/frames_boot.c" <<'PY'
+from pathlib import Path
+import re,sys
+p=Path(sys.argv[1]); s=p.read_text()
+patterns=[
+    r'(boot_policy_flags\s*=\s*)(\d+)(\s*;)',
+    r'(boot_policy_flags\s*:\s*u64\s*=\s*)(\d+)(\s*;)',
+]
+found=[]
+for pat in patterns:
+    for m in re.finditer(pat,s): found.append((m.start(),m.end(),m.group(1),int(m.group(2)),m.group(3)))
+# Prefer assignments in efi_main / BootInfo setup with small default flags.
+found=[x for x in found if x[3] < 2048]
+if not found:
+    print('No patchable boot_policy_flags assignment found')
+    for i,line in enumerate(s.splitlines(),1):
+        if 'boot_policy_flags' in line: print(i,line)
+    raise SystemExit(2)
+# Patch the last small numeric assignment; loader setup is after declarations.
+start,end,prefix,old,suffix=found[-1]
+new=old | 1 | 2048
+s=s[:start]+prefix+str(new)+suffix+s[end:]
+p.write_text(s)
+print(f'patched boot_policy_flags {old} -> {new}')
+PY
+          grep -Rni -C 4 'boot_policy_flags' "$SRC/boot" > "$GITHUB_WORKSPACE/v72-desktop-proof/BOOT-POLICY-AFTER.txt" || true
+      - name: Build supplied v72 with desktop policy enabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$SRC"
+          chmod +x tools/*.sh tools/*.py sdk/*.sh 2>/dev/null || true
+          find toolchain -type f -name nexus -exec chmod +x {} + 2>/dev/null || true
+          ./tools/build.sh 2>&1 | tee "$GITHUB_WORKSPACE/v72-desktop-proof/BUILD.log"
+          python3 tools/make_esp.py 2>&1 | tee "$GITHUB_WORKSPACE/v72-desktop-proof/MAKE-ESP.log"
+          ESP="$(find build -maxdepth 1 -type f -iname '*ESP*.img' -print | sort | head -n1)"
+          test -s "$ESP"
+          echo "ESP=$ESP" >> "$GITHUB_ENV"
+      - name: Boot desktop mode in QEMU and prove real GUI markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          CODE=""; VARS=""
+          for p in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd; do [ -f "$p" ] && CODE="$p" && break; done
+          for p in /usr/share/OVMF/OVMF_VARS_4M.fd /usr/share/OVMF/OVMF_VARS.fd; do [ -f "$p" ] && VARS="$p" && break; done
+          cp "$VARS" "$RUNNER_TEMP/v72-vars.fd"
+          MON="$RUNNER_TEMP/v72-desktop-mon.sock"; SERIAL="$GITHUB_WORKSPACE/v72-desktop-proof/SERIAL.log"; SHOT="$GITHUB_WORKSPACE/v72-desktop-proof/FRAMEBUFFER.ppm"
+          rm -f "$MON"
+          qemu-system-x86_64 -machine q35 -m 1024 -smp 2 \
+            -drive if=pflash,format=raw,readonly=on,file="$CODE" \
+            -drive if=pflash,format=raw,file="$RUNNER_TEMP/v72-vars.fd" \
+            -drive if=virtio,format=raw,file="$ESP" -boot menu=off \
+            -serial file:"$SERIAL" -monitor unix:"$MON",server=on,wait=off \
+            -display none -vga std -no-reboot &
+          PID=$!
+          for i in $(seq 1 30); do [ -S "$MON" ] && break; sleep 1; done
+          sleep 30
+          printf 'screendump %s\ninfo status\nquit\n' "$SHOT" | nc -U "$MON" > "$GITHUB_WORKSPACE/v72-desktop-proof/QEMU-MONITOR.txt" 2>&1 || true
+          wait "$PID" || true
+          grep -E 'FRAMES_DESKTOP|FRAMES_INTEGRATED_GUI|FRAMES_READY' "$SERIAL" | tee "$GITHUB_WORKSPACE/v72-desktop-proof/DESKTOP-MARKERS.txt" || true
+          grep -q 'FRAMES_DESKTOP_POLICY_OK' "$SERIAL"
+          grep -q 'FRAMES_DESKTOP_PHASE1_OK' "$SERIAL"
+          grep -q 'FRAMES_INTEGRATED_GUI_OK' "$SERIAL"
+          test -s "$SHOT"
+      - name: Upload proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v72-Real-Desktop-Activation-Proof
+          path: v72-desktop-proof/
+          if-no-files-found: error
+          retention-days: 30
