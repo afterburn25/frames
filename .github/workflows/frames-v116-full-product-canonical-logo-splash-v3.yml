@@ -1,0 +1,134 @@
+name: Frames v116 Full Product Canonical Logo Splash v3
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v116-full-product-v101-integration ]
+    paths:
+      - '.github/workflows/frames-v116-full-product-canonical-logo-splash-v3.yml'
+      - 'architecture/integration/apply_product_boot_splash_v2.py'
+      - 'architecture/integration/port_architecture_to_product.py'
+
+permissions:
+  contents: read
+
+jobs:
+  build-logo-splash-v3:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v116-full-product-v101-integration
+
+      - name: Install tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 unzip patch gdisk mtools dosfstools xorriso binutils
+
+      - name: Extract exact Frames 0.9.91 v101 product source
+        run: |
+          set -euo pipefail
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.91-Integrated-Connected-Services-Certification-Kit-v101.zip"
+          test -s "$KIT"
+          mkdir -p "$RUNNER_TEMP/v101-kit" "$RUNNER_TEMP/v101-source" "$GITHUB_WORKSPACE/integration-evidence"
+          unzip -q "$KIT" -d "$RUNNER_TEMP/v101-kit"
+          SRCZIP="$(find "$RUNNER_TEMP/v101-kit" -type f \( -iname 'Frames-0.9.91-Source*.zip' -o -iname '*0.9.91*Source*.zip' \) -print | sort | head -n1 || true)"
+          if [ -z "$SRCZIP" ]; then
+            echo 'Exact 0.9.91 source archive not found. Archives present:' >&2
+            find "$RUNNER_TEMP/v101-kit" -type f -iname '*.zip' -print | sort >&2
+            exit 1
+          fi
+          echo "Selected source archive: $SRCZIP" | tee "$GITHUB_WORKSPACE/integration-evidence/SELECTED-SOURCE.txt"
+          unzip -q "$SRCZIP" -d "$RUNNER_TEMP/v101-source"
+          PRODUCT=""
+          while IFS= read -r vf; do
+            d="${vf%/VERSION}"
+            v="$(tr -d '\r\n' < "$vf")"
+            if [ "$v" = "0.9.91" ] && [ -f "$d/kernel/main.nx" ] && [ -f "$d/boot/uefi/frames_boot.c" ]; then PRODUCT="$d"; break; fi
+          done < <(find "$RUNNER_TEMP/v101-source" -type f -name VERSION -print | sort)
+          test -n "$PRODUCT"
+          test -s "$PRODUCT/assets/branding/FramesLogo-48.rgba"
+          echo "PRODUCT=$PRODUCT" >> "$GITHUB_ENV"
+          sha256sum "$SRCZIP" "$PRODUCT/assets/branding/FramesLogo-48.rgba" | tee "$GITHUB_WORKSPACE/integration-evidence/SOURCE-AND-LOGO-SHA256.txt"
+
+      - name: Port certified v109-v116 architecture
+        run: |
+          set -euo pipefail
+          PORT="$GITHUB_WORKSPACE/architecture/integration/port_architecture_to_product.py"
+          : > "$GITHUB_WORKSPACE/integration-evidence/PORT-SUCCESS.txt"
+          while read -r label rel; do
+            python3 "$PORT" "$label" "$GITHUB_WORKSPACE/$rel" "$PRODUCT" "$GITHUB_WORKSPACE/integration-evidence" | tee -a "$GITHUB_WORKSPACE/integration-evidence/PORT-SUCCESS.txt"
+          done <<'EOF'
+          v109 architecture/v109/make_unified_device_architecture_v109.py
+          v110 architecture/v110/make_driver_runtime_v110.py
+          v111 architecture/v111/make_async_io_service_runtime_v111.py
+          v112 architecture/v112/make_device_service_integration_v112.py
+          v113 architecture/v113/make_driver_execution_hal_v113.py
+          v114 architecture/v114/make_kernel_concurrency_driver_scheduling_v114.py
+          v115 architecture/v115/make_driver_migration_unified_input_v115.py
+          v116 architecture/v116/make_usb_core_xhci_migration_v116.py
+          EOF
+
+      - name: Apply approved Frames logo splash
+        run: |
+          set -euo pipefail
+          python3 "$GITHUB_WORKSPACE/architecture/integration/apply_product_boot_splash_v2.py" "$PRODUCT" | tee "$GITHUB_WORKSPACE/integration-evidence/APPLY-SPLASH.txt"
+          LOGO_SHA="$(sha256sum "$PRODUCT/assets/branding/FramesLogo-48.rgba" | awk '{print $1}')"
+          grep -F "FRAMES_CANONICAL_LOGO_48_RGBA_SHA256=$LOGO_SHA" "$PRODUCT/boot/uefi/frames_boot.c"
+          grep -F 'FRAMES_HANDOFF_KERNEL_CALL' "$PRODUCT/boot/uefi/frames_boot.c"
+          grep -F 'frames_logo(w/2' "$PRODUCT/boot/uefi/frames_boot.c"
+
+      - name: Build full product and prove splash loader
+        run: |
+          set -euo pipefail
+          cd "$PRODUCT"
+          chmod +x tools/*.sh tools/*.py sdk/*.sh 2>/dev/null || true
+          find toolchain -type f -name nexus -exec chmod +x {} + 2>/dev/null || true
+          ./tools/build.sh 2>&1 | tee "$GITHUB_WORKSPACE/integration-evidence/BUILD.log"
+          python3 tools/make_esp.py 2>&1 | tee "$GITHUB_WORKSPACE/integration-evidence/MAKE-ESP.log"
+          [ ! -f tools/sdk_selftest.py ] || python3 tools/sdk_selftest.py 2>&1 | tee "$GITHUB_WORKSPACE/integration-evidence/SDK-SELFTEST.log"
+          [ ! -f tools/make_desktop_preview_image.py ] || python3 tools/make_desktop_preview_image.py 2>&1 | tee "$GITHUB_WORKSPACE/integration-evidence/DESKTOP-PREVIEW.log"
+          test -s build/BOOTX64.EFI; test -s build/FramesKernel.fkrn; test -s build/System.fex
+          LOGO_SHA="$(sha256sum assets/branding/FramesLogo-48.rgba | awk '{print $1}')"
+          strings -a build/BOOTX64.EFI | grep -F "FRAMES_CANONICAL_LOGO_48_RGBA_SHA256=$LOGO_SHA" | tee "$GITHUB_WORKSPACE/integration-evidence/BOOTX64-LOGO-PROOF.txt"
+          strings -a build/BOOTX64.EFI | grep -F 'FRAMES_HANDOFF_KERNEL_CALL' | tee "$GITHUB_WORKSPACE/integration-evidence/BOOTX64-HANDOFF-PROOF.txt"
+          sha256sum build/BOOTX64.EFI build/FramesKernel.fkrn build/System.fex | tee "$GITHUB_WORKSPACE/integration-evidence/PAYLOAD-SHA256.txt"
+
+      - name: Verify ESP and create USB-friendly UEFI ISO
+        run: |
+          set -euo pipefail
+          cd "$PRODUCT"
+          ESP="$(find build -maxdepth 1 -type f -iname '*ESP*.img' -print | sort | head -n1 || true)"
+          test -n "$ESP"; test -s "$ESP"
+          FIRST="$(sgdisk -i 1 "$ESP" | awk -F: '/First sector/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); split($2,a," "); print a[1]; exit}')"
+          LAST="$(sgdisk -i 1 "$ESP" | awk -F: '/Last sector/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); split($2,a," "); print a[1]; exit}')"
+          COUNT=$((LAST-FIRST+1)); EFI_IMG="$RUNNER_TEMP/frames-logo-v3-efiboot.img"
+          dd if="$ESP" of="$EFI_IMG" bs=512 skip="$FIRST" count="$COUNT" status=none
+          mcopy -i "$EFI_IMG" ::/EFI/BOOT/BOOTX64.EFI "$RUNNER_TEMP/esp-loader.efi"
+          cmp build/BOOTX64.EFI "$RUNNER_TEMP/esp-loader.efi"
+          LOGO_SHA="$(sha256sum assets/branding/FramesLogo-48.rgba | awk '{print $1}')"
+          strings -a "$RUNNER_TEMP/esp-loader.efi" | grep -F "FRAMES_CANONICAL_LOGO_48_RGBA_SHA256=$LOGO_SHA" | tee "$GITHUB_WORKSPACE/integration-evidence/ESP-LOGO-PROOF.txt"
+          ROOT="$RUNNER_TEMP/iso-root"; mkdir -p "$ROOT/EFI" "$ROOT/FRAMES"
+          cp "$EFI_IMG" "$ROOT/EFI/efiboot.img"
+          cp build/BOOTX64.EFI build/FramesKernel.fkrn build/System.fex "$ROOT/FRAMES/"
+          cp assets/branding/FramesLogo-48.png "$ROOT/FRAMES/"
+          find build -maxdepth 1 -type f \( -iname '*Desktop*.img' -o -iname '*.fthm' -o -iname '*.cfg' -o -iname '*.fapp' \) -exec cp -t "$ROOT/FRAMES" {} + 2>/dev/null || true
+          OUT="$GITHUB_WORKSPACE/Frames-v116-Full-Product-CANONICAL-LOGO-SPLASH-v3-UEFI.iso"
+          xorriso -as mkisofs -iso-level 3 -R -J -V FRAMES_LOGO_V3 -append_partition 2 0xef "$EFI_IMG" -appended_part_as_gpt -e --interval:appended_partition_2:all:: -no-emul-boot -o "$OUT" "$ROOT" 2>&1 | tee "$GITHUB_WORKSPACE/integration-evidence/XORRISO.log"
+          test -s "$OUT"
+          sha256sum "$OUT" | tee "$GITHUB_WORKSPACE/Frames-v116-Full-Product-CANONICAL-LOGO-SPLASH-v3-UEFI.iso.sha256"
+
+      - name: Upload ISO and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v116-Full-Product-CANONICAL-LOGO-SPLASH-v3-UEFI
+          path: |
+            ${{ github.workspace }}/Frames-v116-Full-Product-CANONICAL-LOGO-SPLASH-v3-UEFI.iso
+            ${{ github.workspace }}/Frames-v116-Full-Product-CANONICAL-LOGO-SPLASH-v3-UEFI.iso.sha256
+            ${{ github.workspace }}/integration-evidence/
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 30
