@@ -1,0 +1,144 @@
+name: Frames 0.9.106 v116 Simple Complete ISO
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v116-complete-integrated-iso-testboot ]
+    paths:
+      - '.github/workflows/frames-v116-simple-complete-iso.yml'
+
+env:
+  KIT_SHA256: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
+  SOURCE_SHA256: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
+  V109_MAIN_SHA256: 82594aaea923a2a19c06eadb73d8d985941b392c56b8c613866b5a99523ae806
+  V110_MAIN_SHA256: 788f456bc334fac55c14b2f4c4b04bd39d84822d42a2d655bcb2f5b8d982bdc7
+  V111_MAIN_SHA256: e1dfef88b17199311da98d7474673a16b3aa54826c3d95284e35b74c83c49f23
+  V112_MAIN_SHA256: 40acf98479fbf81122411b01afa7192b99b44ba6ab1dbb188f7d8f14c1f74085
+  V113_MAIN_SHA256: e35ad1a66701653cf95db6517425facbe2743680f368d86ff23d076da23b3d59
+  V114_MAIN_SHA256: 1cebf3df01fbce86edf41e45c49f4a52c64b982526733c8d0f6060ac011bd925
+  V115_MAIN_SHA256: 7ff384e9f2213214ab2b84a4d82492477e922cc96766197f89056101552bfe1e
+  V116_MAIN_SHA256: a8c569ca5c6b9facd85176a0fe97c8b369f9e4bbf50153f41a1b7777636a3ed5
+  V116_FKRN_SHA256: 7bb3d2455b63373826dd4fc7ce38c3244441241d49796a11a46aa8fe298795d7
+
+jobs:
+  build-iso:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v116-complete-integrated-iso-testboot
+
+      - name: Install build tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 unzip mtools dosfstools gdisk xorriso qemu-system-x86 ovmf
+
+      - name: Reconstruct certified v116 source
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/kit" "$RUNNER_TEMP/src"
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip"
+          test "$(sha256sum "$KIT" | awk '{print $1}')" = "$KIT_SHA256"
+          unzip -q "$KIT" -d "$RUNNER_TEMP/kit"
+          SRCZIP="$RUNNER_TEMP/kit/Frames-0.9.98-Source-v108.zip"
+          test "$(sha256sum "$SRCZIP" | awk '{print $1}')" = "$SOURCE_SHA256"
+          unzip -q "$SRCZIP" -d "$RUNNER_TEMP/src"
+          S="$RUNNER_TEMP/src/Frames-0.9.98"
+          python3 architecture/v109/make_unified_device_architecture_v109.py "$S/kernel/main.nx"
+          test "$(sha256sum "$S/kernel/main.nx" | awk '{print $1}')" = "$V109_MAIN_SHA256"
+          python3 architecture/v110/make_driver_runtime_v110.py "$S/kernel/main.nx"
+          test "$(sha256sum "$S/kernel/main.nx" | awk '{print $1}')" = "$V110_MAIN_SHA256"
+          python3 architecture/v111/make_async_io_service_runtime_v111.py "$S/kernel/main.nx"
+          test "$(sha256sum "$S/kernel/main.nx" | awk '{print $1}')" = "$V111_MAIN_SHA256"
+          python3 architecture/v112/make_device_service_integration_v112.py "$S/kernel/main.nx"
+          test "$(sha256sum "$S/kernel/main.nx" | awk '{print $1}')" = "$V112_MAIN_SHA256"
+          python3 architecture/v113/make_driver_execution_hal_v113.py "$S/kernel/main.nx"
+          test "$(sha256sum "$S/kernel/main.nx" | awk '{print $1}')" = "$V113_MAIN_SHA256"
+          python3 architecture/v114/make_kernel_concurrency_driver_scheduling_v114.py "$S/kernel/main.nx"
+          test "$(sha256sum "$S/kernel/main.nx" | awk '{print $1}')" = "$V114_MAIN_SHA256"
+          python3 architecture/v115/make_driver_migration_unified_input_v115.py "$S/kernel/main.nx"
+          test "$(sha256sum "$S/kernel/main.nx" | awk '{print $1}')" = "$V115_MAIN_SHA256"
+          python3 architecture/v116/make_usb_core_xhci_migration_v116.py "$S/kernel/main.nx"
+          test "$(sha256sum "$S/kernel/main.nx" | awk '{print $1}')" = "$V116_MAIN_SHA256"
+          chmod +x "$S"/tools/*.sh "$S"/tools/*.py "$S"/sdk/*.sh 2>/dev/null || true
+          find "$S/toolchain" -type f -name nexus -exec chmod +x {} +
+          echo "S=$S" >> "$GITHUB_ENV"
+
+      - name: Compile complete Frames package
+        run: |
+          set -euo pipefail
+          cd "$S"
+          ./tools/build.sh
+          test "$(sha256sum build/FramesKernel.fkrn | awk '{print $1}')" = "$V116_FKRN_SHA256"
+          python3 tools/make_desktop_preview_image.py
+          python3 tools/verify_release.py
+
+      - name: Build compact EFI boot image
+        run: |
+          set -euo pipefail
+          cd "$S"
+          DESK="build/Frames-0.9.98-Desktop-Preview.img"
+          DESK_FIRST="$(sgdisk -i 1 "$DESK" | awk -F: '/First sector/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); split($2,a," "); print a[1]; exit}')"
+          test -n "$DESK_FIRST"
+          DESK_MTOOLS="$DESK@@$((DESK_FIRST * 512))"
+
+          EFI_IMG="$RUNNER_TEMP/frames-efi.img"
+          truncate -s 24M "$EFI_IMG"
+          mkfs.vfat -F 32 -n FRAMES_EFI "$EFI_IMG"
+          mmd -i "$EFI_IMG" ::/EFI ::/EFI/BOOT ::/FRAMES
+          mcopy -o -i "$EFI_IMG" build/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
+          mcopy -o -i "$EFI_IMG" build/FramesKernel.fkrn ::/FramesKernel.fkrn
+          mcopy -o -i "$EFI_IMG" build/System.fex ::/System.fex
+          mcopy -o -i "$EFI_IMG" build/FramesKernel.fkrn ::/FRAMES/FramesKernel.fkrn
+          mcopy -o -i "$EFI_IMG" build/System.fex ::/FRAMES/System.fex
+          for f in DESKTOP.CFG HELLO.FAP THEME.FTH APPEAR.CFG; do
+            mcopy -o -i "$DESK_MTOOLS" "::/FRAMES/$f" "$RUNNER_TEMP/$f"
+            mcopy -o -i "$EFI_IMG" "$RUNNER_TEMP/$f" "::/$f"
+            mcopy -o -i "$EFI_IMG" "$RUNNER_TEMP/$f" "::/FRAMES/$f"
+          done
+          mdir -i "$EFI_IMG" ::/EFI/BOOT/BOOTX64.EFI
+          mdir -i "$EFI_IMG" ::/FramesKernel.fkrn
+          mdir -i "$EFI_IMG" ::/System.fex
+          echo "EFI_IMG=$EFI_IMG" >> "$GITHUB_ENV"
+
+      - name: Create complete ISO
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/iso-root"
+          mkdir -p "$ROOT/EFI/BOOT" "$ROOT/FRAMES"
+          cp "$EFI_IMG" "$ROOT/EFI/efiboot.img"
+          cp "$S/build/BOOTX64.EFI" "$ROOT/EFI/BOOT/BOOTX64.EFI"
+          cp "$S/build/FramesKernel.fkrn" "$ROOT/FRAMES/FramesKernel.fkrn"
+          cp "$S/build/System.fex" "$ROOT/FRAMES/System.fex"
+          cp "$S/build/Frames-0.9.98-Desktop-Preview.img" "$ROOT/FRAMES/Desktop-Preview.img"
+          for f in DESKTOP.CFG HELLO.FAP THEME.FTH APPEAR.CFG; do cp "$RUNNER_TEMP/$f" "$ROOT/FRAMES/$f"; done
+          printf '%s\n' 'Frames 0.9.106 v116 Complete Integrated Test Boot' 'Certified v116 kernel/runtime plus GUI desktop payload.' > "$ROOT/README.TXT"
+          OUT="$GITHUB_WORKSPACE/Frames-0.9.106-v116-Complete-Integrated-Test-Boot-UEFI.iso"
+          xorriso -as mkisofs -iso-level 3 -R -J -V FRAMES_V116 -eltorito-alt-boot -e EFI/efiboot.img -no-emul-boot -o "$OUT" "$ROOT"
+          test -s "$OUT"
+          sha256sum "$OUT" | tee "$GITHUB_WORKSPACE/Frames-0.9.106-v116-Complete-Integrated-Test-Boot-UEFI.iso.sha256"
+
+      - name: Optional QEMU smoke test
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          code=""; vars=""
+          for p in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd; do [ -f "$p" ] && code="$p" && break; done
+          for p in /usr/share/OVMF/OVMF_VARS_4M.fd /usr/share/OVMF/OVMF_VARS.fd; do [ -f "$p" ] && vars="$p" && break; done
+          test -n "$code"; test -n "$vars"
+          cp "$vars" "$RUNNER_TEMP/OVMF_VARS.fd"
+          timeout --signal=TERM --kill-after=5s 45s qemu-system-x86_64 -machine q35 -m 1024 -smp 2 -drive if=pflash,format=raw,readonly=on,file="$code" -drive if=pflash,format=raw,file="$RUNNER_TEMP/OVMF_VARS.fd" -cdrom "$GITHUB_WORKSPACE/Frames-0.9.106-v116-Complete-Integrated-Test-Boot-UEFI.iso" -boot d -serial file:"$GITHUB_WORKSPACE/Frames-v116-ISO-smoke-serial.log" -display none -no-reboot || true
+
+      - name: Upload complete ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-0.9.106-v116-Complete-Integrated-Test-Boot-UEFI-ISO
+          path: |
+            ${{ github.workspace }}/Frames-0.9.106-v116-Complete-Integrated-Test-Boot-UEFI.iso
+            ${{ github.workspace }}/Frames-0.9.106-v116-Complete-Integrated-Test-Boot-UEFI.iso.sha256
+            ${{ github.workspace }}/Frames-v116-ISO-smoke-serial.log
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
