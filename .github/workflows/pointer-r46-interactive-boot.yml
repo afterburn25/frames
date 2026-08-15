@@ -12,8 +12,8 @@ permissions:
 
 env:
   EXPECTED_PARENT_SHA256: 1c7f1b514d9aa2f847f724e8b633286d069d745bf7c281a3967c46bbfea1a18c
-  EXPECTED_R46_CANDIDATE_SHA256: 0be1fefaeb5a3fa6438ded01321ef197e2873a49b6bb98defdecad3384cb7eff
-  CANDIDATE_NAME: Frames-0.9.98-Pointer-USB-Startup-Fix-r46-Candidate
+  CERTIFIED_R46_ARCHIVE_SHA256: 0be1fefaeb5a3fa6438ded01321ef197e2873a49b6bb98defdecad3384cb7eff
+  EXPECTED_R46_KERNEL_MAIN_SHA256: e5ccd3d4a453184f620e2ed5f928599bc8a7fa6959098f3aeff4916f6dcff165
 
 jobs:
   build-interactive-boot:
@@ -23,23 +23,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Initialize fail-safe evidence directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf boot-out
+          mkdir -p boot-out
+          printf 'status=started\n' > boot-out/BUILD-STATUS.txt
+
       - name: Verify protected parent source kit
         shell: bash
         run: |
           set -euo pipefail
           test -f Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip
           actual="$(sha256sum Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip | awk '{print $1}')"
-          echo "protected_parent_sha256=$actual"
+          echo "protected_parent_sha256=$actual" | tee boot-out/PARENT-IDENTITY.txt
           test "$actual" = "$EXPECTED_PARENT_SHA256"
 
-      - name: Reconstruct exact certified r46 candidate
+      - name: Reconstruct certified r46 source identity
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf "$RUNNER_TEMP/r46-interactive" "$RUNNER_TEMP/$CANDIDATE_NAME" boot-out
-          mkdir -p "$RUNNER_TEMP/r46-interactive" boot-out
+          rm -rf "$RUNNER_TEMP/r46-interactive"
+          mkdir -p "$RUNNER_TEMP/r46-interactive"
           unzip -q Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip -d "$RUNNER_TEMP/r46-interactive"
           SRC="$RUNNER_TEMP/r46-interactive/Frames-0.9.98-Pointer-CI-Source"
+          cp "$SRC/kernel/main.nx" boot-out/kernel-main-before.nx
           python3 - "$SRC/kernel/main.nx" <<'PY'
           from pathlib import Path
           import sys
@@ -53,11 +62,21 @@ jobs:
           assert s.count(old2)==1, f'boot HID decode site count={s.count(old2)}'
           p.write_text(s.replace(old1,new1).replace(old2,new2))
           PY
-          cp -a "$SRC" "$RUNNER_TEMP/$CANDIDATE_NAME"
-          (cd "$RUNNER_TEMP" && zip -qr -X "$GITHUB_WORKSPACE/boot-out/$CANDIDATE_NAME.zip" "$CANDIDATE_NAME")
-          candidate_sha="$(sha256sum "boot-out/$CANDIDATE_NAME.zip" | awk '{print $1}')"
-          echo "reconstructed_candidate_sha256=$candidate_sha"
-          test "$candidate_sha" = "$EXPECTED_R46_CANDIDATE_SHA256"
+          cp "$SRC/kernel/main.nx" boot-out/kernel-main-after.nx
+          diff -u boot-out/kernel-main-before.nx boot-out/kernel-main-after.nx > boot-out/usb-startup-handoff.patch || true
+          kernel_sha="$(sha256sum "$SRC/kernel/main.nx" | awk '{print $1}')"
+          echo "patched_kernel_main_sha256=$kernel_sha" | tee boot-out/R46-SOURCE-IDENTITY.txt
+          echo "certified_r46_archive_sha256=$CERTIFIED_R46_ARCHIVE_SHA256" >> boot-out/R46-SOURCE-IDENTITY.txt
+          echo "identity_rule=exact protected parent + exact two-site USB startup patch + exact patched kernel/main.nx SHA-256" >> boot-out/R46-SOURCE-IDENTITY.txt
+          test "$kernel_sha" = "$EXPECTED_R46_KERNEL_MAIN_SHA256"
+          if grep -Fq 'usb_hid_report_ready = xhci_read_first_hid_report(xhci_state,phys_state)' "$SRC/kernel/main.nx"; then
+            echo 'old synchronous first-report call still present' >&2
+            exit 1
+          fi
+          if grep -Fq 'input_decode_ready = input_decode_boot_hid(xhci_state,input_state)' "$SRC/kernel/main.nx"; then
+            echo 'old one-off boot HID decode still present' >&2
+            exit 1
+          fi
           echo "FRAMES_DIR=$SRC" >> "$GITHUB_ENV"
 
       - name: Install build dependencies
@@ -89,15 +108,16 @@ jobs:
           image_sha="$(sha256sum boot-out/Frames-0.9.98-r46-Certified-Pointer-Interactive-Boot.img | awk '{print $1}')"
           cat > boot-out/BOOT-IDENTITY.txt <<EOF
           Frames 0.9.98 r46 Certified Pointer Interactive Boot
-          certified_candidate=Frames-0.9.98-Pointer-USB-Startup-Fix-r46-Candidate.zip
-          certified_candidate_sha256=$EXPECTED_R46_CANDIDATE_SHA256
+          certified_candidate_archive=Frames-0.9.98-Pointer-USB-Startup-Fix-r46-Candidate.zip
+          certified_candidate_archive_sha256=$CERTIFIED_R46_ARCHIVE_SHA256
           protected_parent_sha256=$EXPECTED_PARENT_SHA256
+          patched_kernel_main_sha256=$EXPECTED_R46_KERNEL_MAIN_SHA256
           image=Frames-0.9.98-r46-Certified-Pointer-Interactive-Boot.img
           image_sha256=$image_sha
           certification=Frames 0.9.98 Pointer Regression CI v5 PASS
           ps2_regression=PASS
           usb_regression=PASS
-          purpose=hands-on interactive pointer verification; no promotion beyond certified r46 implied by hands-on result
+          purpose=hands-on interactive pointer verification; source-equivalent reconstruction from certified parent and patch
           EOF
           cat > boot-out/HANDS-ON-TEST.txt <<'EOF'
           1. Boot this image using the same UEFI/VM setup used for prior Frames pointer hands-on tests.
@@ -108,11 +128,13 @@ jobs:
           6. If available, test primary/secondary buttons and dragging.
           7. Report: boot success/failure, cursor first-motion result, continuous-motion result, idle/resume result, button result, and whether the mouse was USB or PS/2.
           EOF
+          printf 'status=PASS\nimage_sha256=%s\n' "$image_sha" > boot-out/BUILD-STATUS.txt
           sha256sum boot-out/* > boot-out/SHA256SUMS.txt
           cat boot-out/BOOT-IDENTITY.txt
           cat boot-out/HANDS-ON-TEST.txt
 
-      - name: Upload certified r46 hands-on boot
+      - name: Upload r46 hands-on boot and diagnostics
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: frames-0.9.98-r46-certified-pointer-interactive-boot
