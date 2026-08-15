@@ -1,0 +1,144 @@
+name: Frames 0.9.98 r57 Persistent xHCI Enumeration Trace USB Image
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ r56-linux-input-architecture ]
+    paths:
+      - '.github/workflows/pointer-r57-persistent-xhci-trace.yml'
+      - 'tools/ci/make_r57_persistent_xhci_trace.py'
+      - 'tools/ci/make_r56_linux_input_architecture.py'
+      - 'tools/ci/make_r55_physical_protocol_probe.py'
+      - 'tools/ci/make_r54_usb_multiport_hid.py'
+      - 'tools/ci/make_r53b_input_protocol_id.py'
+      - 'tools/ci/make_r50_ps2_phase_fix.py'
+      - 'tools/ci/make_r49_ps2_phase.py'
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_PARENT_SHA256: 1c7f1b514d9aa2f847f724e8b633286d069d745bf7c281a3967c46bbfea1a18c
+  EXPECTED_R46_KERNEL_MAIN_SHA256: e5ccd3d4a453184f620e2ed5f928599bc8a7fa6959098f3aeff4916f6dcff165
+
+jobs:
+  build-r57:
+    name: Build r57 persistent xHCI trace image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: r56-linux-input-architecture
+
+      - name: Initialize evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf r57-out
+          mkdir -p r57-out
+          printf 'status=started\nrevision=r57\nstrategy=persistent-xhci-enumeration-trace\n' > r57-out/BUILD-STATUS.txt
+
+      - name: Reconstruct exact protected r46 base
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent_sha="$(sha256sum Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip | awk '{print $1}')"
+          echo "protected_parent_sha256=$parent_sha" > r57-out/PARENT-IDENTITY.txt
+          test "$parent_sha" = "$EXPECTED_PARENT_SHA256"
+          rm -rf "$RUNNER_TEMP/r57"; mkdir -p "$RUNNER_TEMP/r57"
+          unzip -q Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip -d "$RUNNER_TEMP/r57"
+          SRC="$RUNNER_TEMP/r57/Frames-0.9.98-Pointer-CI-Source"
+          python3 - "$SRC/kernel/main.nx" <<'PY'
+          from pathlib import Path
+          import sys
+          p=Path(sys.argv[1]); s=p.read_text()
+          a='if usb_hid_found != 0 { usb_hid_configured = xhci_configure_boot_hid(xhci_state,phys_state); if usb_hid_configured != 0 { usb_hid_report_ready = xhci_read_first_hid_report(xhci_state,phys_state); } }'
+          b='if usb_hid_found != 0 { usb_hid_configured = xhci_configure_boot_hid(xhci_state,phys_state); if usb_hid_configured != 0 { usb_hid_report_ready = 1; } }'
+          c='if input_queue_ready != 0 { if usb_hid_report_ready != 0 { input_decode_ready = input_decode_boot_hid(xhci_state,input_state); } else { ps2_poll_fallback(input_state); } }'
+          d='if input_queue_ready != 0 { if usb_hid_report_ready != 0 { input_decode_ready = 1; } else { ps2_poll_fallback(input_state); } }'
+          assert s.count(a)==1 and s.count(c)==1
+          p.write_text(s.replace(a,b).replace(c,d))
+          PY
+          r46_sha="$(sha256sum "$SRC/kernel/main.nx" | awk '{print $1}')"
+          echo "r46_kernel_main_sha256=$r46_sha" > r57-out/R46-BASE-IDENTITY.txt
+          test "$r46_sha" = "$EXPECTED_R46_KERNEL_MAIN_SHA256"
+          echo "FRAMES_DIR=$SRC" >> "$GITHUB_ENV"
+
+      - name: Apply r57 persistent xHCI trace
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "$FRAMES_DIR/kernel/main.nx" r57-out/kernel-main-before-r57.nx
+          python3 tools/ci/make_r57_persistent_xhci_trace.py "$FRAMES_DIR/kernel/main.nx"
+          cp "$FRAMES_DIR/kernel/main.nx" r57-out/kernel-main-r57.nx
+          diff -u r57-out/kernel-main-before-r57.nx r57-out/kernel-main-r57.nx > r57-out/R57-PERSISTENT-XHCI-TRACE.patch || true
+          grep -q 'R57' "$FRAMES_DIR/kernel/main.nx"
+          grep -q 'EFLR' "$FRAMES_DIR/kernel/main.nx"
+          grep -q 'ECC ' "$FRAMES_DIR/kernel/main.nx"
+          grep -q 'volatile_write64(xhci_state+840' "$FRAMES_DIR/kernel/main.nx"
+          sha256sum "$FRAMES_DIR/kernel/main.nx" | tee r57-out/R57-KERNEL-SHA256.txt
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 unzip zip mtools dosfstools
+          find "$FRAMES_DIR" -type f -name '*.sh' -exec chmod +x {} +
+          find "$FRAMES_DIR/toolchain" -type f -name nexus -exec chmod +x {} +
+
+      - name: Build and verify raw USB image
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"
+          ./tools/build.sh
+          python3 tools/make_esp.py
+          python3 tools/sdk_selftest.py
+          python3 tools/make_desktop_preview_image.py
+          python3 tools/verify_desktop_preview_image.py --image build/Frames-0.9.98-Desktop-Preview.img --require-pass
+          python3 tools/verify_release.py
+          cp build/Frames-0.9.98-Desktop-Preview.img "$GITHUB_WORKSPACE/r57-out/Frames-0.9.98-r57-Persistent-xHCI-Enumeration-Trace-Rufus.img"
+
+      - name: Record hands-on instructions and hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          img="r57-out/Frames-0.9.98-r57-Persistent-xHCI-Enumeration-Trace-Rufus.img"
+          img_sha="$(sha256sum "$img" | awk '{print $1}')"
+          cat > r57-out/HANDS-ON-TEST.txt <<'EOF'
+          Write the r57 IMG directly with Rufus/raw image mode and boot UEFI.
+          Plug the physical USB mouse in BEFORE boot and leave the Frames boot USB inserted.
+          Confirm PTR DIAG R57.
+
+          Persistent xHCI enumeration trace:
+            XINI = xHCI controller initialized
+            USTG = deepest successful stage stored in xHCI state
+                   1 controller initialized
+                   2 connected root port reset
+                   3 slot enabled
+                   4 default device addressed
+                   5 first 8 descriptor bytes read
+                   6 full device descriptor/address complete
+                   7 boot-HID interface found
+                   8 boot-HID configured
+            UTRY = connected-port scan attempts
+            EFLR = failing stage code (0 means none recorded)
+            ECC  = underlying xHCI command/transfer completion snapshot
+            UPOR = selected root port
+            UVID = VID after full descriptor succeeds
+
+          Photograph the middle USB column after boot with the mouse connected. Do not promote r57; diagnostic only.
+          EOF
+          printf 'status=PASS\nrevision=r57\nimage_sha256=%s\n' "$img_sha" > r57-out/BUILD-STATUS.txt
+          sha256sum r57-out/* > r57-out/SHA256SUMS.txt
+
+      - name: Upload r57 image and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frames-0.9.98-r57-persistent-xhci-enumeration-trace-rufus-image
+          path: r57-out/**
+          if-no-files-found: error
+          retention-days: 14
