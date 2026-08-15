@@ -1,0 +1,43 @@
+name: Frames v101 Loader Source Discovery
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v116-full-product-v101-integration ]
+    paths:
+      - '.github/workflows/frames-v101-loader-source-discovery.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  discover-loader:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v116-full-product-v101-integration
+      - name: Extract sealed v101 product source and locate loader
+        shell: bash
+        run: |
+          set -euo pipefail
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.91-Integrated-Connected-Services-Certification-Kit-v101.zip"
+          mkdir -p "$RUNNER_TEMP/kit" "$RUNNER_TEMP/src" "$GITHUB_WORKSPACE/loader-discovery"
+          unzip -q "$KIT" -d "$RUNNER_TEMP/kit"
+          SRCZIP="$(find "$RUNNER_TEMP/kit" -type f -iname '*0.9.91*Source*.zip' -print | sort | head -n1)"
+          unzip -q "$SRCZIP" -d "$RUNNER_TEMP/src"
+          PRODUCT="$(find "$RUNNER_TEMP/src" -type f -name VERSION -print | while read -r f; do d="${f%/VERSION}"; [ "$(tr -d '\r\n' < "$f")" = "0.9.91" ] && [ -f "$d/kernel/main.nx" ] && { echo "$d"; break; }; done)"
+          test -n "$PRODUCT"
+          grep -RIl --exclude-dir=build --exclude='*.zip' -E 'entering Nexus kernel|SHA-256 verified|boot modules.*ACPI|framebuffer.*memory-map' "$PRODUCT" | sort | tee "$GITHUB_WORKSPACE/loader-discovery/MATCHING-FILES.txt"
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            rel="${f#$PRODUCT/}"
+            mkdir -p "$GITHUB_WORKSPACE/loader-discovery/source/$(dirname "$rel")"
+            cp "$f" "$GITHUB_WORKSPACE/loader-discovery/source/$rel"
+          done < "$GITHUB_WORKSPACE/loader-discovery/MATCHING-FILES.txt"
+          find "$PRODUCT" -maxdepth 4 -type f -printf '%P\n' | grep -Ei '(efi|uefi|boot|loader|startup|main)' | sort > "$GITHUB_WORKSPACE/loader-discovery/BOOT-FILE-INVENTORY.txt" || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frames-v101-loader-source-discovery
+          path: loader-discovery/
+          retention-days: 7
