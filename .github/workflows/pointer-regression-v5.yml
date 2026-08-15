@@ -1,0 +1,246 @@
+name: Frames 0.9.98 Pointer Regression CI v5
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/pointer-regression-v5.yml'
+      - 'tools/ci/pointer_diag_v3.py'
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_V1_KIT_SHA256: 1c7f1b514d9aa2f847f724e8b633286d069d745bf7c281a3967c46bbfea1a18c
+  CANDIDATE_NAME: Frames-0.9.98-Pointer-USB-Startup-Fix-r46-Candidate
+
+jobs:
+  prepare-candidate:
+    name: Prepare deterministic pointer fix candidate
+    runs-on: ubuntu-24.04
+    outputs:
+      candidate_sha256: ${{ steps.identity.outputs.candidate_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify protected source kit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip
+          actual="$(sha256sum Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip | awk '{print $1}')"
+          echo "protected_source_kit_sha256=$actual"
+          test "$actual" = "$EXPECTED_V1_KIT_SHA256"
+
+      - name: Create permanent USB startup handoff candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/pointer-v5" candidate-out
+          mkdir -p "$RUNNER_TEMP/pointer-v5" candidate-out
+          unzip -q Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip -d "$RUNNER_TEMP/pointer-v5"
+          SRC="$RUNNER_TEMP/pointer-v5/Frames-0.9.98-Pointer-CI-Source"
+          cp "$SRC/kernel/main.nx" candidate-out/kernel-main-before.nx
+          python3 - "$SRC/kernel/main.nx" <<'PY'
+          from pathlib import Path
+          import sys
+          p=Path(sys.argv[1])
+          s=p.read_text()
+          old1='if usb_hid_found != 0 { usb_hid_configured = xhci_configure_boot_hid(xhci_state,phys_state); if usb_hid_configured != 0 { usb_hid_report_ready = xhci_read_first_hid_report(xhci_state,phys_state); } }'
+          new1='if usb_hid_found != 0 { usb_hid_configured = xhci_configure_boot_hid(xhci_state,phys_state); if usb_hid_configured != 0 { usb_hid_report_ready = 1; } }'
+          old2='if input_queue_ready != 0 { if usb_hid_report_ready != 0 { input_decode_ready = input_decode_boot_hid(xhci_state,input_state); } else { ps2_poll_fallback(input_state); } }'
+          new2='if input_queue_ready != 0 { if usb_hid_report_ready != 0 { input_decode_ready = 1; } else { ps2_poll_fallback(input_state); } }'
+          assert s.count(old1)==1, f'boot first-report site count={s.count(old1)}'
+          assert s.count(old2)==1, f'boot HID decode site count={s.count(old2)}'
+          p.write_text(s.replace(old1,new1).replace(old2,new2))
+          PY
+          cp "$SRC/kernel/main.nx" candidate-out/kernel-main-after.nx
+          diff -u candidate-out/kernel-main-before.nx candidate-out/kernel-main-after.nx > candidate-out/usb-startup-handoff.patch || true
+          grep -q 'xhci_read_first_hid_report' candidate-out/kernel-main-before.nx
+          if grep -Fq 'usb_hid_report_ready = xhci_read_first_hid_report(xhci_state,phys_state)' "$SRC/kernel/main.nx"; then
+            echo 'old synchronous first-report call still present' >&2
+            exit 1
+          fi
+          if grep -Fq 'input_decode_ready = input_decode_boot_hid(xhci_state,input_state)' "$SRC/kernel/main.nx"; then
+            echo 'old one-off boot HID decode still present' >&2
+            exit 1
+          fi
+          cp -a "$SRC" "$RUNNER_TEMP/$CANDIDATE_NAME"
+          (cd "$RUNNER_TEMP" && zip -qr -X "$GITHUB_WORKSPACE/candidate-out/$CANDIDATE_NAME.zip" "$CANDIDATE_NAME")
+
+      - name: Record candidate identity
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="$(sha256sum "candidate-out/$CANDIDATE_NAME.zip" | awk '{print $1}')"
+          echo "candidate_sha256=$sha" >> "$GITHUB_OUTPUT"
+          {
+            echo "candidate=$CANDIDATE_NAME.zip"
+            echo "candidate_sha256=$sha"
+            echo "protected_parent_kit_sha256=$EXPECTED_V1_KIT_SHA256"
+            echo "fix=USB HID continuous poller owns first live interrupt-IN report"
+          } > candidate-out/SOURCE-IDENTITY.txt
+          sha256sum candidate-out/* > candidate-out/PREPARE-SHA256SUMS.txt
+          cat candidate-out/SOURCE-IDENTITY.txt
+          cat candidate-out/usb-startup-handoff.patch
+
+      - name: Upload candidate source
+        uses: actions/upload-artifact@v4
+        with:
+          name: frames-0.9.98-pointer-usb-startup-fix-r46-candidate
+          path: candidate-out/**
+          if-no-files-found: error
+          retention-days: 14
+
+  regression:
+    name: Pointer regression / ${{ matrix.lane }}
+    needs: prepare-candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [ps2, usb]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download exact candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: frames-0.9.98-pointer-usb-startup-fix-r46-candidate
+          path: candidate
+
+      - name: Verify candidate identity and extract
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(sha256sum "candidate/$CANDIDATE_NAME.zip" | awk '{print $1}')"
+          echo "candidate_sha256=$actual"
+          test "$actual" = '${{ needs.prepare-candidate.outputs.candidate_sha256 }}'
+          rm -rf "$RUNNER_TEMP/pointer-v5-regression"
+          mkdir -p "$RUNNER_TEMP/pointer-v5-regression"
+          unzip -q "candidate/$CANDIDATE_NAME.zip" -d "$RUNNER_TEMP/pointer-v5-regression"
+          echo "FRAMES_DIR=$RUNNER_TEMP/pointer-v5-regression/$CANDIDATE_NAME" >> "$GITHUB_ENV"
+
+      - name: Install QEMU/OVMF and build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils ovmf clang lld python3 unzip zip
+          code="$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE.fd' \) | head -n1)"
+          test -n "$code"
+          echo "OVMF_CODE=$code" >> "$GITHUB_ENV"
+          echo "QEMU=$(command -v qemu-system-x86_64)" >> "$GITHUB_ENV"
+
+      - name: Build exact candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          find "$FRAMES_DIR" -type f -name '*.sh' -exec chmod +x {} +
+          find "$FRAMES_DIR/toolchain" -type f -name nexus -exec chmod +x {} +
+          chmod +x tools/ci/pointer_diag_v3.py
+          cd "$FRAMES_DIR"
+          ./tools/build.sh
+          python3 tools/make_esp.py
+          python3 tools/sdk_selftest.py
+          python3 tools/make_desktop_preview_image.py
+          python3 tools/verify_desktop_preview_image.py --image build/Frames-0.9.98-Desktop-Preview.img --require-pass
+          python3 tools/verify_release.py
+
+      - name: Run OCR-free pointer regression
+        id: pointer_test
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          set +e
+          OUT="$GITHUB_WORKSPACE/pointer-regression-${{ matrix.lane }}"
+          mkdir -p "$OUT"
+          cp candidate/SOURCE-IDENTITY.txt "$OUT/" || true
+          cp candidate/usb-startup-handoff.patch "$OUT/" || true
+          printf 'lane=%s\nstatus=started\n' '${{ matrix.lane }}' > "$OUT/harness-status.txt"
+          python3 tools/ci/pointer_diag_v3.py \
+            --qemu "$QEMU" \
+            --ovmf "$OVMF_CODE" \
+            --image "$FRAMES_DIR/build/Frames-0.9.98-Desktop-Preview.img" \
+            --lane '${{ matrix.lane }}' \
+            --out "$OUT" \
+            2>&1 | tee "$OUT/runner.log"
+          rc=${PIPESTATUS[0]}
+          printf 'lane=%s\nstatus=completed\nrunner_rc=%s\n' '${{ matrix.lane }}' "$rc" > "$OUT/harness-status.txt"
+          echo "runner_rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frames-0.9.98-pointer-regression-v5-${{ matrix.lane }}
+          path: pointer-regression-${{ matrix.lane }}/**
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Enforce lane result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test '${{ steps.pointer_test.outputs.runner_rc }}' = '0'
+
+  certify:
+    name: Pointer regression certification
+    needs: [prepare-candidate, regression]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download all v5 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: frames-0.9.98-pointer-*
+          path: evidence
+
+      - name: Fail-closed aggregate certification
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p certification
+          ps2="evidence/frames-0.9.98-pointer-regression-v5-ps2/summary.json"
+          usb="evidence/frames-0.9.98-pointer-regression-v5-usb/summary.json"
+          source="evidence/frames-0.9.98-pointer-usb-startup-fix-r46-candidate/SOURCE-IDENTITY.txt"
+          test -f "$ps2" -a -f "$usb" -a -f "$source"
+          python3 - "$ps2" "$usb" "$source" '${{ needs.prepare-candidate.outputs.candidate_sha256 }}' <<'PY'
+          import json,sys,pathlib
+          ps2=json.load(open(sys.argv[1])); usb=json.load(open(sys.argv[2]))
+          source=pathlib.Path(sys.argv[3]).read_text()
+          sha=sys.argv[4]
+          ok=bool(ps2.get('pass')) and bool(usb.get('pass')) and f'candidate_sha256={sha}' in source
+          obj={
+            'schema':'frames-0.9.98-pointer-regression-v5-certification',
+            'status':'PASS' if ok else 'FAIL',
+            'candidate':'Frames-0.9.98-Pointer-USB-Startup-Fix-r46-Candidate.zip',
+            'candidate_sha256':sha,
+            'protected_parent_kit_sha256':'1c7f1b514d9aa2f847f724e8b633286d069d745bf7c281a3967c46bbfea1a18c',
+            'fix':'USB HID continuous poller owns first live interrupt-IN report; boot-time synchronous first-report read/decode removed',
+            'ps2_pass':bool(ps2.get('pass')),
+            'usb_pass':bool(usb.get('pass')),
+            'promotion_allowed':ok
+          }
+          pathlib.Path('certification/FINAL-POINTER-CERTIFICATION.json').write_text(json.dumps(obj,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(obj,indent=2,sort_keys=True))
+          if not ok: raise SystemExit(1)
+          PY
+          cp "$source" certification/SOURCE-IDENTITY.txt
+          cp evidence/frames-0.9.98-pointer-usb-startup-fix-r46-candidate/usb-startup-handoff.patch certification/
+          sha256sum certification/* > certification/EVIDENCE-FILES-SHA256.txt
+
+      - name: Upload final certification
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frames-0.9.98-pointer-regression-v5-certification
+          path: certification/**
+          if-no-files-found: error
+          retention-days: 30
