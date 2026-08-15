@@ -39,6 +39,7 @@ jobs:
           set -euo pipefail
           E="$GITHUB_WORKSPACE/v109-evidence"
           mkdir -p "$E" "$RUNNER_TEMP/v109-kit" "$RUNNER_TEMP/v109-source"
+          printf 'status=STARTED\nworkflow_revision=%s\n' "$WORKFLOW_REVISION" > "$E/RUN-START.txt"
           KIT="$GITHUB_WORKSPACE/Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip"
           test "$(sha256sum "$KIT" | awk '{print $1}')" = "$EXPECTED_RUNTIME_KIT_SHA256"
           unzip -q "$KIT" -d "$RUNNER_TEMP/v109-kit"
@@ -57,6 +58,7 @@ jobs:
           cp architecture/v109/UNIFIED-DEVICE-DRIVER-ARCHITECTURE-V2.md "$SRC/docs/"
           cp architecture/v109/RELEASE-NOTES-0.9.99-CANDIDATE.md "$SRC/docs/"
           actual_main="$(sha256sum "$SRC/kernel/main.nx" | awk '{print $1}')"
+          printf '%s  kernel/main.nx\n' "$actual_main" > "$E/PATCHED-KERNEL-MAIN-SHA256.txt"
           test "$actual_main" = "$EXPECTED_PATCHED_KERNEL_MAIN_SHA256"
           diff -u --label a/kernel/main.nx --label b/kernel/main.nx "$RUNNER_TEMP/v108-main.nx" "$SRC/kernel/main.nx" > "$E/V109-KERNEL.patch" || test $? -eq 1
           chmod +x "$SRC"/tools/*.sh "$SRC"/tools/*.py "$SRC"/sdk/*.sh 2>/dev/null || true
@@ -148,6 +150,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: frames-0.9.99-v109-unified-device-driver-architecture-phase1-evidence
-          path: v109-evidence/**
+          path: ${{ github.workspace }}/v109-evidence/**
           if-no-files-found: error
           retention-days: 30
