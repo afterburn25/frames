@@ -15,8 +15,16 @@ if m:
 elif 'HELLO.FAP' in s:
     expected = r'\Frames\HELLO.FAP'
 else:
-    raise SystemExit('v72 loader does not reference HELLO.FAP')
+    raise SystemExit('loader does not reference HELLO.FAP')
 print(f'loader_fapp_path={expected}')
+
+version_file = root / 'VERSION'
+if not version_file.exists():
+    raise SystemExit('source root VERSION file is missing')
+frames_version = version_file.read_text(errors='replace').strip()
+if not re.fullmatch(r'\d+\.\d+\.\d+', frames_version):
+    raise SystemExit(f'unexpected Frames VERSION: {frames_version!r}')
+print(f'contract_frames_min={frames_version}')
 
 
 def packages():
@@ -40,9 +48,9 @@ if not candidates:
         'target': 'frames-x64',
         'fex_abi': 1,
         'payload': 'APP.FEX',
-        'frames_min': '0.9.62',
+        'frames_min': frames_version,
         'sha256': digest,
-        'purpose': 'v72-desktop-contract-proof'
+        'purpose': 'desktop-contract-proof'
     }
     manifest_bytes = json.dumps(manifest, separators=(',', ':')).encode('utf-8')
     out = root / 'build' / 'HELLO.FAP'
