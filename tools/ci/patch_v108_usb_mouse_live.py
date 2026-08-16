@@ -2,7 +2,7 @@
 from pathlib import Path
 import hashlib,sys
 p=Path(sys.argv[1]); s=p.read_text()
-if 'FRAMES_V108_USB_GUI_CURSOR_OK' not in s or 'fn v108_input_backend_prepare' not in s:
+if 'serial_marker_v108_usb_gui_cursor_ok' not in s or 'fn v108_input_backend_prepare' not in s:
     raise SystemExit('apply patch_v108_live_input_common.py first')
 if 'input_state+3128' in s:
     raise SystemExit('USB report proof offset already in use')
