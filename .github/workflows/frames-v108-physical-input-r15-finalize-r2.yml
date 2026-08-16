@@ -1,0 +1,104 @@
+name: Frames v108 Physical Input r15 Finalize r2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-usb-hub-topology-r1 ]
+    paths:
+      - '.github/workflows/frames-v108-physical-input-r15-finalize-r2.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SOURCE_RUN: '31969530813'
+  R15_SHA: fa0f42f558f0004f7663f79b49c3049c57c896203cf18646b1ec6f999824f941
+  ISO_NAME: Frames-0.9.98-v108-Physical-Input-Repair-r15-TextEdit-Rufus-UEFI.iso
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r15-Candidate
+          path: candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: 'Frames-v108-r15-*-Evidence'
+          path: gates
+          merge-multiple: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN }}
+      - name: Verify all successful runtime and safety lanes from exact candidate
+        run: |
+          set -euo pipefail
+          for lane in usb-direct usb-hub usb-hub-multi ps2 smoothness interactive right-click text-edit safety; do
+            test "$(cat gates/Frames-v108-r15-$lane-Evidence/RESULT.status)" = PASS
+          done
+          test "$(sha256sum candidate/evidence/kernel-r15.nx|awk '{print $1}')" = "$R15_SHA"
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"
+          test -s "$ISO"
+          EXPECT="$(awk '{print $1}' candidate/evidence/ISO-SHA256.txt)"
+          test "$(sha256sum "$ISO"|awk '{print $1}')" = "$EXPECT"
+      - name: Corrected r15 source-model contract
+        run: |
+          set -euo pipefail
+          K=candidate/evidence/kernel-r15.nx
+          grep -Fq 'fn serial_marker_v108_text_ibeam_ok' "$K"
+          grep -Fq 'fn serial_marker_v108_text_caret_ok' "$K"
+          grep -Fq 'fn serial_marker_v108_text_blink_ok' "$K"
+          grep -Fq 'fn serial_marker_v108_text_left_ok' "$K"
+          grep -Fq 'fn serial_marker_v108_text_right_ok' "$K"
+          grep -Fq 'fn serial_marker_v108_text_delete_ok' "$K"
+          grep -Fq 'fn v108_draw_ibeam_v115' "$K"
+          grep -Fq 'fn v108_input_pointer_draw_v115(surface:u64,state:u64,input_state:u64)' "$K"
+          grep -Fq 'fn v108_input_test_key_v115' "$K"
+          grep -Fq 'volatile_write64(input_state+3976' "$K"
+          grep -Fq 'ascii==8' "$K"
+          printf 'status=PASS\nreason=marker functions are serial_putc encoded; runtime text-edit lane proved emitted markers\nsource_sha=%s\n' "$R15_SHA" > MODEL-R2.txt
+      - name: Seal exact r15 physical candidate
+        run: |
+          set -euo pipefail
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"
+          mkdir final
+          cp "$ISO" final/
+          cp MODEL-R2.txt final/
+          sha256sum "$ISO" | tee final/ISO-SHA256.txt
+          stat -c '%s' "$ISO" | tee final/ISO-SIZE.txt
+          cat > final/CERTIFICATION.txt <<'EOF'
+          Frames v108 Physical Input Repair r15 — Text Editing Physical Candidate
+          status=PASS_VM_PENDING_PHYSICAL
+          source_run=31969530813
+          model_contract_r2=PASS
+          vm_usb_direct=PASS
+          vm_usb_hub_child_hid=PASS
+          vm_usb_hub_keyboard_then_mouse=PASS
+          vm_ps2=PASS
+          vm_ps2_smoothness=PASS
+          vm_click_keyboard_text=PASS
+          vm_right_click_context=PASS
+          vm_text_ibeam=PASS
+          vm_text_caret=PASS
+          vm_text_caret_blink=PASS
+          vm_text_left_right_delete=PASS
+          readonly_internal_media=PASS
+          r13_physical_usb_mouse=FAIL_NO_CURSOR
+          r13_physical_touchpad=FAIL_JUMPBACK_REGRESSION
+          r13_physical_keyboard=PARTIAL_INPUT_DELIVERY
+          physical_r15=PENDING
+          destructive_writes=BLOCKED
+          Frames_1_0_promoted=false
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r15-Rufus-Final-r2
+          path: final/**
+          if-no-files-found: error
+          retention-days: 30
