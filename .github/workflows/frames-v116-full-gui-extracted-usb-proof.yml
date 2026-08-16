@@ -71,8 +71,8 @@ jobs:
           sudo mkfs.fat -F 32 -n FRAMES_USB "${LOOP}p1" > "$E/USB-FAT32-CREATE.log"
           sudo mkdir -p /mnt/frames-usb
           sudo mount "${LOOP}p1" /mnt/frames-usb
-          sudo cp -a "$ROOT/EFI" /mnt/frames-usb/EFI
-          sudo cp -a "$ROOT/FRAMES" /mnt/frames-usb/FRAMES
+          sudo cp -r "$ROOT/EFI" /mnt/frames-usb/EFI
+          sudo cp -r "$ROOT/FRAMES" /mnt/frames-usb/FRAMES
           sync
           find /mnt/frames-usb -maxdepth 3 -type f -printf '%P\n' | sort | sudo tee "$E/USB-FILE-TREE.txt" >/dev/null
           test -s /mnt/frames-usb/EFI/BOOT/BOOTX64.EFI
