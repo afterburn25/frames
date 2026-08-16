@@ -26,7 +26,6 @@ s=s.replace(old_sig,new_sig,1)
 old_call='xhci_address_hub_child_v113(xhci_state,phys_state,parent_slot,parent_root,parent_speed,p,speed)'
 if s.count(old_call)!=1: raise SystemExit('child call anchor mismatch')
 s=s.replace(old_call,'xhci_address_hub_child_v113(xhci_state,phys_state,p,speed)',1)
-# Fail closed if either repaired helper still exceeds the Nexus x64 four-parameter ABI.
 for name in ('usb_setup_value_v113','xhci_address_hub_child_v113'):
     m=re.search(r'fn '+name+r'\(([^)]*)\)',s)
     if not m: raise SystemExit(f'missing {name}')
@@ -34,3 +33,4 @@ for name in ('usb_setup_value_v113','xhci_address_hub_child_v113'):
     if len(params)>4: raise SystemExit(f'{name} still has {len(params)} params')
 p.write_text(s)
 out=hashlib.sha256(p.read_bytes()).hexdigest(); print(out)
+if out!='7bc6594c05e71d821a07275a7ded816869681fa2d328e64f18dee0ebd0f02ce9': raise SystemExit(f'unexpected hub-r3 output {out}')
