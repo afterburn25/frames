@@ -1,11 +1,25 @@
 #!/usr/bin/env python3
 import argparse,hashlib,json,pathlib,socket,subprocess,time
+from PIL import Image
+
+WHITE=(244,247,251)
+CURSOR_PATTERN=[(1,1),(1,2),(1,3),(1,4),(1,5),(3,5),(4,5),(1,6),(1,7),(1,8),(5,8),(6,8),(1,9),(1,10),(1,11),(1,12),(1,13)]
 
 def sha256(p):
     h=hashlib.sha256()
     with open(p,'rb') as f:
         for b in iter(lambda:f.read(1024*1024),b''): h.update(b)
     return h.hexdigest()
+
+def locate_cursor(im,cx=396,cy=290,radius=80):
+    cand=[]
+    for y in range(max(0,cy-radius),min(im.height-16,cy+radius)+1):
+        for x in range(max(0,cx-radius),min(im.width-8,cx+radius)+1):
+            if all(im.getpixel((x+dx,y+dy))==WHITE for dx,dy in CURSOR_PATTERN):
+                wc=sum(1 for yy in range(y,y+16) for xx in range(x,x+8) if im.getpixel((xx,yy))==WHITE)
+                cand.append((abs(x-cx)+abs(y-cy),abs(wc-17),x,y,wc))
+    if not cand:return None
+    cand.sort(); return (cand[0][2],cand[0][3])
 
 def main():
     ap=argparse.ArgumentParser(); ap.add_argument('--ovmf',required=True); ap.add_argument('--iso',required=True); ap.add_argument('--out',required=True); ap.add_argument('--expected-iso-sha',required=True)
@@ -31,6 +45,9 @@ def main():
                 if 'return' in r:return r['return']
                 if 'error' in r:raise RuntimeError(r['error'])
         def hmp(cmd): return call('human-monitor-command',{'command-line':cmd})
+        def capture(name):
+            ppm=out/(name+'.ppm'); call('screendump',{'filename':str(ppm)})
+            im=Image.open(ppm).convert('RGB'); im.save(out/(name+'.png')); ppm.unlink(); return im
         call('qmp_capabilities'); mice=call('query-mice'); (out/'query-mice.json').write_text(json.dumps(mice,indent=2)+'\n')
         idx=next((m['index'] for m in mice if 'ps/2' in m['name'].lower() or 'ps2' in m['name'].lower()),None)
         if idx is None: raise RuntimeError('PS2 pointer frontend missing')
@@ -41,27 +58,45 @@ def main():
                 result['runtime_ready']=True; break
             time.sleep(.1)
         if not result['runtime_ready']: raise RuntimeError('runtime readiness timeout')
-        def rel(dx,dy,delay=.025):
-            call('input-send-event',{'events':[{'type':'rel','data':{'axis':'x','value':dx}},{'type':'rel','data':{'axis':'y','value':dy}}]}); time.sleep(delay)
-        # Standard-PS/2 physical conversion is deliberately bounded/scaled. Large synthetic deltas
-        # can be rejected, so walk from the deterministic initial cursor (~396,290) into the
-        # 1280x800 INPUT TEST textbox (~x 60..640, y 556..604) using ordinary small packets.
-        for _ in range(78): rel(-6,0)
-        for _ in range(73): rel(0,6)
-        hmp(f'screendump {out}/HOVER.ppm')
-        # Hover must switch to I-beam before focus/click.
+
+        # Position using the same feedback-controlled standard-PS/2 path already used by
+        # the smoothness certifier. This avoids flooding i8042 and proves the real GUI cursor
+        # actually reaches the textbox before the I-beam assertion is evaluated.
+        time.sleep(.2); im=capture('START'); pos=locate_cursor(im)
+        if pos is None: raise RuntimeError('initial cursor not found')
+        result['initial_cursor']=list(pos)
+        for _ in range(3):
+            call('input-send-event',{'events':[{'type':'rel','data':{'axis':'x','value':1}}]}); time.sleep(.08)
+        im=capture('WARM'); warm=locate_cursor(im,pos[0]+2,pos[1],12)
+        if warm is None: raise RuntimeError('cursor missing after PS2 warm-up')
+        pos=warm
+        target_y=570
+        step_index=0
+        while pos[1] < target_y and step_index < 120:
+            req=min(3,target_y-pos[1])
+            call('input-send-event',{'events':[{'type':'rel','data':{'axis':'y','value':req}}]})
+            expected=(pos[0],pos[1]+req); moved=None
+            for _ in range(14):
+                time.sleep(.04)
+                ppm=out/'STEP.ppm'; call('screendump',{'filename':str(ppm)})
+                frame=Image.open(ppm).convert('RGB'); ppm.unlink()
+                moved=locate_cursor(frame,expected[0],expected[1],12)
+                if moved is None: moved=locate_cursor(frame,pos[0],pos[1],12)
+                if moved is not None and moved!=pos: break
+            if moved is None or moved==pos: raise RuntimeError(f'cursor failed while walking to textbox at {pos}')
+            if moved[1] <= pos[1]: raise RuntimeError(f'cursor wrong direction while walking to textbox {pos}->{moved}')
+            pos=moved; step_index+=1
+        result['textbox_hover_cursor']=list(pos)
+        result['textbox_walk_steps']=step_index
+        hover=capture('HOVER')
+        # x stays near 398 and y is now inside the textbox. The rendered cursor itself may be
+        # an I-beam, so the arrow-template locator is no longer used after this point.
         for _ in range(60):
             t=ser.read_text(errors='ignore') if ser.exists() else ''
             if 'FRAMES_V108_IBEAM_OK' in t: result['ibeam']=True; break
             time.sleep(.05)
-        if not result['ibeam']:
-            # Search a small rectangle around the expected textbox location using valid PS/2-sized moves.
-            for dy in (-6,6,-6,6):
-                for _ in range(8):
-                    rel(6,dy)
-                    t=ser.read_text(errors='ignore') if ser.exists() else ''
-                    if 'FRAMES_V108_IBEAM_OK' in t: result['ibeam']=True; break
-                if result['ibeam']: break
+        if not result['ibeam']: raise RuntimeError('I-beam marker not reached after verified textbox hover')
+
         call('input-send-event',{'events':[{'type':'btn','data':{'down':True,'button':'left'}}]}); time.sleep(.08)
         call('input-send-event',{'events':[{'type':'btn','data':{'down':False,'button':'left'}}]}); time.sleep(.12)
         # Exact editing proof: ABC -> Left -> Left -> Right -> Delete -> Backspace == A.
