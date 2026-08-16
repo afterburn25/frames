@@ -1,0 +1,369 @@
+name: Frames v108 Physical Input Repair r11 Rufus
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-physical-input-bringup ]
+    paths:
+      - '.github/workflows/frames-v108-physical-input-r11-rufus.yml'
+      - 'tools/ci/patch_v108_physical_input_r11_touch_usb.py'
+      - 'tools/ci/qemu_ps2_click_gate_r11.py'
+      - 'tools/ci/qemu_input_visual_gate_r10.py'
+      - 'tools/ci/qemu_ps2_cursor_smoothness_r10.py'
+
+permissions:
+  contents: read
+
+env:
+  KIT_SHA: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
+  SRC_SHA: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
+  BASE_SHA: ffc5721eca68844357dbdca63b0edf266e7e210f9d162eecde8cae0067f210a8
+  R2_SHA: 8cf33253489331e200643fa004992fece4eaf86b6feccaa3e00c06883927f675
+  R5_SHA: d0421388cd288a7073ca750915b1b51ceeee62acfe524a6785f855e42f9b1e7f
+  R6_SHA: de8cd41f707268bc0d7bb2ff5ef925ba0e8981650703afdb065b1a62a1d6cca1
+  R7P_SHA: b94070bfe399162a8bb5bef1694c92100716d500d9e85737896901ef3f5aa8e7
+  R7_SHA: d458aa61d92ff33bcf7e529354deec7cd345d5d96188c95b08842853fa3e3e2b
+  R8_SHA: b0e7893dea8306b44ea044b5e712fb4568223b5bdd599b9d369f19e523bad037
+  R9_SHA: 5b2384f8e128b1ec6922f34c14478918c3388179937c2000dd12135fefcf682c
+  R10_SHA: b2dee4fc2c1ca3ad68d4428febf564a2143948ee797ea74ee532ac87b2c14ab6
+  R11_SHA: 4e6b4fd0f4c44020099e2c097615d3b6f03e8e123763fd803c90eb1d40f3b016
+  ISO_NAME: Frames-0.9.98-v108-Physical-Input-Repair-r11-Rufus-UEFI.iso
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-physical-input-bringup
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 unzip mtools dosfstools gdisk xorriso
+      - name: Reconstruct exact certified v108 through r11
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/r11" evidence out payload
+          mkdir -p "$RUNNER_TEMP/r11/kit" "$RUNNER_TEMP/r11/src" evidence out payload
+          K=Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip
+          test "$(sha256sum "$K"|awk '{print $1}')" = "$KIT_SHA"
+          unzip -q "$K" -d "$RUNNER_TEMP/r11/kit"
+          Z="$RUNNER_TEMP/r11/kit/Frames-0.9.98-Source-v108.zip"
+          test "$(sha256sum "$Z"|awk '{print $1}')" = "$SRC_SHA"
+          unzip -q "$Z" -d "$RUNNER_TEMP/r11/src"
+          F="$RUNNER_TEMP/r11/src/Frames-0.9.98"
+          test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$BASE_SHA"
+          python3 tools/ci/patch_v108_live_input_common.py "$F/kernel/main.nx" >/dev/null
+          python3 tools/ci/patch_v108_usb_mouse_live.py "$F/kernel/main.nx" >/dev/null
+          python3 tools/ci/patch_v108_ps2_touchpad_live.py "$F/kernel/main.nx" >/dev/null
+          python3 tools/ci/patch_v108_input_telemetry_overlay.py "$F/kernel/main.nx" >/dev/null
+          python3 tools/ci/patch_v108_input_usbboot_gate_decouple.py "$F/kernel/main.nx" >/dev/null
+          test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$R2_SHA"
+          python3 tools/ci/patch_v108_physical_deep_telemetry.py "$F/kernel/main.nx" >/dev/null
+          test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$R5_SHA"
+          python3 tools/ci/patch_v108_stable_input_diag_runtime.py "$F/kernel/main.nx" >/dev/null
+          test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$R6_SHA"
+          python3 tools/ci/patch_v108_physical_input_r7.py "$F/kernel/main.nx" >/dev/null
+          test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$R7P_SHA"
+          python3 tools/ci/patch_v108_physical_input_r7_compilefix.py "$F/kernel/main.nx" >/dev/null
+          test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$R7_SHA"
+          python3 tools/ci/patch_v108_physical_input_r8_cursor_offsets.py "$F/kernel/main.nx" >/dev/null
+          test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$R8_SHA"
+          python3 tools/ci/patch_v108_physical_input_r9_protocol.py "$F/kernel/main.nx" >/dev/null
+          test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$R9_SHA"
+          python3 tools/ci/patch_v108_physical_input_r10_hwdecode.py "$F/kernel/main.nx" >/dev/null
+          test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$R10_SHA"
+          cp "$F/kernel/main.nx" evidence/kernel-r10.nx
+          python3 tools/ci/patch_v108_physical_input_r11_touch_usb.py "$F/kernel/main.nx" | tee evidence/R11-PATCH-OUTPUT.txt
+          actual_r11="$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')"
+          test "$actual_r11" = "$R11_SHA"
+          printf '%s\n' "$actual_r11" > evidence/R11-SHA.txt
+          cp "$F/kernel/main.nx" evidence/kernel-r11.nx
+          diff -u evidence/kernel-r10.nx evidence/kernel-r11.nx > evidence/R10-R11.patch || true
+          grep -Fq 'if maxslots>32 { maxslots=32; }' "$F/kernel/main.nx"
+          grep -Fq 'usb_scan_tries<32' "$F/kernel/main.nx"
+          grep -Fq 'fn ps2_elan4_buttons_v111' "$F/kernel/main.nx"
+          grep -Fq 'FRAMES_V108_GUI_CLICK_OK' <(strings "$F/kernel/main.nx") || grep -Fq 'serial_marker_v108_gui_click_ok' "$F/kernel/main.nx"
+          grep -Fq 'var sx=(ax+3)/4' "$F/kernel/main.nx"
+          echo "F=$F" >> "$GITHUB_ENV"
+      - name: Audit destructive write surface
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          d=Path('evidence/R10-R11.patch').read_text(errors='replace').lower()
+          forbidden=['nvme_write','storage_write','write10','write(10)','scsi_write','fat_write','block_write','destructive_write','physical_write_enable']
+          hits=[x for x in forbidden if x in d]
+          Path('evidence/WRITE-SURFACE.txt').write_text('status='+('PASS' if not hits else 'FAIL')+'\nhits='+','.join(hits)+'\n')
+          if hits: raise SystemExit(hits)
+          PY
+      - name: Build exact r11 and package Rufus UEFI ISO
+        run: |
+          set -euo pipefail
+          find "$F" -type f -name '*.sh' -exec chmod +x {} +
+          find "$F/toolchain" -type f -name nexus -exec chmod +x {} +
+          cd "$F"
+          ./tools/build.sh
+          python3 tools/make_esp.py
+          python3 tools/sdk_selftest.py
+          python3 tools/make_desktop_preview_image.py
+          python3 tools/verify_desktop_preview_image.py --image build/Frames-0.9.98-Desktop-Preview.img --require-pass
+          python3 tools/verify_release.py
+          cp build/Frames-0.9.98-Desktop-Preview.img "$GITHUB_WORKSPACE/out/raw.img"
+          sha256sum build/FramesKernel.fkrn build/BOOTX64.EFI build/System.fex | tee "$GITHUB_WORKSPACE/evidence/BINARY-SHA256.txt"
+          cd "$GITHUB_WORKSPACE"
+          FIRST="$(sgdisk -i 1 out/raw.img|awk -F: '/First sector/{gsub(/ /,"",$2);split($2,a,"(");print a[1]}')"
+          LAST="$(sgdisk -i 1 out/raw.img|awk -F: '/Last sector/{gsub(/ /,"",$2);split($2,a,"(");print a[1]}')"
+          dd if=out/raw.img of=out/esp.img bs=512 skip="$FIRST" count=$((LAST-FIRST+1)) status=none
+          mcopy -s -i out/esp.img '::/EFI' payload/
+          mcopy -s -i out/esp.img '::/FRAMES' payload/
+          test -s payload/EFI/BOOT/BOOTX64.EFI
+          test -s payload/FRAMES/FramesKernel.fkrn
+          sha256sum payload/EFI/BOOT/BOOTX64.EFI payload/FRAMES/* > evidence/PAYLOAD-SHA256.txt
+          dd if=/dev/zero of=out/efiboot.img bs=1M count=16 status=none
+          mkfs.fat -F 16 -n FRAMESBOOT out/efiboot.img
+          mmd -i out/efiboot.img ::/EFI ::/EFI/BOOT ::/FRAMES
+          mcopy -i out/efiboot.img payload/EFI/BOOT/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
+          for f in payload/FRAMES/*; do mcopy -i out/efiboot.img "$f" ::/FRAMES/; done
+          ROOT="$RUNNER_TEMP/r11-root"; rm -rf "$ROOT"; mkdir -p "$ROOT"
+          cp out/efiboot.img "$ROOT/"; cp -a payload/EFI payload/FRAMES "$ROOT/"
+          printf 'Frames v108 r11 physical input repair\nRufus: ISO Image mode\nRead-only diagnostic only\n' > "$ROOT/README.TXT"
+          xorriso -as mkisofs -iso-level 3 -R -J -V FRAMES_V108_R11 -eltorito-alt-boot -e efiboot.img -no-emul-boot -o "out/$ISO_NAME" "$ROOT"
+          sha256sum "out/$ISO_NAME" | tee evidence/ISO-SHA256.txt
+          stat -c '%s' "out/$ISO_NAME" | tee evidence/ISO-SIZE.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r11-Candidate
+          path: |
+            out/${{ env.ISO_NAME }}
+            evidence/**
+          if-no-files-found: error
+          retention-days: 30
+
+  input:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [usb, ps2]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-physical-input-bringup
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r11-Candidate
+          path: candidate
+      - name: Install QEMU runtime tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf python3 python3-pil
+          O="$(find /usr/share/OVMF -type f \( -name OVMF_CODE_4M.fd -o -name OVMF_CODE.fd \)|head -n1)"
+          test -s "$O"; echo "OVMF=$O" >> "$GITHUB_ENV"
+      - name: Boot exact ISO and prove stable ${{ matrix.lane }} input
+        run: |
+          set -euo pipefail
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"; test -s "$ISO"
+          EXPECT="$(awk '{print $1}' candidate/evidence/ISO-SHA256.txt)"
+          mkdir -p "evidence-${{ matrix.lane }}"
+          python3 tools/ci/qemu_input_visual_gate_r10.py --ovmf "$OVMF" --iso "$ISO" --lane '${{ matrix.lane }}' --out "evidence-${{ matrix.lane }}" --expected-iso-sha "$EXPECT"
+          grep -q '"status": "PASS"' "evidence-${{ matrix.lane }}/RUNTIME.json"
+          sha256sum "evidence-${{ matrix.lane }}"/* > "evidence-${{ matrix.lane }}/SHA256SUMS.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Frames-v108-r11-${{ matrix.lane }}-Evidence
+          path: evidence-${{ matrix.lane }}/**
+          if-no-files-found: warn
+          retention-days: 30
+
+  smoothness:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-physical-input-bringup
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r11-Candidate
+          path: candidate
+      - name: Install QEMU smoothness tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf python3 python3-pil
+          O="$(find /usr/share/OVMF -type f \( -name OVMF_CODE_4M.fd -o -name OVMF_CODE.fd \)|head -n1)"
+          test -s "$O"; echo "OVMF=$O" >> "$GITHUB_ENV"
+      - name: Quantitative standard PS2 cursor smoothness regression
+        run: |
+          set -euo pipefail
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"; test -s "$ISO"
+          EXPECT="$(awk '{print $1}' candidate/evidence/ISO-SHA256.txt)"
+          mkdir -p smoothness
+          python3 tools/ci/qemu_ps2_cursor_smoothness_r10.py --ovmf "$OVMF" --iso "$ISO" --out smoothness --expected-iso-sha "$EXPECT"
+          grep -q '"status": "PASS"' smoothness/SMOOTHNESS.json
+          sha256sum smoothness/* > smoothness/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Frames-v108-r11-PS2-Smoothness-Evidence
+          path: smoothness/**
+          if-no-files-found: warn
+          retention-days: 30
+
+  click:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-physical-input-bringup
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r11-Candidate
+          path: candidate
+      - name: Install QEMU click tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf python3
+          O="$(find /usr/share/OVMF -type f \( -name OVMF_CODE_4M.fd -o -name OVMF_CODE.fd \)|head -n1)"
+          test -s "$O"; echo "OVMF=$O" >> "$GITHUB_ENV"
+      - name: Prove PS2 button reaches GUI click layer
+        run: |
+          set -euo pipefail
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"; test -s "$ISO"
+          EXPECT="$(awk '{print $1}' candidate/evidence/ISO-SHA256.txt)"
+          mkdir -p click
+          python3 tools/ci/qemu_ps2_click_gate_r11.py --ovmf "$OVMF" --iso "$ISO" --out click --expected-iso-sha "$EXPECT"
+          grep -q '"status": "PASS"' click/CLICK.json
+          sha256sum click/* > click/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Frames-v108-r11-Click-Evidence
+          path: click/**
+          if-no-files-found: warn
+          retention-days: 30
+
+  model:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r11-Candidate
+          path: candidate
+      - name: Verify r11 source/model contract
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n' < candidate/evidence/R11-SHA.txt)" = "$R11_SHA"
+          K=candidate/evidence/kernel-r11.nx
+          grep -Fq 'if maxslots>32 { maxslots=32; }' "$K"
+          grep -Fq 'usb_scan_tries<32' "$K"
+          grep -Fq 'fn ps2_elan4_buttons_v111' "$K"
+          grep -Fq 'var sx=(ax+3)/4' "$K"
+          grep -Fq 'serial_marker_v108_gui_click_ok' "$K"
+          grep -Fq 'fn ps2_elan4_selftest_v110' "$K"
+          printf 'status=PASS\nr11_source=%s\nusb_slot_cap=32\nusb_scan_cap=32\nelan_gain=quarter\nclick_delivery_instrumented=PASS\n' "$R11_SHA" > MODEL.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r11-Model-Evidence
+          path: MODEL.txt
+          retention-days: 30
+
+  safety:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r11-Candidate
+          path: candidate
+      - name: Read-only internal-media sentinel gate
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf
+          O="$(find /usr/share/OVMF -type f \( -name OVMF_CODE_4M.fd -o -name OVMF_CODE.fd \)|head -n1)"
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"; test -s "$ISO"
+          mkdir safety; truncate -s 32M safety/sentinel.img
+          before="$(sha256sum safety/sentinel.img|awk '{print $1}')"
+          set +e
+          timeout 90 qemu-system-x86_64 -machine q35 -m 768M -smp 2 -cpu max -accel tcg,thread=single -display none -no-reboot -no-shutdown -nic none -serial file:safety/serial.log -drive if=pflash,format=raw,readonly=on,file="$O" -cdrom "$ISO" -boot d -drive file=safety/sentinel.img,if=none,format=raw,readonly=on,id=s -device nvme,drive=s,serial=R11_SENTINEL >/dev/null 2>safety/stderr
+          rc=$?
+          set -e
+          after="$(sha256sum safety/sentinel.img|awk '{print $1}')"
+          test "$before" = "$after"
+          grep -q 'FRAMES_V108_INPUT_TEST_RUNTIME_READY' safety/serial.log
+          printf 'status=PASS\nqemu_rc=%s\nbefore=%s\nafter=%s\n' "$rc" "$before" "$after" > safety/RESULT.txt
+          sha256sum safety/* > safety/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r11-ReadOnly-Safety
+          path: safety/**
+          if-no-files-found: error
+          retention-days: 30
+
+  final:
+    needs: [build, input, smoothness, click, model, safety]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r11-Candidate
+          path: candidate
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: 'Frames-v108-r11-*-Evidence'
+          path: evidence
+          merge-multiple: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r11-ReadOnly-Safety
+          path: evidence/read-only-safety
+      - name: Seal exact candidate only after all gates pass
+        run: |
+          set -euo pipefail
+          mkdir final
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"; test -s "$ISO"
+          test "$(tr -d '\r\n' < candidate/evidence/R11-SHA.txt)" = "$R11_SHA"
+          grep -R -q '"status": "PASS"' evidence/Frames-v108-r11-usb-Evidence
+          grep -R -q '"status": "PASS"' evidence/Frames-v108-r11-ps2-Evidence
+          grep -R -q '"status": "PASS"' evidence/Frames-v108-r11-PS2-Smoothness-Evidence
+          grep -R -q '"status": "PASS"' evidence/Frames-v108-r11-Click-Evidence
+          grep -R -q '^status=PASS$' evidence/Frames-v108-r11-Model-Evidence
+          grep -R -q '^status=PASS$' evidence/read-only-safety
+          cp "$ISO" final/
+          sha256sum "$ISO" | tee final/ISO-SHA256.txt
+          stat -c '%s' "$ISO" | tee final/ISO-SIZE.txt
+          cat > final/CERTIFICATION.txt <<'EOF'
+          Frames v108 Physical Input Repair r11
+          status=PASS
+          exact_source_hash=PASS
+          vm_usb_live_input=PASS
+          vm_ps2_live_input=PASS
+          vm_ps2_cursor_smoothness=PASS
+          vm_ps2_button_to_gui_click=PASS
+          r11_model_contract=PASS
+          readonly_internal_media=PASS
+          physical_r10_touchpad_direction_and_smoothness=PASS_WITH_LOW_SENSITIVITY
+          physical_r11_touchpad_gain=PENDING_USER_HARDWARE
+          physical_r11_touchpad_click=PENDING_USER_HARDWARE
+          physical_r11_usb=PENDING_USER_HARDWARE
+          physical_destructive_writes=BLOCKED
+          EOF
+          sha256sum final/* > final/FINAL-SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r11-Rufus-Final
+          path: final/**
+          if-no-files-found: error
+          retention-days: 30
