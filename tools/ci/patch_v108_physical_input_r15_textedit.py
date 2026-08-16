@@ -22,10 +22,11 @@ def marker_fn(name,text):
 
 # r15 text-edit state slots in the unused tail of the one-page input state.
 # 3976 caret index, 3984 blink phase, 3992 blink TSC, 4000 I-beam marker guard,
-# 4008 caret marker guard, 4016 left count, 4024 right count, 4032 delete count.
+# 4008 caret marker guard, 4016 left count, 4024 right count, 4032 delete count, 4040 blink marker guard.
 insert=s.index('fn v108_input_test_draw')
 helpers = marker_fn('serial_marker_v108_text_ibeam_ok','FRAMES_V108_TEXT_IBEAM_OK')
 helpers += marker_fn('serial_marker_v108_text_caret_ok','FRAMES_V108_TEXT_CARET_OK')
+helpers += marker_fn('serial_marker_v108_text_blink_ok','FRAMES_V108_TEXT_CARET_BLINK_OK')
 helpers += marker_fn('serial_marker_v108_text_left_ok','FRAMES_V108_TEXT_LEFT_OK')
 helpers += marker_fn('serial_marker_v108_text_right_ok','FRAMES_V108_TEXT_RIGHT_OK')
 helpers += marker_fn('serial_marker_v108_text_delete_ok','FRAMES_V108_TEXT_DELETE_OK')
@@ -65,29 +66,24 @@ fn v108_input_test_key_v115(input_state:u64,sc:u64) -> u64 {
 '''
 s=s[:insert]+helpers+s[insert:]
 
-# Draw text plus a true insertion caret at the current edit position.
 old='''    let len=volatile_read64(input_state+3680); var i:u64=0; while i<len && i<64 { let c=volatile_read8(input_state+3776+i); if c>=32 && c<=126 { gui_draw_char_scaled(surface,((x+30+(i*8))*65536)+(y+78),(c*65536)+1,white); } i=i+1; }'''
 new='''    let len=volatile_read64(input_state+3680); var i:u64=0; while i<len && i<64 { let c=volatile_read8(input_state+3776+i); if c>=32 && c<=126 { gui_draw_char_scaled(surface,((x+30+(i*8))*65536)+(y+78),(c*65536)+1,white); } i=i+1; }
     if volatile_read64(input_state+3672)!=0 { var caret=volatile_read64(input_state+3976); if caret>len { caret=len; unsafe { volatile_write64(input_state+3976,caret); } } if volatile_read64(input_state+3984)!=0 { let caret_x=x+30+(caret*8); display_fill_rect(surface,(caret_x*65536)+(y+75),(2*65536)+20,white); if volatile_read64(input_state+4008)==0 { unsafe { volatile_write64(input_state+4008,1); } serial_marker_v108_text_caret_ok(); } } }'''
 assert s.count(old)==1
 s=s.replace(old,new,1)
 
-# Input-test redraws use the context-sensitive pointer shape.
 s=s.replace('if v108_cursor_capture(cursor,surface,cx,cy)==0 { return 0; } if desktop_draw_cursor(surface,cx,cy)==0 { return 0; }','if v108_cursor_capture(cursor,surface,cx,cy)==0 { return 0; } if v108_input_pointer_draw_v115(surface,state,input_state)==0 { return 0; }',1)
 
-# Clicking the text box positions the caret approximately under the click and starts blink visibly.
 old='''    if x>=60 && x<640 && y>=py+62 && y<py+110 { unsafe { volatile_write64(input_state+3672,1); } return 1; }'''
 new='''    if x>=60 && x<640 && y>=py+62 && y<py+110 { let len=volatile_read64(input_state+3680); var caret:u64=0; if x>70 { caret=(x-70)/8; } if caret>len { caret=len; } unsafe { volatile_write64(input_state+3672,1); volatile_write64(input_state+3976,caret); } v108_input_text_reset_blink_v115(input_state); return 1; }'''
 assert s.count(old)==1
 s=s.replace(old,new,1)
 
-# Clear also resets edit position and immediately shows the caret.
 old='''if x>=250 && x<380 && y>=py+132 && y<py+180 { var i:u64=0; while i<64 { unsafe { volatile_write8(input_state+3776+i,0); } i=i+1; } unsafe { volatile_write64(input_state+3680,0); volatile_write64(input_state+3672,1); } return 1; }'''
 new='''if x>=250 && x<380 && y>=py+132 && y<py+180 { var i:u64=0; while i<64 { unsafe { volatile_write8(input_state+3776+i,0); } i=i+1; } unsafe { volatile_write64(input_state+3680,0); volatile_write64(input_state+3672,1); volatile_write64(input_state+3976,0); } v108_input_text_reset_blink_v115(input_state); return 1; }'''
 assert s.count(old)==1
 s=s.replace(old,new,1)
 
-# Replace append-only textbox editing with insertion/backspace-at-caret semantics.
 new_char=r'''fn v108_input_test_char_v112(input_state:u64,ascii:u64) -> u64 {
     if input_state==0 || volatile_read64(input_state+3672)==0 { return 0; } var len=volatile_read64(input_state+3680); var caret=volatile_read64(input_state+3976); if caret>len { caret=len; }
     if ascii==8 {
@@ -101,13 +97,11 @@ new_char=r'''fn v108_input_test_char_v112(input_state:u64,ascii:u64) -> u64 {
 }'''
 repl_fn('fn v108_input_test_char_v112',new_char)
 
-# Raw PS/2 key-down events now drive caret navigation/delete before the printable ASCII event path.
 old='''                if kind==7 { if value!=0 { gui_input_dispatch(state,wm,event,surface); } telemetry_redraw=1; }'''
 new='''                if kind==7 { if value!=0 { gui_input_dispatch(state,wm,event,surface); if v108_input_test_key_v115(input_state,code)!=0 { test_redraw=1; } } telemetry_redraw=1; }'''
 assert s.count(old)==1
 s=s.replace(old,new,1)
 
-# Draw the I-beam during live pointer movement, and blink the caret while idle.
 old='''            v108_cursor_restore(cursor,surface); cursor_move(cursor,surface,(newx*65536)+newy); v108_cursor_capture(cursor,surface,newx,newy); desktop_draw_cursor(surface,newx,newy); v108_cursor_present(process,(oldx*65536)+oldy,(newx*65536)+newy); if volatile_read64(input_state+3336)==0 { unsafe { volatile_write64(input_state+3336,1); } serial_marker_v108_physical_cursor_visible_ok(); }'''
 new='''            v108_cursor_restore(cursor,surface); cursor_move(cursor,surface,(newx*65536)+newy); v108_cursor_capture(cursor,surface,newx,newy); v108_input_pointer_draw_v115(surface,state,input_state); v108_cursor_present(process,(oldx*65536)+oldy,(newx*65536)+newy); if volatile_read64(input_state+3336)==0 { unsafe { volatile_write64(input_state+3336,1); } serial_marker_v108_physical_cursor_visible_ok(); }'''
 assert s.count(old)==1
@@ -116,7 +110,7 @@ s=s.replace(old,new,1)
 old='''        if test_redraw!=0 { if v108_input_test_present(process,state,input_state,cursor)==0 { return 0; } }
         if telemetry_redraw!=0 { if v108_input_overlay_present(process,state,input_state,xhci)==0 { return 0; } }
         cpu_pause();'''
-new='''        if volatile_read64(input_state+3672)!=0 { let now=read_tsc(); let then=volatile_read64(input_state+3992); if then==0 { unsafe { volatile_write64(input_state+3992,now); volatile_write64(input_state+3984,1); } } else { if now>then && now-then>600000000 { let phase=volatile_read64(input_state+3984); var next:u64=1; if phase!=0 { next=0; } unsafe { volatile_write64(input_state+3984,next); volatile_write64(input_state+3992,now); } test_redraw=1; } } }
+new='''        if volatile_read64(input_state+3672)!=0 { let now=read_tsc(); let then=volatile_read64(input_state+3992); if then==0 { unsafe { volatile_write64(input_state+3992,now); volatile_write64(input_state+3984,1); } } else { if now>then && now-then>600000000 { let phase=volatile_read64(input_state+3984); var next:u64=1; if phase!=0 { next=0; } unsafe { volatile_write64(input_state+3984,next); volatile_write64(input_state+3992,now); } if volatile_read64(input_state+4040)==0 { unsafe { volatile_write64(input_state+4040,1); } serial_marker_v108_text_blink_ok(); } test_redraw=1; } } }
         if test_redraw!=0 { if v108_input_test_present(process,state,input_state,cursor)==0 { return 0; } }
         if telemetry_redraw!=0 { if v108_input_overlay_present(process,state,input_state,xhci)==0 { return 0; } }
         cpu_pause();'''
@@ -125,4 +119,4 @@ s=s.replace(old,new,1)
 
 p.write_text(s)
 out=hashlib.sha256(p.read_bytes()).hexdigest(); print(out)
-if out!='d00b2e0f7fbca33c2a61b7181e539e3bd64fb7677e822c70b0a799853b8111e7': raise SystemExit(f'unexpected r15 source hash {out}')
+if out!='fa0f42f558f0004f7663f79b49c3049c57c896203cf18646b1ec6f999824f941': raise SystemExit(f'unexpected r15 source hash {out}')
