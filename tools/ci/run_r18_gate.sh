@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 lane="$1"; cand="$2"; ovmf="${3:-}"
+if [[ "$lane" != model && -z "$ovmf" ]]; then ovmf="$(find /usr/share/OVMF -type f \( -name OVMF_CODE_4M.fd -o -name OVMF_CODE.fd \) | head -n1)"; test -s "$ovmf"; fi
 ISO_NAME=Frames-0.9.98-v108-Physical-Input-Repair-r18-USB-xHCI-Menu-Stability-Rufus-UEFI.iso
 R18_SHA=dd0386720bba6dce4c1fd0576e995dd6a2932638633147914589b342cc3dfe22
 mkdir -p gate; ISO="$(find "$cand" -name "$ISO_NAME" -type f -print -quit)"; test -s "$ISO"; EXPECT="$(awk '{print $1}' "$cand/evidence/ISO-SHA256.txt")"; test "$(sha256sum "$ISO"|awk '{print $1}')" = "$EXPECT"
