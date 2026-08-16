@@ -1,0 +1,210 @@
+name: Frames v116 Full GUI Physical Media Compatibility
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ physical-hardware-full-gui-validation ]
+    paths:
+      - '.github/workflows/frames-v116-full-gui-physical-media-compatibility.yml'
+      - 'bootux/**'
+      - 'physical-validation/**'
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CERTIFIED_RUN_ID: '31923853583'
+  CERTIFIED_ISO_SHA256: 'abeead78504b6562ee6ecef47027c95803594dd21527cfc3120205a5ef9b7068'
+  APPROVED_SPLASH_SHA256: '70e9ca0c9e31b56b720f3cf0bd22c5eacc35b51797782ad0f03172c2038b9fbd'
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  certify-physical-media-compatibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: physical-hardware-full-gui-validation
+
+      - name: Install media and proof tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y xorriso qemu-system-x86 ovmf netcat-openbsd mtools python3 python3-pil
+
+      - name: Download exact certified full-GUI ISO
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p input physical-media-evidence
+          gh run download "$CERTIFIED_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name Frames-0.9.106-v116-Full-Interactive-Desktop-GUI-UEFI-ISO \
+            --dir input
+          IN="$(find input -type f -name '*.iso' -print -quit)"
+          test -s "$IN"
+          ACTUAL="$(sha256sum "$IN" | awk '{print $1}')"
+          test "$ACTUAL" = "$CERTIFIED_ISO_SHA256"
+          printf '%s  %s\n' "$ACTUAL" "$IN" > physical-media-evidence/INPUT-CERTIFIED-ISO-SHA256.txt
+          echo "INPUT_ISO=$(readlink -f "$IN")" >> "$GITHUB_ENV"
+
+      - name: Reconstruct ISO-level UEFI and Frames trees from certified EFI payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/physical-media-evidence"
+          ROOT="$RUNNER_TEMP/iso-root"; EFI_BOOT="$RUNNER_TEMP/certified-efiboot.img"
+          mkdir -p "$ROOT/EFI/BOOT" "$ROOT/FRAMES"
+          xorriso -osirrox on -indev "$INPUT_ISO" -extract /EFI/efiboot.img "$EFI_BOOT" > "$E/EXTRACT-EFIBOOT.log" 2>&1
+          test -s "$EFI_BOOT"
+          mdir -i "$EFI_BOOT" ::/EFI/BOOT/BOOTX64.EFI > "$E/EMBEDDED-EFI-DIRECTORY.txt"
+          mdir -i "$EFI_BOOT" ::/FRAMES > "$E/EMBEDDED-FRAMES-DIRECTORY.txt"
+          mcopy -o -i "$EFI_BOOT" ::/EFI/BOOT/BOOTX64.EFI "$ROOT/EFI/BOOT/BOOTX64.EFI"
+          for f in FramesKernel.fkrn System.fex DESKTOP.CFG HELLO.FAP THEME.FTH APPEAR.CFG GUITEST.CFG SPLASH.FSP BOOTSTAT.TXT; do
+            mcopy -o -i "$EFI_BOOT" "::/FRAMES/$f" "$ROOT/FRAMES/$f"
+          done
+          test "$(sha256sum "$ROOT/FRAMES/SPLASH.FSP" | awk '{print $1}')" = "$APPROVED_SPLASH_SHA256"
+          cp "$EFI_BOOT" "$ROOT/EFI/efiboot.img"
+          cat > "$ROOT/README.TXT" <<'EOF'
+          Frames v116 Full Interactive Desktop GUI physical-test media.
+          ISO-level EFI/BOOT and FRAMES trees are included for broad UEFI/USB-authoring compatibility.
+          Physical destructive writes remain uncertified and blocked.
+          EOF
+          sha256sum "$ROOT/EFI/BOOT/BOOTX64.EFI" "$ROOT/FRAMES"/* > "$E/ISO-LEVEL-PAYLOAD-SHA256.txt"
+          echo "ISO_ROOT=$ROOT" >> "$GITHUB_ENV"
+          echo "EFI_BOOT=$EFI_BOOT" >> "$GITHUB_ENV"
+
+      - name: Build UEFI DVD plus extractable USB-compatible ISO
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/physical-media-evidence"
+          OUT="$GITHUB_WORKSPACE/Frames-0.9.106-v116-Full-Interactive-Desktop-GUI-USB-Compatible-UEFI.iso"
+          xorriso -as mkisofs -iso-level 3 -R -J -V FRAMES_FULL_GUI \
+            -eltorito-alt-boot -e EFI/efiboot.img -no-emul-boot \
+            -o "$OUT" "$ISO_ROOT" 2>&1 | tee "$E/ISO-BUILD.log"
+          test -s "$OUT"
+          ! grep -q 'no directory /EFI/BOOT' "$E/ISO-BUILD.log"
+          xorriso -indev "$OUT" -report_el_torito plain > "$E/EL-TORITO-REPORT.txt" 2>&1
+          grep -qi 'UEFI' "$E/EL-TORITO-REPORT.txt"
+          xorriso -indev "$OUT" -find /EFI/BOOT -type f -exec lsdl > "$E/ISO-EFI-BOOT-TREE.txt" 2>&1
+          xorriso -indev "$OUT" -find /FRAMES -type f -exec lsdl > "$E/ISO-FRAMES-TREE.txt" 2>&1
+          grep -q 'BOOTX64.EFI' "$E/ISO-EFI-BOOT-TREE.txt"
+          for f in FramesKernel.fkrn System.fex DESKTOP.CFG HELLO.FAP THEME.FTH APPEAR.CFG GUITEST.CFG SPLASH.FSP; do grep -q "$f" "$E/ISO-FRAMES-TREE.txt"; done
+          sha256sum "$OUT" | tee "$E/USB-COMPATIBLE-ISO-SHA256.txt"
+          echo "ISO=$(readlink -f "$OUT")" >> "$GITHUB_ENV"
+
+      - name: Verify ISO-level payload is byte-identical to certified EFI payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/physical-media-evidence"; X="$RUNNER_TEMP/extracted-tree"
+          mkdir -p "$X/EFI/BOOT" "$X/FRAMES"
+          xorriso -osirrox on -indev "$ISO" -extract /EFI/BOOT/BOOTX64.EFI "$X/EFI/BOOT/BOOTX64.EFI" >/dev/null 2>&1
+          for f in FramesKernel.fkrn System.fex DESKTOP.CFG HELLO.FAP THEME.FTH APPEAR.CFG GUITEST.CFG SPLASH.FSP BOOTSTAT.TXT; do
+            xorriso -osirrox on -indev "$ISO" -extract "/FRAMES/$f" "$X/FRAMES/$f" >/dev/null 2>&1
+          done
+          cmp "$X/EFI/BOOT/BOOTX64.EFI" "$ISO_ROOT/EFI/BOOT/BOOTX64.EFI"
+          for f in FramesKernel.fkrn System.fex DESKTOP.CFG HELLO.FAP THEME.FTH APPEAR.CFG GUITEST.CFG SPLASH.FSP BOOTSTAT.TXT; do cmp "$X/FRAMES/$f" "$ISO_ROOT/FRAMES/$f"; done
+          sha256sum "$X/EFI/BOOT/BOOTX64.EFI" "$X/FRAMES"/* > "$E/EXTRACTED-ISO-PAYLOAD-SHA256.txt"
+
+      - name: Locate OVMF
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=''; vars=''
+          for p in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd; do [ -f "$p" ] && code="$p" && break; done
+          for p in /usr/share/OVMF/OVMF_VARS_4M.fd /usr/share/OVMF/OVMF_VARS.fd; do [ -f "$p" ] && vars="$p" && break; done
+          test -n "$code"; test -n "$vars"
+          echo "OVMF_CODE=$code" >> "$GITHUB_ENV"; echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"
+
+      - name: Boot exact USB-compatible ISO and prove splash to full GUI
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/physical-media-evidence"; MON="$RUNNER_TEMP/media-mon.sock"; SERIAL="$E/ISO-SERIAL.log"
+          cp "$OVMF_VARS" "$RUNNER_TEMP/media-vars.fd"; rm -f "$MON"
+          qemu-system-x86_64 -machine q35 -m 1024 -smp 2 \
+            -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
+            -drive if=pflash,format=raw,file="$RUNNER_TEMP/media-vars.fd" \
+            -cdrom "$ISO" -boot d -serial file:"$SERIAL" \
+            -monitor unix:"$MON",server=on,wait=off -display none -vga std -no-reboot &
+          PID=$!; trap 'kill $PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 80); do [ -S "$MON" ] && break; sleep 0.1; done; test -S "$MON"
+          python3 - "$MON" "$E" <<'PY'
+          import socket,sys,time,pathlib
+          s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect(sys.argv[1]); s.settimeout(.05)
+          try:s.recv(4096)
+          except Exception:pass
+          out=pathlib.Path(sys.argv[2])
+          for i in range(55):
+              s.sendall(f'screendump {out}/SPLASH-{i:02d}.ppm\n'.encode()); time.sleep(.15)
+          s.close()
+          PY
+          python3 bootux/verify_splash_frame.py "$E"/SPLASH-*.ppm | tee "$E/SPLASH-PROOF.json"
+          WIN="$(python3 -c 'import json;print(json.load(open("physical-media-evidence/SPLASH-PROOF.json"))["winner"]["file"])')"
+          cp "$E/$WIN" "$E/BOOT-SPLASH.ppm"; rm -f "$E"/SPLASH-[0-9][0-9].ppm
+          found=0; for i in $(seq 1 85); do if [ -s "$SERIAL" ] && grep -q 'FRAMES_FULL_INTERACTIVE_DESKTOP_OK' "$SERIAL"; then found=1; break; fi; sleep 1; done; test "$found" = 1
+          for m in FRAMES_KERNEL_START FRAMES_USB_MIGRATION_RUNTIME_V9_OK FRAMES_DESKTOP_PHASE12_OK FRAMES_APPEARANCE_SYSTEM_OK FRAMES_FULL_GUI_WINDOWS_OK FRAMES_FULL_GUI_INPUT_OK FRAMES_FULL_GUI_FILEMAN_OK FRAMES_FULL_GUI_SETTINGS_OK FRAMES_FULL_INTERACTIVE_DESKTOP_OK FRAMES_INTEGRATED_GUI_OK FRAMES_GUI_PHYSICAL_TEST_READY; do grep -q "$m" "$SERIAL"; done
+          ! grep -q 'FRAMES_DESKTOP_CERT_FAIL' "$SERIAL"
+          printf 'screendump %s\nquit\n' "$E/FULL-DESKTOP.ppm" | nc -U "$MON" >/dev/null 2>&1 || true
+          wait "$PID" || true; trap - EXIT
+          test -s "$E/FULL-DESKTOP.ppm"
+          python3 bootux/verify_full_desktop_frame.py "$E/FULL-DESKTOP.ppm" | tee "$E/FULL-DESKTOP-VISUAL.json"
+          python3 bootux/verify_gui_transition_frame.py "$E/BOOT-SPLASH.ppm" "$E/FULL-DESKTOP.ppm" | tee "$E/SPLASH-TO-FULL-GUI.json"
+
+      - name: Final fail-closed physical-media certification
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/physical-media-evidence"
+          python3 - "$E" "$ISO" <<'PY'
+          import hashlib,json,pathlib,sys
+          e=pathlib.Path(sys.argv[1]); iso=pathlib.Path(sys.argv[2])
+          visual=json.loads((e/'FULL-DESKTOP-VISUAL.json').read_text())
+          transition=json.loads((e/'SPLASH-TO-FULL-GUI.json').read_text())
+          serial=(e/'ISO-SERIAL.log').read_text(errors='replace')
+          checks={
+            'input_certified_iso_exact': 'abeead78504b6562ee6ecef47027c95803594dd21527cfc3120205a5ef9b7068' in (e/'INPUT-CERTIFIED-ISO-SHA256.txt').read_text(),
+            'iso_level_efi_boot_tree': 'BOOTX64.EFI' in (e/'ISO-EFI-BOOT-TREE.txt').read_text(),
+            'iso_level_frames_tree': 'SPLASH.FSP' in (e/'ISO-FRAMES-TREE.txt').read_text() and 'DESKTOP.CFG' in (e/'ISO-FRAMES-TREE.txt').read_text(),
+            'approved_splash_exact': hashlib.sha256((pathlib.Path(__import__('os').environ['ISO_ROOT'])/'FRAMES/SPLASH.FSP').read_bytes()).hexdigest()=='70e9ca0c9e31b56b720f3cf0bd22c5eacc35b51797782ad0f03172c2038b9fbd',
+            'full_desktop_visual': visual.get('status')=='PASS',
+            'splash_to_gui_transition': transition.get('status')=='PASS',
+            'runtime_full_gui': 'FRAMES_FULL_INTERACTIVE_DESKTOP_OK' in serial and 'FRAMES_INTEGRATED_GUI_OK' in serial,
+            'no_desktop_cert_fail': 'FRAMES_DESKTOP_CERT_FAIL' not in serial,
+            'legacy_missing_efi_tree_warning_absent': 'no directory /EFI/BOOT' not in (e/'ISO-BUILD.log').read_text(errors='replace')
+          }
+          status='PASS' if all(checks.values()) else 'FAIL'
+          out={
+            'status':status,
+            'profile':'frames-v116-full-gui-physical-media-compatibility',
+            'parent_certified_iso_sha256':'abeead78504b6562ee6ecef47027c95803594dd21527cfc3120205a5ef9b7068',
+            'candidate_iso_sha256':hashlib.sha256(iso.read_bytes()).hexdigest(),
+            'checks':checks,
+            'physical_test_allowed':status=='PASS',
+            'physical_destructive_writes_certified':False,
+            'promotion_allowed':False
+          }
+          (e/'FINAL-PHYSICAL-MEDIA-CERTIFICATION.json').write_text(json.dumps(out,indent=2)+'\n')
+          if status!='PASS': raise SystemExit(1)
+          PY
+          cd "$E"; find . -maxdepth 1 -type f ! -name EVIDENCE-FILES-SHA256.txt -print0 | sort -z | xargs -0 sha256sum > EVIDENCE-FILES-SHA256.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-0.9.106-v116-Full-Interactive-Desktop-GUI-USB-Compatible-UEFI-ISO
+          path: Frames-0.9.106-v116-Full-Interactive-Desktop-GUI-USB-Compatible-UEFI.iso
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v116-Full-GUI-Physical-Media-Compatibility-Evidence
+          path: physical-media-evidence/
+          if-no-files-found: error
+          retention-days: 30
