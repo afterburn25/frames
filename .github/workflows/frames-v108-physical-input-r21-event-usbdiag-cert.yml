@@ -8,6 +8,7 @@ on:
       - '.github/workflows/frames-v108-physical-input-r21-event-usbdiag-cert.yml'
       - 'tools/ci/patch_v108_physical_input_r21_event_usbdiag.py'
       - 'tools/ci/qemu_r21_event_integrity_gate.py'
+      - 'tools/ci/qemu_ps2_cursor_smoothness_r21.py'
 
 permissions:
   contents: read
@@ -18,7 +19,7 @@ env:
   KIT_SHA: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
   SRC_SHA: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
   R20_SHA: 7dcb3529c0db43f51e824b15c441607d24c6a1cd7906639e695b8320a31bef3e
-  R21_SHA: 719437076c0a8f07a5f8ac5e13de0fb1d287323423828feb31888af9105c2de3
+  R21_SHA: bed3740e10c3bab8b5c81ca6b2fb77668b33bdc9109039a38e2e40aa09c7efb9
   ISO_NAME: Frames-0.9.98-v108-Physical-Input-Repair-r21-Event-Integrity-USB-Frozen-Diag-Rufus-UEFI.iso
 
 jobs:
@@ -151,7 +152,7 @@ jobs:
             ps2)
               python3 tools/ci/qemu_ps2_delivery_gate_r17.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$EXPECT"; grep -q '"status": "PASS"' gate/PS2-DELIVERY.json ;;
             smoothness)
-              python3 tools/ci/qemu_ps2_cursor_smoothness_r18.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$EXPECT"; grep -q '"status": "PASS"' gate/SMOOTHNESS.json ;;
+              python3 tools/ci/qemu_ps2_cursor_smoothness_r21.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$EXPECT"; grep -q '"status": "PASS"' gate/SMOOTHNESS.json ;;
             text-edit)
               python3 tools/ci/qemu_text_edit_gate_r15.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$EXPECT"; grep -q '"status": "PASS"' gate/TEXT-EDIT.json ;;
             focus-persistence)
@@ -163,9 +164,15 @@ jobs:
               grep -Fq 'fn v108_context_restore_present_v121' "$K"
               grep -Fq 'fn v108_drag_commit_present_v121' "$K"
               grep -Fq 'fn ps2_elan4_buttons_v111(input_state:u64,a:u64,typ:u64)' "$K"
-              grep -Fq 'volatile_write64(input_state+3808' "$K"
+              grep -Fq 'volatile_write64(input_state+2824' "$K"
               grep -Fq 'volatile_write64(xhci_state+1472' "$K"
               grep -Fq '(410*65536)+544' "$K"
+              grep -Fq 'var overlap:u64=0' "$K"
+              ! grep -Fq 'volatile_write64(input_state+3784' "$K"
+              ! grep -Fq 'volatile_write64(input_state+3792' "$K"
+              ! grep -Fq 'volatile_write64(input_state+3800' "$K"
+              ! grep -Fq 'volatile_write64(input_state+3808' "$K"
+              ! grep -Fq 'volatile_write64(input_state+3816' "$K"
               ! grep -Fq 'desktop_redraw=1' "$K" ;;
             safety)
               truncate -s 32M gate/sentinel.img; before="$(sha256sum gate/sentinel.img | awk '{print $1}')"
