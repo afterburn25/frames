@@ -57,6 +57,7 @@ jobs:
           grep -q 'fn xhci_reset_connected_port_from' "$F/kernel/main.nx"
           grep -q 'serial_marker_v108_usb_live_report_ok' "$F/kernel/main.nx"
           grep -q 'serial_marker_v108_usb_gui_cursor_ok' "$F/kernel/main.nx"
+          grep -q 'serial_marker_v108_input_test_runtime_ready' "$F/kernel/main.nx"
           echo "FRAMES_DIR=$F" >> "$GITHUB_ENV"
 
       - name: Build exact USB candidate
@@ -103,17 +104,21 @@ jobs:
                       if 'error' in r: raise RuntimeError(r['error'])
               call('qmp_capabilities')
               mice=call('query-mice'); (out/'query-mice.json').write_text(json.dumps(mice,indent=2)+'\n')
-              usb_index=next((m.get('index') for m in mice if 'usb' in m.get('name','').lower()),None)
-              if usb_index is not None: call('human-monitor-command',{'command-line':f'mouse_set {usb_index}'})
+              usb_index=next((m.get('index') for m in mice if ('hid' in m.get('name','').lower() or 'usb' in m.get('name','').lower()) and 'ps/2' not in m.get('name','').lower()),None)
+              if usb_index is None: raise RuntimeError(f'QEMU HID/USB mouse frontend not found: {mice}')
+              call('human-monitor-command',{'command-line':f'mouse_set {usb_index}'})
               deadline=time.time()+75
+              ready=False
               while time.time()<deadline:
                   txt=serial.read_text(errors='ignore') if serial.exists() else ''
-                  if 'FRAMES_DESKTOP_PHASE12_OK' in txt or 'FRAMES_APPEARANCE_SYSTEM_OK' in txt: break
-                  if p.poll() is not None: raise RuntimeError('qemu stopped before desktop')
+                  if 'FRAMES_V108_INPUT_TEST_RUNTIME_READY' in txt:
+                      ready=True; break
+                  if p.poll() is not None: raise RuntimeError('qemu stopped before input-test runtime')
                   time.sleep(.25)
+              if not ready: raise RuntimeError('input-test runtime readiness timeout')
               before=out/'before.ppm'; call('screendump',{'filename':str(before)})
               got=False
-              for _ in range(50):
+              for _ in range(60):
                   call('input-send-event',{'events':[{'type':'rel','data':{'axis':'x','value':6}},{'type':'rel','data':{'axis':'y','value':3}}]})
                   time.sleep(.12)
                   txt=serial.read_text(errors='ignore') if serial.exists() else ''
@@ -121,7 +126,7 @@ jobs:
                       got=True; break
               after=out/'after.ppm'; call('screendump',{'filename':str(after)})
               a=before.read_bytes(); b=after.read_bytes(); changed=sum(x!=y for x,y in zip(a,b))
-              result={'status':'PASS' if got and changed>20 else 'FAIL','markers_ok':got,'changed_bytes':changed,'usb_mouse_index':usb_index}
+              result={'status':'PASS' if got and changed>20 else 'FAIL','runtime_ready':ready,'markers_ok':got,'changed_bytes':changed,'usb_mouse_index':usb_index}
               (out/'USB-LIVE-RESULT.json').write_text(json.dumps(result,indent=2)+'\n'); print(json.dumps(result,indent=2))
               if result['status']!='PASS': raise SystemExit(1)
               call('quit')
@@ -135,6 +140,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          find usb-live-evidence -type s -delete || true
           sha256sum usb-live-evidence/* > usb-live-evidence/SHA256SUMS.txt || true
 
       - uses: actions/upload-artifact@v4
