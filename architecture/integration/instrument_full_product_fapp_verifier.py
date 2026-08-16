@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import sys
+import re, sys
 
 if len(sys.argv) != 2:
     raise SystemExit('usage: instrument_full_product_fapp_verifier.py PATH_TO_frames_boot.c')
@@ -12,7 +12,6 @@ pos = s.find(needle)
 if pos < 0:
     raise SystemExit('fapp_extract_verify not found')
 
-# Find the function body that owns the first fapp_extract_verify definition.
 brace = s.find('{', pos)
 if brace < 0:
     raise SystemExit('fapp_extract_verify opening brace not found')
@@ -53,24 +52,32 @@ if end < 0:
     raise SystemExit('fapp_extract_verify closing brace not found')
 body = s[brace+1:end]
 
-# Idempotent: do not double-instrument an already patched source.
 if '[FAPP-DIAG]' in body:
     print('fapp_extract_verify already instrumented')
     raise SystemExit(0)
 
-# Give each fail-closed branch a unique serial marker. This preserves every
-# original predicate and return value while making the exact verifier rejection
-# visible in headless QEMU and physical-test evidence.
-parts = body.split('return 0;')
-out = parts[0]
-for idx, tail in enumerate(parts[1:], 1):
-    out += f'print16(L"[FAPP-DIAG] fail-{idx:02d}\\r\\n"); return 0;' + tail
+# Preserve control flow exactly. The source uses compact one-line forms such as
+#   if(condition)return 0;
+# so inserting text before `return 0` would make that return unconditional.
+# Instead, wrap each fail branch in braces and keep the return inside the if.
+pat = re.compile(r'if\s*\((.*?)\)\s*return\s+0\s*;', re.S)
+count = 0
 
-# Mark successful verification too, if the verifier has an explicit success return.
-out = out.replace('return 1;', 'print16(L"[FAPP-DIAG] verify-ok\\r\\n"); return 1;')
+def repl(m):
+    global count
+    count += 1
+    cond = m.group(1)
+    return f'if({cond}){{print16(L"[FAPP-DIAG] fail-{count:02d}\\r\\n"); return 0;}}'
 
-s = s[:brace+1] + '\n    print16(L"[FAPP-DIAG] verifier-enter\\r\\n");' + out + s[end:]
+new_body = pat.sub(repl, body)
+if count == 0:
+    raise SystemExit('no conditional return 0 verifier fail sites found')
+
+# Success marker; explicit and semantics-preserving.
+new_body, success_count = re.subn(r'(?<![A-Za-z0-9_])return\s+1\s*;', 'print16(L"[FAPP-DIAG] verify-ok\\r\\n"); return 1;', new_body, count=1)
+if success_count != 1:
+    raise SystemExit('expected one explicit verifier success return')
+
+s = s[:brace+1] + '\n    print16(L"[FAPP-DIAG] verifier-enter\\r\\n");' + new_body + s[end:]
 p.write_text(s)
-print(f'instrumented fapp_extract_verify fail_sites={len(parts)-1}')
-if len(parts) <= 1:
-    raise SystemExit('no return 0 verifier fail sites found')
+print(f'instrumented fapp_extract_verify fail_sites={count} semantics=preserved')
