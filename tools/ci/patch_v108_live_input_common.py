@@ -31,6 +31,7 @@ prefix=(marker('serial_marker_v108_usb_live_report_ok','FRAMES_V108_USB_LIVE_REP
         marker('serial_marker_v108_ps2_enable_ok','FRAMES_V108_PS2_ENABLE_OK')+
         marker('serial_marker_v108_ps2_packet_ok','FRAMES_V108_PS2_PACKET_OK')+
         marker('serial_marker_v108_ps2_gui_cursor_ok','FRAMES_V108_PS2_GUI_CURSOR_OK')+
+        marker('serial_marker_v108_input_test_runtime_ready','FRAMES_V108_INPUT_TEST_RUNTIME_READY')+
         'fn v108_input_backend_prepare(input_state:u64) -> u64 { return 1; }\n')
 new=prefix+'''fn desktop_input_runtime(process:u64,input_state:u64,phys_state:u64,hardware_state:u64) -> u64 {
     if process==0 || input_state==0 || phys_state==0 || hardware_state==0 { return 0; }
@@ -61,5 +62,12 @@ new=prefix+'''fn desktop_input_runtime(process:u64,input_state:u64,phys_state:u6
     return 1;
 }'''
 s=s.replace(old,new,1)
+
+appearance='appearance_ready=appearance_system_phase1_compose(appearance_state,display_state,process_state,window_manager_state); if appearance_ready==0 { serial_marker_desktop_cert_fail(); return; }'
+input_handoff='appearance_ready=appearance_system_phase1_compose(appearance_state,display_state,process_state,window_manager_state); if appearance_ready==0 { serial_marker_desktop_cert_fail(); return; } serial_marker_v108_input_test_runtime_ready(); if timer_ready != 0 && scheduler_ready != 0 && lifecycle_mode==0 { interrupts_enable(); } if desktop_input_runtime(process_state,input_state,phys_state,hardware_state)==0 { serial_marker_desktop_cert_fail(); return; } return;'
+if s.count(appearance)!=1:
+    raise SystemExit(f'appearance input-test handoff mismatch: {s.count(appearance)}')
+s=s.replace(appearance,input_handoff,1)
+
 p.write_text(s)
 print(hashlib.sha256(p.read_bytes()).hexdigest())
