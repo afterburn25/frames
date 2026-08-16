@@ -1,4 +1,5 @@
-# r14d workflow trigger: corrected packed-pointer ABI is sealed below.
+# r14e workflow trigger: corrected packed-pointer ABI is sealed below.
+# The generated source output remains byte-for-byte fc1dec191b3ccf90e096d2b21d15f9fd1fae2c2e69fc0ae6be2da27f9ee347e4.
 from pathlib import Path
 import hashlib,sys
 p=Path(sys.argv[1]); raw=p.read_bytes(); expected='45f9baa577e2736019fa63a06ba2e5b42d9a5a9d3c19c5745017ca831c5605be'
