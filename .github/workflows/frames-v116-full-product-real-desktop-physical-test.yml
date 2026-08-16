@@ -1,0 +1,196 @@
+name: Frames v116 Full Product Real Desktop Physical Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v116-full-product-v101-integration ]
+    paths:
+      - '.github/workflows/frames-v116-full-product-real-desktop-physical-test.yml'
+      - 'architecture/integration/**'
+      - 'architecture/v109/**'
+      - 'architecture/v110/**'
+      - 'architecture/v111/**'
+      - 'architecture/v112/**'
+      - 'architecture/v113/**'
+      - 'architecture/v114/**'
+      - 'architecture/v115/**'
+      - 'architecture/v116/**'
+
+permissions:
+  contents: read
+
+jobs:
+  build-prove-physical-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v116-full-product-v101-integration
+
+      - name: Install tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 unzip gdisk mtools dosfstools xorriso qemu-system-x86 ovmf netcat-openbsd
+
+      - name: Extract certified full Frames 0.9.91 v101 product source
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/physical-test-evidence"
+          mkdir -p "$RUNNER_TEMP/v101-kit" "$RUNNER_TEMP/v101-source" "$E"
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.91-Integrated-Connected-Services-Certification-Kit-v101.zip"
+          test -s "$KIT"
+          sha256sum "$KIT" | tee "$E/V101-KIT-SHA256.txt"
+          unzip -q "$KIT" -d "$RUNNER_TEMP/v101-kit"
+          SRCZIP="$(find "$RUNNER_TEMP/v101-kit" -type f \( -iname 'Frames-0.9.91-Source*.zip' -o -iname '*0.9.91*Source*.zip' \) -print | sort | head -n1 || true)"
+          if [ -z "$SRCZIP" ]; then SRCZIP="$(find "$RUNNER_TEMP/v101-kit" -type f -iname '*Source*.zip' -print | sort | head -n1 || true)"; fi
+          test -n "$SRCZIP"; test -s "$SRCZIP"
+          sha256sum "$SRCZIP" | tee "$E/V101-SOURCE-SHA256.txt"
+          unzip -q "$SRCZIP" -d "$RUNNER_TEMP/v101-source"
+          PRODUCT=""
+          while IFS= read -r vf; do
+            d="${vf%/VERSION}"
+            v="$(tr -d '\r\n' < "$vf")"
+            if [ "$v" = '0.9.91' ] && [ -f "$d/kernel/main.nx" ] && [ -f "$d/boot/uefi/frames_boot.c" ]; then PRODUCT="$d"; break; fi
+          done < <(find "$RUNNER_TEMP/v101-source" -type f -name VERSION -print | sort)
+          test -n "$PRODUCT"
+          echo "PRODUCT=$PRODUCT" >> "$GITHUB_ENV"
+          printf 'product=%s\nversion=%s\n' "$PRODUCT" "$(cat "$PRODUCT/VERSION")" | tee "$E/PRODUCT-IDENTITY.txt"
+
+      - name: Port v109-v116 architecture and activate proven real desktop path
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/physical-test-evidence"
+          PORT="$GITHUB_WORKSPACE/architecture/integration/port_architecture_to_product.py"
+          : > "$E/PORT-SUCCESS.txt"
+          while read -r label rel; do
+            python3 "$PORT" "$label" "$GITHUB_WORKSPACE/$rel" "$PRODUCT" "$E" | tee -a "$E/PORT-SUCCESS.txt"
+          done <<'EOF'
+          v109 architecture/v109/make_unified_device_architecture_v109.py
+          v110 architecture/v110/make_driver_runtime_v110.py
+          v111 architecture/v111/make_async_io_service_runtime_v111.py
+          v112 architecture/v112/make_device_service_integration_v112.py
+          v113 architecture/v113/make_driver_execution_hal_v113.py
+          v114 architecture/v114/make_kernel_concurrency_driver_scheduling_v114.py
+          v115 architecture/v115/make_driver_migration_unified_input_v115.py
+          v116 architecture/v116/make_usb_core_xhci_migration_v116.py
+          EOF
+          python3 "$GITHUB_WORKSPACE/architecture/integration/enable_v72_desktop_policy.py" "$PRODUCT/boot/uefi/frames_boot.c" | tee "$E/PATCH-DESKTOP-POLICY.log"
+          python3 "$GITHUB_WORKSPACE/architecture/integration/decouple_v72_network_from_filesystem.py" "$PRODUCT/kernel/main.nx" | tee "$E/PATCH-NETWORK-GATE.log"
+          python3 "$GITHUB_WORKSPACE/architecture/integration/instrument_v72_gui_app_host.py" "$PRODUCT/kernel/main.nx" | tee "$E/PATCH-GUI-APP-HOST.log"
+          python3 "$GITHUB_WORKSPACE/architecture/integration/instrument_v72_file_manager.py" "$PRODUCT/kernel/main.nx" | tee "$E/PATCH-FILE-MANAGER.log"
+          grep -q 'settings_phase1_compose' "$PRODUCT/kernel/main.nx"
+          sha256sum "$PRODUCT/kernel/main.nx" | tee "$E/FULL-PRODUCT-DESKTOP-KERNEL-SHA256.txt"
+
+      - name: Build full product and wire verified GUI FAPP
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/physical-test-evidence"
+          cd "$PRODUCT"
+          chmod +x tools/*.sh tools/*.py sdk/*.sh 2>/dev/null || true
+          find toolchain -type f -name nexus -exec chmod +x {} + 2>/dev/null || true
+          ./tools/build.sh 2>&1 | tee "$E/BUILD.log"
+          python3 tools/make_esp.py 2>&1 | tee "$E/MAKE-ESP.log"
+          ESP="$(find build -maxdepth 1 -type f -iname '*ESP*.img' -print | sort | head -n1)"
+          test -s "$ESP"
+          python3 "$GITHUB_WORKSPACE/architecture/integration/wire_v72_gui_fapp_into_esp.py" "$PRODUCT" "$ESP" 2>&1 | tee "$E/WIRE-GUI-FAPP.log"
+          echo "ESP=$ESP" >> "$GITHUB_ENV"
+          sha256sum build/BOOTX64.EFI build/FramesKernel.fkrn build/System.fex "$ESP" | tee "$E/BUILD-PAYLOAD-SHA256.txt"
+
+      - name: Create physical-test UEFI ISO
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/physical-test-evidence"
+          cd "$PRODUCT"
+          FIRST="$(sgdisk -i 1 "$ESP" | awk -F: '/First sector/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); split($2,a," "); print a[1]; exit}')"
+          LAST="$(sgdisk -i 1 "$ESP" | awk -F: '/Last sector/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); split($2,a," "); print a[1]; exit}')"
+          test -n "$FIRST"; test -n "$LAST"
+          COUNT=$((LAST - FIRST + 1))
+          EFI_IMG="$RUNNER_TEMP/frames-v116-real-desktop-efiboot.img"
+          dd if="$ESP" of="$EFI_IMG" bs=512 skip="$FIRST" count="$COUNT" status=none
+          fsck.vfat -n "$EFI_IMG" | tee "$E/EFI-FAT-CHECK.txt" || true
+          mdir -i "$EFI_IMG" ::/EFI/BOOT/BOOTX64.EFI | tee "$E/EFI-BOOT-DIR.txt"
+          mdir -i "$EFI_IMG" ::/Frames/HELLO.FAP | tee "$E/EFI-FAPP-DIR.txt"
+          ROOT="$RUNNER_TEMP/physical-iso-root"
+          rm -rf "$ROOT"; mkdir -p "$ROOT/EFI" "$ROOT/FRAMES"
+          cp "$EFI_IMG" "$ROOT/EFI/efiboot.img"
+          cp build/BOOTX64.EFI build/FramesKernel.fkrn build/System.fex "$ROOT/FRAMES/"
+          cp "$ESP" "$ROOT/FRAMES/Product-ESP.img"
+          find build -maxdepth 1 -type f \( -iname '*.FAP' -o -iname '*.FAPP' -o -iname '*.fthm' -o -iname '*Desktop*.img' \) -exec cp -t "$ROOT/FRAMES" {} + 2>/dev/null || true
+          cat > "$ROOT/README.TXT" <<'EOF'
+          Frames v116 Full Product Real Desktop Physical-Test Image
+          Product version remains Frames 0.9.91 (v101 source baseline).
+          Includes v109-v116 architecture integration plus the QEMU-certified real desktop activation path.
+          Physical-test candidate only; not a Frames release promotion.
+          EOF
+          OUT="$GITHUB_WORKSPACE/Frames-v116-Full-Product-Real-Desktop-Physical-Test.iso"
+          xorriso -as mkisofs -iso-level 3 -R -J -V FRAMES_TEST -eltorito-alt-boot -e EFI/efiboot.img -no-emul-boot -o "$OUT" "$ROOT" 2>&1 | tee "$E/XORRISO.log"
+          test -s "$OUT"
+          sha256sum "$OUT" | tee "$GITHUB_WORKSPACE/Frames-v116-Full-Product-Real-Desktop-Physical-Test.iso.sha256"
+          xorriso -indev "$OUT" -report_el_torito plain > "$E/EL-TORITO-REPORT.txt" 2>&1
+          grep -q 'UEFI' "$E/EL-TORITO-REPORT.txt"
+          echo "ISO=$OUT" >> "$GITHUB_ENV"
+
+      - name: QEMU OVMF fail-closed full-product real desktop proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/physical-test-evidence"
+          code=''; vars=''
+          for p in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd; do [ -f "$p" ] && code="$p" && break; done
+          for p in /usr/share/OVMF/OVMF_VARS_4M.fd /usr/share/OVMF/OVMF_VARS.fd; do [ -f "$p" ] && vars="$p" && break; done
+          test -n "$code"; test -n "$vars"
+          cp "$vars" "$RUNNER_TEMP/v116-real-desktop-vars.fd"
+          MON="$RUNNER_TEMP/v116-real-desktop.sock"
+          SERIAL="$E/SERIAL.log"
+          SHOT="$E/FRAMEBUFFER.ppm"
+          qemu-system-x86_64 -machine q35 -m 1024 -smp 2 -drive if=pflash,format=raw,readonly=on,file="$code" -drive if=pflash,format=raw,file="$RUNNER_TEMP/v116-real-desktop-vars.fd" -cdrom "$ISO" -boot d -serial file:"$SERIAL" -monitor unix:"$MON",server=on,wait=off -display none -vga std -no-reboot &
+          PID=$!
+          for i in $(seq 1 60); do [ -S "$MON" ] && break; sleep 1; done
+          test -S "$MON"
+          sleep 45
+          printf 'screendump %s\ninfo status\nquit\n' "$SHOT" | nc -U "$MON" > "$E/QEMU-MONITOR.txt" 2>&1
+          wait "$PID"
+          test -s "$SERIAL"; test -s "$SHOT"
+          ! grep -q 'failed to load Boot0001' "$SERIAL"
+          grep -q 'FRAMES_KERNEL_START' "$SERIAL"
+          grep -q 'FRAMES_HAL_RUNTIME_V6_OK' "$SERIAL"
+          grep -q 'FRAMES_CONCURRENCY_RUNTIME_V7_OK' "$SERIAL"
+          grep -q 'FRAMES_UNIFIED_INPUT_RUNTIME_V8_OK' "$SERIAL"
+          grep -q 'FRAMES_USB_MIGRATION_RUNTIME_V9_OK' "$SERIAL"
+          grep -q 'FRAMES_DESKTOP_PHASE12_OK' "$SERIAL"
+          grep -q 'FRAMES_GUI_DESKTOP_INTEGRATED_OK' "$SERIAL"
+          grep -E 'FRAMES_(KERNEL_START|HAL_RUNTIME_V6_OK|CONCURRENCY_RUNTIME_V7_OK|UNIFIED_INPUT_RUNTIME_V8_OK|USB_MIGRATION_RUNTIME_V9_OK|DESKTOP_PHASE[0-9]+_OK|GUI_DESKTOP_INTEGRATED_OK)' "$SERIAL" | tee "$E/CERTIFIED-RUNTIME-MARKERS.txt"
+
+      - name: Final physical-test certification gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/physical-test-evidence"
+          test -s "$ISO"
+          test -s "$E/FRAMEBUFFER.ppm"
+          test -s "$E/CERTIFIED-RUNTIME-MARKERS.txt"
+          grep -q 'FRAMES_GUI_DESKTOP_INTEGRATED_OK' "$E/SERIAL.log"
+          grep -q 'FRAMES_DESKTOP_PHASE12_OK' "$E/SERIAL.log"
+          grep -q 'FRAMES_USB_MIGRATION_RUNTIME_V9_OK' "$E/SERIAL.log"
+          printf '{"status":"PASS","profile":"frames-v116-full-product-real-desktop-physical-test","product_version":"0.9.91","architecture_port":"v109-v116","real_desktop_qemu_certified":true,"physical_test_candidate":true,"release_promotion":false}\n' > "$E/FINAL-PHYSICAL-TEST-CERTIFICATION.json"
+          cd "$E"
+          find . -maxdepth 1 -type f ! -name EVIDENCE-FILES-SHA256.txt -print0 | sort -z | xargs -0 sha256sum > EVIDENCE-FILES-SHA256.txt
+
+      - name: Upload physical-test ISO and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v116-Full-Product-Real-Desktop-Physical-Test
+          path: |
+            ${{ github.workspace }}/Frames-v116-Full-Product-Real-Desktop-Physical-Test.iso
+            ${{ github.workspace }}/Frames-v116-Full-Product-Real-Desktop-Physical-Test.iso.sha256
+            ${{ github.workspace }}/physical-test-evidence/
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 30
