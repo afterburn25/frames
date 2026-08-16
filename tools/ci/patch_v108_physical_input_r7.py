@@ -54,7 +54,7 @@ rep('''    let usb_r=volatile_read64(input_state+3128);
     v108_draw_small_u64(surface,((px+82)*65536)+(py+28),usb_h,green); v108_draw_small_u64(surface,((px+130)*65536)+(py+28),usb_r,green); v108_draw_small_u64(surface,((px+178)*65536)+(py+28),usb_p,amber);
     v108_text_us2(surface,px+10,py+46,white);
     v108_draw_small_u64(surface,((px+82)*65536)+(py+46),volatile_read64(input_state+3192),amber); v108_draw_small_u64(surface,((px+130)*65536)+(py+46),volatile_read64(input_state+3200),white); v108_draw_small_u64(surface,((px+178)*65536)+(py+46),volatile_read64(input_state+3216),white); v108_draw_small_u64(surface,((px+232)*65536)+(py+46),usb_q,green);''',
-'''    let usb_r=volatile_read64(input_state+3128); let usb_cc=volatile_read64(xhci+488);
+'''    let usb_r=volatile_read64(input_state+3128); var usb_cc:u64=0; if xhci!=0 { usb_cc=volatile_read64(xhci+488); }
     v108_draw_small_u64(surface,((px+82)*65536)+(py+28),usb_h,green); v108_draw_small_u64(surface,((px+130)*65536)+(py+28),usb_r,green); v108_draw_small_u64(surface,((px+178)*65536)+(py+28),usb_p,amber);
     v108_text_us2(surface,px+10,py+46,white);
     v108_draw_small_u64(surface,((px+82)*65536)+(py+46),volatile_read64(input_state+3192),amber); v108_draw_small_u64(surface,((px+130)*65536)+(py+46),volatile_read64(input_state+3200),white); v108_draw_small_u64(surface,((px+178)*65536)+(py+46),volatile_read64(input_state+3216),white); v108_draw_small_u64(surface,((px+232)*65536)+(py+46),usb_cc,red);''','usb error telemetry')
@@ -144,6 +144,6 @@ s=s[:start]+new_runtime+s[end:]
 p.write_text(s)
 out=hashlib.sha256(p.read_bytes()).hexdigest()
 print(out)
-expected_out='7fc3260909e8b16a64ff39ae51b2eca9f30ec79ebcfbac9e10437a510835d5f6'
+expected_out='b94070bfe399162a8bb5bef1694c92100716d500d9e85737896901ef3f5aa8e7'
 if out!=expected_out:
     raise SystemExit(f'unexpected r7 output hash: {out}')
