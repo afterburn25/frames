@@ -9,6 +9,7 @@ on:
       - 'architecture/integration/enable_v72_desktop_policy.py'
       - 'architecture/integration/decouple_v72_network_from_filesystem.py'
       - 'architecture/integration/instrument_v72_gui_app_host.py'
+      - 'architecture/integration/wire_v72_gui_fapp_into_esp.py'
 
 permissions:
   contents: read
@@ -44,7 +45,7 @@ jobs:
           grep -n -C 2 'fn network_core_gate' "$SRC/kernel/main.nx" > "$GITHUB_WORKSPACE/v72-desktop-proof/NETWORK-GATE-AFTER.txt" || true
           grep -n -A 24 'fn gui_app_host_init' "$SRC/kernel/main.nx" > "$GITHUB_WORKSPACE/v72-desktop-proof/GUI-APP-HOST-AFTER.txt" || true
           grep -q 'score==9' "$SRC/kernel/main.nx"
-      - name: Build supplied v72 with desktop path enabled
+      - name: Build supplied v72 with desktop path enabled and wire verified GUI FAPP
         shell: bash
         run: |
           set -euo pipefail
@@ -52,9 +53,11 @@ jobs:
           chmod +x tools/*.sh tools/*.py sdk/*.sh 2>/dev/null || true
           find toolchain -type f -name nexus -exec chmod +x {} + 2>/dev/null || true
           ./tools/build.sh 2>&1 | tee "$GITHUB_WORKSPACE/v72-desktop-proof/BUILD.log"
+          find "$SRC" -type f \( -iname '*.fapp' -o -iname '*hello*' \) -print | sort | tee "$GITHUB_WORKSPACE/v72-desktop-proof/FAPP-CANDIDATES.txt" || true
           python3 tools/make_esp.py 2>&1 | tee "$GITHUB_WORKSPACE/v72-desktop-proof/MAKE-ESP.log"
           ESP="$(find "$SRC/build" -maxdepth 1 -type f -iname '*ESP*.img' -print | sort | head -n1)"
           test -s "$ESP"
+          python3 "$GITHUB_WORKSPACE/architecture/integration/wire_v72_gui_fapp_into_esp.py" "$SRC" "$ESP" 2>&1 | tee "$GITHUB_WORKSPACE/v72-desktop-proof/WIRE-GUI-FAPP.log"
           echo "ESP=$ESP" >> "$GITHUB_ENV"
       - name: Boot desktop mode in QEMU and prove real GUI markers
         shell: bash
@@ -78,6 +81,8 @@ jobs:
           grep -q 'FRAMES_DESKTOP_POLICY_OK' "$SERIAL"
           grep -q 'FRAMES_NETWORK_CORE_OK' "$SERIAL"
           grep -q 'FRAMES_DESKTOP_PHASE1_OK' "$SERIAL"
+          grep -q 'FRAMES_GUI_APP_CONTRACT_OK' "$SERIAL"
+          grep -q 'FRAMES_DESKTOP_PHASE5_OK' "$SERIAL"
           grep -q 'FRAMES_INTEGRATED_GUI_OK' "$SERIAL"
           test -s "$SHOT"
       - name: Upload proof
