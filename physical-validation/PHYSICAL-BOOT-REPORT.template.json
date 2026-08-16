@@ -1,11 +1,13 @@
 {
   "profile": "frames-v116-physical-hardware-full-gui-validation",
   "candidate": {
-    "iso_name": "Frames-0.9.106-v116-Full-Interactive-Desktop-GUI-UEFI.iso",
-    "iso_sha256": "abeead78504b6562ee6ecef47027c95803594dd21527cfc3120205a5ef9b7068",
-    "iso_size_bytes": 67160064,
+    "iso_name": "Frames-0.9.106-v116-Full-Interactive-Desktop-GUI-USB-Compatible-UEFI.iso",
+    "iso_sha256": "7d1c212ad71778a84579e91c2e12ebafe3801a8bcd8a0a0856e506d47ebe20c7",
+    "iso_size_bytes": 67401728,
     "certified_gui_commit": "8a730a580b98026189eac897d0dec9efde58c07e",
-    "certified_vm_iso_run": 31923853583
+    "certified_vm_iso_run": 31923853583,
+    "physical_media_compatibility_run": 31924483046,
+    "extracted_xhci_usb_proof_run": 31924646428
   },
   "hardware": {
     "manufacturer": "",
