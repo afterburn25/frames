@@ -93,8 +93,13 @@ jobs:
           xorriso -as mkisofs -iso-level 3 -R -J -V FRAMES_V108_R12B -eltorito-alt-boot -e efiboot.img -no-emul-boot -o "out/$ISO_NAME" "$ROOT"
           sha256sum "out/$ISO_NAME" | tee evidence/ISO-SHA256.txt; stat -c '%s' "out/$ISO_NAME" | tee evidence/ISO-SIZE.txt
       - uses: actions/upload-artifact@v4
-        with: { name: Frames-v108-r12b-Candidate, path: 'out/*.iso
-evidence/**', if-no-files-found: error, retention-days: 30 }
+        with:
+          name: Frames-v108-r12b-Candidate
+          path: |
+            out/*.iso
+            evidence/**
+          if-no-files-found: error
+          retention-days: 30
 
   input:
     needs: build
