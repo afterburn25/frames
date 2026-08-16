@@ -1,0 +1,213 @@
+name: Frames v108 Physical Input r9c Smoothness Certification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-physical-input-bringup ]
+    paths:
+      - '.github/workflows/frames-v108-physical-input-r9c-smoothness.yml'
+      - 'tools/ci/qemu_input_visual_gate_r9.py'
+      - 'tools/ci/qemu_ps2_cursor_smoothness.py'
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SOURCE_RUN: 31958310396
+  CANDIDATE_ARTIFACT_ID: 9266559750
+  CANDIDATE_ZIP_SHA: d78b35b959a366705567a44fe58d31090d6dec83537cd5341f5089f80404b9da
+  SAFETY_ARTIFACT_ID: 9266583882
+  SAFETY_ZIP_SHA: 062afccb4759b9d7cfeb49b07a75491eab2bcc5dadd36e23756cd44275c6d948
+  ISO_NAME: Frames-0.9.98-v108-Physical-Input-Repair-r9-Rufus-UEFI.iso
+  ISO_SHA: afad163240b6db6d95a694235456ee8a1fdfb322805c6ce6b0d4c23df08b8a85
+  ISO_SIZE: 18733056
+  R9_SHA: 5b2384f8e128b1ec6922f34c14478918c3388179937c2000dd12135fefcf682c
+
+jobs:
+  stable-input:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [usb, ps2]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-physical-input-bringup
+      - name: Install QEMU runtime tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf python3 python3-pil unzip
+          O="$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE.fd' \) | head -n1)"
+          test -s "$O"
+          echo "OVMF=$O" >> "$GITHUB_ENV"
+      - name: Fetch and verify exact r9 candidate from source run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p candidate
+          curl -fL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${CANDIDATE_ARTIFACT_ID}/zip" -o candidate.zip
+          test "$(sha256sum candidate.zip | awk '{print $1}')" = "$CANDIDATE_ZIP_SHA"
+          unzip -q candidate.zip -d candidate
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"; test -s "$ISO"
+          test "$(sha256sum "$ISO" | awk '{print $1}')" = "$ISO_SHA"
+          test "$(stat -c '%s' "$ISO")" = "$ISO_SIZE"
+          test "$(tr -d '\r\n' < candidate/evidence/R9-SHA.txt)" = "$R9_SHA"
+          grep -q '^status=PASS$' candidate/evidence/WRITE-SURFACE.txt
+          echo "ISO=$ISO" >> "$GITHUB_ENV"
+      - name: Stable-frame live input proof — ${{ matrix.lane }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence-${{ matrix.lane }}
+          python3 tools/ci/qemu_input_visual_gate_r9.py \
+            --ovmf "$OVMF" --iso "$ISO" --lane '${{ matrix.lane }}' \
+            --out evidence-${{ matrix.lane }} --expected-iso-sha "$ISO_SHA"
+          grep -q '"status": "PASS"' evidence-${{ matrix.lane }}/RUNTIME.json
+          sha256sum evidence-${{ matrix.lane }}/* > evidence-${{ matrix.lane }}/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Frames-v108-r9c-${{ matrix.lane }}-Stable-Input-Evidence
+          path: evidence-${{ matrix.lane }}/**
+          if-no-files-found: warn
+          retention-days: 30
+
+  smoothness:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-physical-input-bringup
+      - name: Install QEMU smoothness tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf python3 python3-pil unzip
+          O="$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE.fd' \) | head -n1)"
+          test -s "$O"
+          echo "OVMF=$O" >> "$GITHUB_ENV"
+      - name: Fetch and verify exact r9 candidate from source run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p candidate
+          curl -fL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${CANDIDATE_ARTIFACT_ID}/zip" -o candidate.zip
+          test "$(sha256sum candidate.zip | awk '{print $1}')" = "$CANDIDATE_ZIP_SHA"
+          unzip -q candidate.zip -d candidate
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"; test -s "$ISO"
+          test "$(sha256sum "$ISO" | awk '{print $1}')" = "$ISO_SHA"
+          test "$(stat -c '%s' "$ISO")" = "$ISO_SIZE"
+          test "$(tr -d '\r\n' < candidate/evidence/R9-SHA.txt)" = "$R9_SHA"
+          echo "ISO=$ISO" >> "$GITHUB_ENV"
+      - name: Quantitative PS2 cursor smoothness gate
+        run: |
+          set -euo pipefail
+          mkdir -p smoothness
+          python3 tools/ci/qemu_ps2_cursor_smoothness.py \
+            --ovmf "$OVMF" --iso "$ISO" --out smoothness --expected-iso-sha "$ISO_SHA"
+          grep -q '"status": "PASS"' smoothness/SMOOTHNESS.json
+          sha256sum smoothness/* > smoothness/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Frames-v108-r9c-PS2-Cursor-Smoothness-Evidence
+          path: smoothness/**
+          if-no-files-found: warn
+          retention-days: 30
+
+  safety-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Fetch and verify exact source-run safety artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p safety
+          curl -fL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SAFETY_ARTIFACT_ID}/zip" -o safety.zip
+          test "$(sha256sum safety.zip | awk '{print $1}')" = "$SAFETY_ZIP_SHA"
+          unzip -q safety.zip -d safety
+          grep -R -q '^status=PASS$' safety
+          python3 - <<'PY'
+          from pathlib import Path
+          p=next(Path('safety').rglob('RESULT.txt'))
+          d=dict(line.split('=',1) for line in p.read_text().splitlines() if '=' in line)
+          assert d['status']=='PASS'
+          assert d['before']==d['after'], d
+          Path('safety/VERIFIED.txt').write_text('status=PASS\nsource_run=31958310396\nartifact_id=9266583882\n')
+          PY
+          sha256sum safety/* > safety/SHA256SUMS-r9c.txt || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r9c-Verified-ReadOnly-Safety
+          path: safety/**
+          if-no-files-found: error
+          retention-days: 30
+
+  final:
+    needs: [stable-input, smoothness, safety-proof]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Fetch and verify exact r9 candidate for final seal
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p candidate final
+          curl -fL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${CANDIDATE_ARTIFACT_ID}/zip" -o candidate.zip
+          test "$(sha256sum candidate.zip | awk '{print $1}')" = "$CANDIDATE_ZIP_SHA"
+          unzip -q candidate.zip -d candidate
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"; test -s "$ISO"
+          test "$(sha256sum "$ISO" | awk '{print $1}')" = "$ISO_SHA"
+          test "$(stat -c '%s' "$ISO")" = "$ISO_SIZE"
+          cp "$ISO" final/
+          sha256sum "$ISO" | tee final/ISO-SHA256.txt
+          stat -c '%s' "$ISO" | tee final/ISO-SIZE.txt
+          printf '%s\n' "$R9_SHA" > final/R9-SOURCE-SHA256.txt
+          cat > final/CERTIFICATION.txt <<'EOF'
+          Frames v108 Physical Input Repair r9c
+          status=PASS
+          exact_r9_candidate_reused=PASS
+          vm_usb_stable_input=PASS
+          vm_ps2_stable_input=PASS
+          vm_ps2_cursor_smoothness=PASS
+          readonly_safety=PASS
+          physical_touchpad_smoothness=PENDING_USER_HARDWARE
+          physical_usb_full_descriptor=PENDING_USER_HARDWARE
+          physical_destructive_writes=BLOCKED
+          EOF
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: 'Frames-v108-r9c-*-Evidence'
+          path: final/evidence
+          merge-multiple: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r9c-Verified-ReadOnly-Safety
+          path: final/evidence/read-only-safety
+      - name: Verify current-run evidence before seal
+        run: |
+          set -euo pipefail
+          grep -R -q '"status": "PASS"' final/evidence/Frames-v108-r9c-usb-Stable-Input-Evidence
+          grep -R -q '"status": "PASS"' final/evidence/Frames-v108-r9c-ps2-Stable-Input-Evidence
+          grep -R -q '"status": "PASS"' final/evidence/Frames-v108-r9c-PS2-Cursor-Smoothness-Evidence
+          grep -R -q '^status=PASS$' final/evidence/read-only-safety
+          sha256sum final/Frames-0.9.98-v108-Physical-Input-Repair-r9-Rufus-UEFI.iso final/CERTIFICATION.txt final/R9-SOURCE-SHA256.txt > final/FINAL-SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r9c-Rufus-Final
+          path: final/**
+          if-no-files-found: error
+          retention-days: 30
