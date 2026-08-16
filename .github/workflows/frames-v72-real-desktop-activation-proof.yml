@@ -8,6 +8,7 @@ on:
       - '.github/workflows/frames-v72-real-desktop-activation-proof.yml'
       - 'architecture/integration/enable_v72_desktop_policy.py'
       - 'architecture/integration/decouple_v72_network_from_filesystem.py'
+      - 'architecture/integration/instrument_v72_gui_app_host.py'
 
 permissions:
   contents: read
@@ -25,7 +26,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y clang lld python3 unzip qemu-system-x86 ovmf netcat-openbsd mtools dosfstools
-      - name: Extract v72, enable desktop mode, and repair gate dependency
+      - name: Extract v72, enable desktop mode, repair gate dependency, and instrument GUI app host
         shell: bash
         run: |
           set -euo pipefail
@@ -38,8 +39,10 @@ jobs:
           grep -Rni -C 4 'boot_policy_flags' "$SRC/boot" > "$GITHUB_WORKSPACE/v72-desktop-proof/BOOT-POLICY-BEFORE.txt" || true
           python3 "$GITHUB_WORKSPACE/architecture/integration/enable_v72_desktop_policy.py" "$SRC/boot/uefi/frames_boot.c" | tee "$GITHUB_WORKSPACE/v72-desktop-proof/PATCH-DESKTOP-POLICY.log"
           python3 "$GITHUB_WORKSPACE/architecture/integration/decouple_v72_network_from_filesystem.py" "$SRC/kernel/main.nx" | tee "$GITHUB_WORKSPACE/v72-desktop-proof/PATCH-NETWORK-GATE.log"
+          python3 "$GITHUB_WORKSPACE/architecture/integration/instrument_v72_gui_app_host.py" "$SRC/kernel/main.nx" | tee "$GITHUB_WORKSPACE/v72-desktop-proof/PATCH-GUI-APP-HOST.log"
           grep -Rni -C 4 'boot_policy_flags' "$SRC/boot" > "$GITHUB_WORKSPACE/v72-desktop-proof/BOOT-POLICY-AFTER.txt" || true
           grep -n -C 2 'fn network_core_gate' "$SRC/kernel/main.nx" > "$GITHUB_WORKSPACE/v72-desktop-proof/NETWORK-GATE-AFTER.txt" || true
+          grep -n -A 24 'fn gui_app_host_init' "$SRC/kernel/main.nx" > "$GITHUB_WORKSPACE/v72-desktop-proof/GUI-APP-HOST-AFTER.txt" || true
           grep -q 'score==9' "$SRC/kernel/main.nx"
       - name: Build supplied v72 with desktop path enabled
         shell: bash
