@@ -1,0 +1,44 @@
+name: Frames v72 Post Phase4 Cert Inspection
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v116-full-product-v101-integration ]
+    paths:
+      - '.github/workflows/frames-v72-post-phase4-cert-inspection.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v116-full-product-v101-integration
+      - name: Inspect post-Phase4 desktop certification path
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/v72-post-phase4-cert"
+          TMP="$RUNNER_TEMP/v72-post-phase4"
+          rm -rf "$OUT" "$TMP"
+          mkdir -p "$OUT" "$TMP"
+          unzip -q "$GITHUB_WORKSPACE/Frames-0.9.62-Source-v72-r1.zip" -d "$TMP"
+          SRC="$(find "$TMP" -type f -name VERSION -print | while read -r f; do [ "$(tr -d '\r\n' < "$f")" = '0.9.62' ] && dirname "$f" && break; done)"
+          test -n "$SRC"
+          K="$SRC/kernel/main.nx"
+          echo "source=$SRC" > "$OUT/IDENTITY.txt"
+          grep -n -C 120 -E 'serial_marker_desktop_phase4_ok|serial_marker_desktop_cert_fail|serial_marker_integrated_gui_ok|gui_app_phase1_compose|desktop_phase4|shell_route|desktop_cert' "$K" > "$OUT/POST-PHASE4-CONTEXT.txt" || true
+          grep -n -E 'desktop_.*=|shell_.*=|gui_.*=|window_.*=|theme_.*=' "$K" > "$OUT/POST-PHASE4-ASSIGNMENTS.txt" || true
+          sed -n '5000,5350p' "$K" > "$OUT/KERNEL-GUI-REGION.txt"
+          test -s "$OUT/POST-PHASE4-CONTEXT.txt"
+      - name: Upload inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v72-Post-Phase4-Cert-Inspection
+          path: v72-post-phase4-cert/
+          if-no-files-found: error
+          retention-days: 30
