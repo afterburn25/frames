@@ -62,8 +62,8 @@ jobs:
           test "$(sha256sum "$F/kernel/main.nx" | awk '{print $1}')" = "$R7_MAIN_SHA"
           cp "$F/kernel/main.nx" evidence/kernel-r7.nx
           diff -u evidence/kernel-r6.nx evidence/kernel-r7.nx > evidence/R6-TO-R7.patch || true
-          grep -q 'ring+(tail*16)+cycle' "$F/kernel/main.nx"
-          grep -q 'serial_marker_v108_physical_cursor_visible_ok' "$F/kernel/main.nx"
+          grep -Fq 'ring+(tail*16)+cycle' "$F/kernel/main.nx"
+          grep -Fq 'serial_marker_v108_physical_cursor_visible_ok' "$F/kernel/main.nx"
           ! grep -A100 '^fn desktop_input_runtime' "$F/kernel/main.nx" | grep -q 'appearance_render(process)'
           ! grep -A100 '^fn desktop_input_runtime' "$F/kernel/main.nx" | grep -q 'wm_render_all'
           echo "FRAMES_DIR=$F" >> "$GITHUB_ENV"
@@ -213,7 +213,6 @@ jobs:
               if a.size!=b.size: raise RuntimeError('frame size changed')
               changed=sum(1 for x,y in zip(a.getdata(),b.getdata()) if x!=y)
               result['changed_pixels']=changed; result['frame_size']=list(a.size)
-              # Cursor + telemetry should move, but a full-desktop repaint is a regression.
               result['visual']=20 <= changed <= 20000
               if not result['markers'] or not result['visual']:
                   raise RuntimeError(f'input/visual gate failed: {result}')
