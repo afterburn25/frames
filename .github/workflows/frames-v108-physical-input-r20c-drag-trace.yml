@@ -1,4 +1,5 @@
 name: Frames v108 Physical Input r20c Drag Trace
+# rerun with held-button packet model
 
 on:
   workflow_dispatch:
