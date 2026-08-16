@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# r21 workflow registration trigger
 import argparse,hashlib,json,pathlib,socket,subprocess,time
 
 def sha256(p):
