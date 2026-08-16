@@ -6,17 +6,17 @@
 Last updated: 2026-08-16
 
 ## Project identity / safety
-
 - Frames is an independent OS using Nexus.
 - Boot chain: UEFI -> BOOTX64.EFI -> FramesKernel.fkrn.
-- Evidence model is fail-closed: exact source/hash, QEMU/OVMF first, then real hardware for physical claims.
+- Evidence is fail-closed: exact source/hash, QEMU/OVMF first, then real hardware for physical claims.
+- VM PASS is never described as physical PASS.
+- Generated/mockup images are never Frames runtime evidence.
 - Frames 1.0 is NOT promoted.
 - Physical destructive writes, installation, persistent internal-media modification, and release promotion remain blocked.
-- User-facing physical-test artifacts must be Rufus-compatible UEFI ISOs. Raw IMG is CI-only.
+- User-facing physical-test artifacts must be Rufus-compatible UEFI ISOs; raw IMG is CI-only.
 - Independent workflows/lanes should run in parallel whenever practical.
 
 ## Certified reconstruction foundation — Frames 0.9.98 v108 r9
-
 Fresh unchanged certification:
 - workflow `.github/workflows/main.yml`
 - run `31831716862`, attempt 2: PASS
@@ -27,162 +27,169 @@ Fresh unchanged certification:
 - evidence artifact `9257820749`
 - evidence ZIP SHA-256 `b7589b75190186b3886e76e8e571bbee1d58884e8a5516338ba59c994427ce74`
 
-Active branch: `v108-physical-input-bringup`.
-All current physical-input work reconstructs exact certified v108. v109-v116 transforms are excluded from this bring-up train.
+All current physical-input work reconstructs this exact v108 source. v109-v116 architecture transforms are intentionally excluded from this bring-up train.
 
-## Authoritative physical result — r10 on user's ASUS laptop
+## Authoritative real-hardware input results
+### Touchpad
+The user's ASUS gaming laptop is a circa-2014 Core i7 / GTX 860M generation system. Physical telemetry strongly supports a legacy PS/2-compatible ELAN/Synaptics-style path rather than I2C-HID for this machine.
 
-Exact tested ISO:
-- `Frames-0.9.98-v108-Physical-Input-Repair-r10-Rufus-UEFI.iso`
-- SHA-256 `ef9d3cd24724acf4cf3bfb75708393c1b8de3a2f5fefeba7e0281acda125cde7`
-- size `18,745,344 bytes`
-- Rufus mode: ISO Image mode
+r9 physical result:
+- i8042/AUX transport active, roughly 2208 AUX bytes seen;
+- zero accepted motion packets;
+- showed protocol/framing rather than electrical/transport failure.
 
-### Touchpad — FIRST REAL PHYSICAL POINTER SUCCESS
+r10 physical breakthrough:
+- six-byte Elantech-v4-like recognizer locked with `PH=4`;
+- hundreds of packets accepted;
+- `SRC=2` touchpad path active;
+- cursor physically moved smoothly in the requested direction;
+- sensitivity was too low.
 
-The user's built-in touchpad physically moved the Frames cursor smoothly in the intended direction.
+r11 physical result:
+- sensitivity substantially improved and cursor remained controllable;
+- intermittent stalls remain: telemetry continues changing during some finger motion while cursor temporarily does not move;
+- this is the active touchpad responsiveness/latency issue, not a complete touchpad failure.
 
-Representative physical telemetry from the supplied photo:
-- `PS2 E PK = 1, 704`
-- `P2 O A K = 6101, 6101, 0`
-- `P2 R PH PK = 6101, 4, 704`
-- `P2 SY R1 R2 = 1121, 18, 0`
-- `SRC X Y = 2, 922, 131`
+### External USB mouse
+r11 physical result:
+- external USB mouse still produced no cursor movement;
+- descriptor/config telemetry advanced farther than earlier revisions but no live HID report reached the GUI.
 
-Physical conclusions:
-- i8042/AUX transport: PASS on this laptop.
-- r10 six-byte recognizer locked at `PH=4` on real hardware.
-- hundreds of touchpad packets were accepted.
-- Generic Pointer source became `SRC=2`.
-- real cursor direction/control: PASS.
-- movement smoothness: physically usable, but sensitivity is too low.
-- some initial/small movements require repeating.
-- physical click/tap behavior is NOT yet proven.
+Known software gap identified by VM topology probe:
+- direct xHCI USB mouse worked;
+- mouse behind a USB hub failed because Frames did not traverse hubs.
 
-Do not reduce this to a VM claim: this is the first user-observed real-hardware Frames pointer movement.
-Do not overstate it either: touchpad tuning and physical button/click proof remain pending.
+That gap has now been implemented and VM-certified in r13, but physical USB remains PENDING until the user's laptop proves it.
 
-### External USB mouse — STILL PHYSICAL FAIL at r10
+### Keyboard
+Physical keyboard validation is PENDING. The user's laptop keyboard itself is known to behave erratically at times (including spontaneous/repeating letters), so Frames diagnostics must distinguish make/break events, repeats/stuck keys, and actual text delivery instead of assuming all odd input is an OS bug.
 
-User observed no USB mouse cursor motion.
+## r12b combined touchpad-latency + keyboard + interactive test UI — VM PASS
+Corrected source chain:
+- r12 intermediate SHA `70e01c31e669679ec8de986cddfb361a3686681ce109740c16a7e50bb1a90be3`
+- r12b source SHA `92782808bd0cda553f6f84116dc8761cefc561c2c025c464cbfe7830b72df81b`
+- repair `tools/ci/patch_v108_physical_input_r12b_pollfix.py`
 
-Representative physical telemetry:
-- `USB H R P = 0, 0, 16`
-- `USB S T X E = 6, 8, 1, 1`
-- `USB D L T C R = 0, 18, 1, 1, 1`
+r12/r12b adds:
+- Elantech-v4 motion-packet handling in addition to head packets;
+- burst/drain PS/2 polling to reduce event backlog/latency;
+- reduced diagnostic redraw pressure;
+- PS/2 keyboard make/break decode;
+- basic Shift/Caps/text mapping;
+- repeat/stuck-key telemetry/suppression;
+- real `INPUT TEST` UI with text box, `CLICK TEST`, and `CLEAR` controls.
 
-Interpretation:
-- the full 18-byte device descriptor is now valid on physical hardware;
-- the blocker moved beyond address/full-device-descriptor completion;
-- r10 still exhausted an artificial 8-attempt/8-slot scan boundary;
-- HID configuration/report delivery never became physically active.
+Authoritative r12b workflow:
+- `.github/workflows/frames-v108-physical-input-r12b-rufus.yml`
+- run `31964885466`: PASS
+- head `b0b9378552f5ca711d781daae77dfab23a214b5a`
+- all build, USB, PS/2, smoothness, interactive, model, safety, and final jobs PASS.
 
-Known separate USB topology gap:
-- workflow `.github/workflows/frames-v108-usb-hub-topology-probe.yml`
-- run `31929194248`
-- direct xHCI mouse: VM supported
-- mouse behind hub: `NO_HID_BEHIND_TOPOLOGY`
+Exact r12b ISO:
+- `Frames-0.9.98-v108-Physical-Input-Repair-r12b-Rufus-UEFI.iso`
+- SHA-256 `3b08bf72557735c1b8ac36c1cafbf0d00345d38774b75b2a8587bdcf0996d7e6`
+- size `18,786,304 bytes`
+- Rufus: ISO Image mode
 
-## r11 active repair — touchpad gain + click proof + expanded USB discovery
+Interactive VM evidence:
+- keyboard text marker PASS;
+- click-test marker PASS;
+- textbox framebuffer visibly changed and contained typed text;
+- physical keyboard/click remain unclaimed until hardware test.
 
-Primary patch:
-- `tools/ci/patch_v108_physical_input_r11_touch_usb.py`
-- creation commit `a137c3bc3882be7527ec78d3f70ed8ddbd460161`
-- exact r10 input SHA `b2dee4fc2c1ca3ad68d4428febf564a2143948ee797ea74ee532ac87b2c14ab6`
-- exact r11 output source SHA `4e6b4fd0f4c44020099e2c097615d3b6f03e8e123763fd803c90eb1d40f3b016`
+## r13 USB-hub + r12b combined input candidate — NEXT AUTHORIZED PHYSICAL BOOT
+USB hub implementation branch:
+- `v108-usb-hub-topology-r1`
 
-r11 changes:
-- Elantech-like physical gain changes from approximately 1/8 to 1/4;
-- maximum converted physical step increases from 40 px to 64 px while retaining implausible-jump rejection;
-- left/right button transitions are extracted from all recognized Elantech-v4-like packet types, not only motion packets;
-- hardware-button and GUI-button telemetry are separated;
-- marker `FRAMES_V108_GUI_CLICK_OK` proves a button event reaches the GUI layer in VM;
-- stable diagnostic runtime again calls desktop/appearance click handlers for kind-4 button events;
-- xHCI `MaxSlots` diagnostic cap raised from 8 to 32;
-- root-port HID scan cap raised from 8 to 32;
-- configuration descriptor/header retries and interface/subclass/protocol/endpoint telemetry added.
+Hub repair provenance:
+- hub-r2 pre-ABI-repair source SHA `8ebec9c4ed641be22eccf3294a9f478093189d4ad36c454605b1b273dd662cd6`
+- hub-r3 exact source SHA `7bc6594c05e71d821a07275a7ded816869681fa2d328e64f18dee0ebd0f02ce9`
+- ABI repair `tools/ci/patch_v108_usb_hub_topology_r3_abi.py`
+- Nexus x64 4-parameter ABI compile probe run `31967066233`: PASS
 
-The stale self-hash in `patch_v108_physical_input_r10_hwdecode.py` was corrected to the already-certified r10 output SHA. This changes no r10 output bytes; it only makes the patch script exit consistently with its actual sealed result.
+r13 hub implementation adds first-tier USB hub traversal:
+- hub class recognition;
+- hub descriptor/configuration path;
+- downstream port power/status/reset handling;
+- xHCI child slot route/context setup;
+- child device descriptor/finalize-address flow;
+- child boot-HID discovery/configuration;
+- runtime markers `FRAMES_USB_HUB_FOUND`, `FRAMES_USB_HUB_CHILD_FOUND`, `FRAMES_USB_HUB_CHILD_HID_OK`.
 
-## r11 certification — VM PASS, physical pending
+Authoritative combined r13 workflow:
+- `.github/workflows/frames-v108-usb-hub-topology-r3-cert.yml`
+- run `31967222521`: PASS
+- head `b28115ea45df0e18b1c19f62294c5314982fd52b`
+- exact-source reconstruction: PASS
+- destructive-write surface audit: PASS
+- build/Rufus packaging: PASS
+- VM USB direct mouse: PASS
+- VM USB mouse behind hub: PASS
+- VM PS/2 input: PASS
+- VM quantitative PS/2 smoothness: PASS
+- VM clickable controls + keyboard text: PASS
+- source/model gate: PASS
+- read-only NVMe sentinel: PASS
+- final seal: PASS
 
-Workflow:
-- `.github/workflows/frames-v108-physical-input-r11-rufus.yml`
-- run `31962777837`, attempt 2: PASS
-- workflow head `569a0ac14a41f33160979d450bd8d1c2f8528ba5`
+Independent hub evidence check:
+- hub `TOPOLOGY.json`: PASS
+- exact ISO SHA in hub evidence `ceb2201bd641e8f950929730e1dd6a0db8c7049aa29f0a133533e38fd55900a6`
+- hub found: true
+- hub child found: true
+- hub child HID: true
+- live USB report: true
+- GUI cursor: true
+- serial markers for all of the above present;
+- evidence manifest hashes independently matched after normalizing GitHub artifact directory prefix.
 
-Parallel gates on the same exact r11 ISO:
-- exact source reconstruction: PASS
-- destructive-write surface audit: PASS, zero hits
-- VM USB live input + localized cursor motion: PASS
-- VM PS/2 live input + localized cursor motion: PASS
-- VM quantitative standard-PS2 smoothness: PASS
-- VM PS/2 button -> GUI click layer: PASS
-- r11 source/model contract: PASS
-- read-only internal NVMe sentinel: PASS, sentinel hash unchanged
-- final aggregate seal: PASS
+Independent interactive evidence check:
+- `r12_interactive_pointer_keyboard_ui`: PASS on the same r13 ISO SHA;
+- keyboard text marker true;
+- click marker true;
+- textbox visual change true;
+- actual final framebuffer inspected: `INPUT TEST` panel visible, text `ABC` visible, `CLICK TEST` count `1` visible.
 
-Independent inspection:
-- USB runtime: cursor `396,290 -> 400,292`, changed pixels outside telemetry `112`, idle changed pixels `0`
-- PS/2 runtime: cursor `396,290 -> 400,292`, changed pixels outside telemetry `112`, idle changed pixels `0`
-- actual USB and PS/2 AFTER framebuffers inspected; desktop remains intact with a singular localized cursor
-- click JSON: PASS with `gui_click_marker=true`
-- smoothness JSON: PASS
-- read-only safety result: PASS
+Independent safety check:
+- read-only sentinel before/after SHA identical: `83ee47245398adee79bd9c0a8bc57b821e92aba10f5f9ade8a5d1fae4d8c4302`.
 
-Candidate artifact:
-- `Frames-v108-r11-Candidate`
-- artifact ID `9267709712`
-- artifact ZIP SHA-256 `bb41a06c48234004a93a2bb06107835e15be956703b5769b8b0125b41e2b7e40`
+Exact r13 physical-test ISO:
+- `Frames-0.9.98-v108-Physical-Input-Repair-r13-USB-Hub-Rufus-UEFI.iso`
+- SHA-256 `ceb2201bd641e8f950929730e1dd6a0db8c7049aa29f0a133533e38fd55900a6`
+- size `18,796,544 bytes`
+- Rufus: ISO Image mode
+- final artifact ID `9268854072`
+- final artifact ZIP digest `d124bb91a5cd215f1a600ab27a1c97d7ed557e005e062817688ab3a69eb616b6`
 
-Final artifact:
-- `Frames-v108-r11-Rufus-Final`
-- artifact ID `9267735713`
-- artifact ZIP SHA-256 `5403a852857cde8842561e75d432e5d962735db1d272299db3c5615790cb6eb9`
+## r13 physical test order
+Use only exact ISO SHA `ceb2201bd641e8f950929730e1dd6a0db8c7049aa29f0a133533e38fd55900a6`.
 
-### Exact next authorized physical-test ISO
+1. Boot in UEFI mode and wait for the input test desktop.
+2. Touchpad: test small and long movements in all directions; note whether the r11 intermittent cursor stalls are reduced/eliminated.
+3. Click: physically press/click the touchpad while over `CLICK TEST`; confirm click count changes.
+4. Text box: click `TEXT BOX`, type a short known sequence such as `ABC123`; observe typed text and keyboard make/break/repeat counters.
+5. Because the physical keyboard is known to be flaky, report both what was intentionally typed and any spontaneous/repeated characters separately.
+6. External USB mouse: move it in all directions and test a button click. This is the first physical candidate containing VM-certified USB-hub traversal.
+7. If any path fails, photograph the complete `INPUT V108 LIVE` panel plus `INPUT TEST` panel.
 
-- `Frames-0.9.98-v108-Physical-Input-Repair-r11-Rufus-UEFI.iso`
-- SHA-256 `f4657955ce073fe244e647c77b690324f2da13a21645faf1893ddf8d0170c07d`
-- size `18,753,536 bytes`
-- Rufus mode: **ISO Image mode**
-
-Physical r11 claims remain PENDING until user hardware confirms them.
-
-## Next physical test — r11
-
-1. Boot exact SHA `f4657955ce073fe244e647c77b690324f2da13a21645faf1893ddf8d0170c07d` using Rufus ISO Image mode.
-2. Test touchpad motion in all directions, including small movements; judge whether sensitivity is materially improved and whether first motion registers reliably.
-3. Stop moving and confirm no idle cursor drift.
-4. Physically press the touchpad left button/clickpad and, if supported, right button. Also try a normal tap once, but keep button press and tap results separate.
-5. Observe `BTN H HP G GP`:
-   - H = hardware button state
-   - HP = hardware left-press count
-   - G = GUI button state
-   - GP = GUI left-press count
-6. Test external USB mouse.
-7. If USB still fails, photograph `USB H R P`, `USB S T X E`, `USB D L T C R`, and new `USB G L I S P E` row.
-8. Physical destructive writes remain blocked.
+Physical PASS is not inferred from VM PASS. The user's real-machine result is authoritative.
 
 ## Claim policy
-
-- Touchpad physical movement is proven on r10.
-- Touchpad sensitivity improvement is not proven until r11 physical test.
-- Touchpad physical clicking is not proven until r11 physical `BTN` telemetry and observed behavior confirm it.
-- USB mouse remains physically unproven/failing until the real machine produces HID reports/cursor movement.
-- VM PASS never substitutes for physical PASS.
+- Touchpad: physically proven to move and be controllable since r10/r11, but intermittent stalls remain pending r13 physical retest.
+- USB hub traversal: VM-certified in r13; physical external USB mouse remains PENDING.
+- Keyboard/text/click UI: VM-certified in r12b/r13; physical keyboard and physical click behavior remain PENDING.
+- Frames 1.0 remains NOT promoted.
+- Physical destructive writes remain BLOCKED.
 
 ## Automatic progression
-
 - Run independent workflows/lanes in parallel whenever practical.
 - Failure -> diagnose -> repair -> rerun automatically.
 - Pass -> independently verify -> update this file -> continue automatically.
-- Stop only for genuine physical hardware/user action or a safety/authorization boundary.
+- Stop only for genuine physical hardware/user action, required user information, authorization, or safety boundary.
 
 ## New-chat startup
-
 1. Read `PROJECT_STATE.md`.
 2. Read `CONTINUITY_PROTOCOL.md`.
-3. Inspect active branch/run/evidence named here.
-4. Repository/evidence overrides older chat summaries.
-5. Resume from the exact pending physical or CI gate; do not fall back to the old v116/static-GUI narrative.
+3. Inspect the active branch/run/evidence named here.
+4. Repository/evidence overrides older chat/project summaries.
+5. Do not silently pivot to another roadmap or claim level.
