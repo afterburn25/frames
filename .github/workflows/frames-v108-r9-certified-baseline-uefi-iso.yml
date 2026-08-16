@@ -25,15 +25,16 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Initialize output
+      - name: Initialize output and fetch only exact r9 runtime kit
         shell: bash
         run: |
           set -euo pipefail
           rm -rf boot-out
           mkdir -p boot-out
           printf 'status=started\n' > boot-out/BUILD-STATUS.txt
+          curl -fL --retry 3 \
+            "https://raw.githubusercontent.com/afterburn25/frames/$CERTIFICATION_COMMIT/Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip" \
+            -o Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip
 
       - name: Verify and extract certified v108 r9 source
         shell: bash
@@ -51,12 +52,10 @@ jobs:
           kit=pathlib.Path(sys.argv[1]); dst=pathlib.Path(sys.argv[2])
           with zipfile.ZipFile(kit) as z:
               bad=z.testzip()
-              if bad:
-                  raise SystemExit(f'runtime kit ZIP integrity failure: {bad}')
+              if bad: raise SystemExit(f'runtime kit ZIP integrity failure: {bad}')
               need={'CERTIFICATION-KIT.json','Frames-0.9.98-Source-v108.zip'}
               missing=need-set(z.namelist())
-              if missing:
-                  raise SystemExit(f'missing runtime kit members: {sorted(missing)}')
+              if missing: raise SystemExit(f'missing runtime kit members: {sorted(missing)}')
               for name in sorted(need): z.extract(name,dst)
           PY
 
@@ -135,7 +134,7 @@ jobs:
 
           Built from the exact source sealed by the successful v108 r9 certification.
           This ISO packaging is test media derived from the certified source baseline.
-          It does not change the certification status or unlock physical-media writes.
+          It does not change certification status or unlock physical-media writes.
           UEFI boot only.
           EOF
 
@@ -163,13 +162,9 @@ jobs:
           cp "$VARS_SRC" "$RUNNER_TEMP/OVMF_VARS.fd"
           set +e
           timeout 18s qemu-system-x86_64 \
-            -machine q35,accel=tcg \
-            -m 768 \
-            -no-reboot \
-            -display none \
+            -machine q35,accel=tcg -m 768 -no-reboot -display none \
             -serial file:"$GITHUB_WORKSPACE/boot-out/QEMU-ISO-SERIAL.log" \
-            -monitor none \
-            -nic none \
+            -monitor none -nic none \
             -drive if=pflash,format=raw,readonly=on,file="$CODE" \
             -drive if=pflash,format=raw,file="$RUNNER_TEMP/OVMF_VARS.fd" \
             -cdrom "$ISO" \
@@ -177,7 +172,6 @@ jobs:
           rc=$?
           set -e
           if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ]; then
-            echo "Unexpected QEMU exit code: $rc"
             cat "$GITHUB_WORKSPACE/boot-out/QEMU-ISO-DEBUG.log"
             exit "$rc"
           fi
@@ -218,7 +212,6 @@ jobs:
           EOF
           printf 'status=PASS\niso_sha256=%s\nsource_sha256=%s\n' "$iso_sha" "$EXPECTED_SOURCE_SHA256" > BUILD-STATUS.txt
           sha256sum * > SHA256SUMS.txt
-          cat BOOT-IDENTITY.txt
 
       - name: Upload v108 r9 baseline UEFI boot media
         uses: actions/upload-artifact@v4
