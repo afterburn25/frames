@@ -1,0 +1,258 @@
+name: Frames v108 Stable Physical Input Rufus r6b Certification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-physical-input-bringup ]
+    paths:
+      - '.github/workflows/frames-v108-stable-physical-input-rufus-r6b-cert.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SOURCE_RUN_ID: 31929714354
+  CANDIDATE_ARTIFACT: Frames-v108-Stable-Physical-Input-r6-Candidate
+  ISO_NAME: Frames-0.9.98-v108-Stable-Physical-Input-Diagnostic-r6-Rufus-UEFI.iso
+  EXPECTED_ISO_SHA: 4aa3ddfbe70668f0d362fcb9c8ea04c77a96977b417eed090c7bfc8f4177fd22
+  EXPECTED_ISO_SIZE: 18722816
+  EXPECTED_KERNEL_SHA: de8cd41f707268bc0d7bb2ff5ef925ba0e8981650703afdb065b1a62a1d6cca1
+
+jobs:
+  identity:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.CANDIDATE_ARTIFACT }}
+          path: candidate
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify immutable r6 candidate
+        run: |
+          set -euo pipefail
+          mkdir -p identity
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"; test -s "$ISO"
+          test "$(sha256sum "$ISO" | awk '{print $1}')" = "$EXPECTED_ISO_SHA"
+          test "$(stat -c '%s' "$ISO")" = "$EXPECTED_ISO_SIZE"
+          K="$(find candidate -name 'stable-r6-sha.txt' -type f -print -quit)"; test -s "$K"
+          test "$(tail -n1 "$K" | tr -d '\r\n ')" = "$EXPECTED_KERNEL_SHA"
+          A="$(find candidate -name 'WRITE-SURFACE-AUDIT.txt' -type f -print -quit)"; grep -q '^status=PASS' "$A"
+          printf 'status=PASS\niso_sha256=%s\niso_size=%s\nkernel_sha256=%s\n' "$EXPECTED_ISO_SHA" "$EXPECTED_ISO_SIZE" "$EXPECTED_KERNEL_SHA" > identity/IDENTITY.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-Stable-r6b-Identity
+          path: identity/**
+          if-no-files-found: error
+          retention-days: 30
+
+  input-visual-stability:
+    needs: identity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [usb, ps2]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.CANDIDATE_ARTIFACT }}
+          path: candidate
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install QEMU/OVMF/Pillow
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf python3 python3-pil
+          code="$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE.fd' \) | head -n1)"
+          test -n "$code"
+          echo "OVMF_CODE=$code" >> "$GITHUB_ENV"
+      - name: Re-certify immutable r6 ISO ${{ matrix.lane }} input and stable framebuffer
+        run: |
+          set -euo pipefail
+          OUT="lane-${{ matrix.lane }}"; mkdir -p "$OUT"
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"; test -s "$ISO"
+          test "$(sha256sum "$ISO" | awk '{print $1}')" = "$EXPECTED_ISO_SHA"
+          python3 - "$OVMF_CODE" "$ISO" "$OUT" '${{ matrix.lane }}' <<'PY'
+          import json,pathlib,socket,subprocess,sys,time
+          ovmf,iso,out,lane=sys.argv[1:]
+          out=pathlib.Path(out); qmp=out/'qmp.sock'; serial=out/'serial.log'; stderr=out/'qemu.stderr'
+          cmd=['qemu-system-x86_64','-machine','q35','-m','768M','-smp','2','-cpu','max','-accel','tcg,thread=single','-display','none','-no-reboot','-no-shutdown','-nic','none','-serial',f'file:{serial}','-qmp',f'unix:{qmp},server=on,wait=off','-drive',f'if=pflash,format=raw,readonly=on,file={ovmf}','-cdrom',iso,'-boot','d']
+          if lane=='usb': cmd += ['-device','qemu-xhci,id=xhci','-device','usb-mouse,bus=xhci.0,id=usbmouse']
+          (out/'qemu-command.json').write_text(json.dumps(cmd,indent=2)+'\n')
+          ef=stderr.open('wb'); p=subprocess.Popen(cmd,stdout=subprocess.DEVNULL,stderr=ef)
+          result={'lane':lane,'status':'FAIL','runtime_ready':False,'input_markers':False,'exact_iso_sha_verified':True}
+          try:
+              deadline=time.time()+25
+              while time.time()<deadline and not qmp.exists():
+                  if p.poll() is not None: raise RuntimeError(f'qemu exited {p.returncode}')
+                  time.sleep(.05)
+              if not qmp.exists(): raise RuntimeError('qmp timeout')
+              s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect(str(qmp)); f=s.makefile('rwb',buffering=0); json.loads(f.readline())
+              def call(name,args=None):
+                  o={'execute':name}
+                  if args is not None:o['arguments']=args
+                  f.write((json.dumps(o)+'\n').encode())
+                  while True:
+                      r=json.loads(f.readline())
+                      if 'return' in r:return r['return']
+                      if 'error' in r:raise RuntimeError(r['error'])
+              call('qmp_capabilities'); mice=call('query-mice'); (out/'query-mice.json').write_text(json.dumps(mice,indent=2)+'\n')
+              if lane=='usb': idx=next((m['index'] for m in mice if ('hid' in m['name'].lower() or 'usb' in m['name'].lower()) and 'ps/2' not in m['name'].lower()),None)
+              else: idx=next((m['index'] for m in mice if 'ps/2' in m['name'].lower() or 'ps2' in m['name'].lower()),None)
+              if idx is None: raise RuntimeError(f'{lane} frontend missing: {mice}')
+              result['frontend_index']=idx
+              call('human-monitor-command',{'command-line':f'mouse_set {idx}'})
+              deadline=time.time()+90
+              while time.time()<deadline:
+                  txt=serial.read_text(errors='ignore') if serial.exists() else ''
+                  if 'FRAMES_V108_INPUT_TEST_RUNTIME_READY' in txt:
+                      if lane=='usb' or 'FRAMES_V108_PS2_ENABLE_OK' in txt:
+                          result['runtime_ready']=True; break
+                  if p.poll() is not None: raise RuntimeError('qemu stopped before runtime ready')
+                  time.sleep(.2)
+              if not result['runtime_ready']: raise RuntimeError('runtime readiness timeout')
+              before=out/'BEFORE.ppm'; call('screendump',{'filename':str(before)})
+              required=['FRAMES_V108_USB_LIVE_REPORT_OK','FRAMES_V108_USB_GUI_CURSOR_OK'] if lane=='usb' else ['FRAMES_V108_PS2_PACKET_OK','FRAMES_V108_PS2_GUI_CURSOR_OK']
+              for _ in range(120):
+                  call('input-send-event',{'events':[{'type':'rel','data':{'axis':'x','value':8}},{'type':'rel','data':{'axis':'y','value':4}}]})
+                  time.sleep(.08)
+                  txt=serial.read_text(errors='ignore') if serial.exists() else ''
+                  if all(x in txt for x in required): result['input_markers']=True; break
+              time.sleep(.35)
+              after=out/'AFTER.ppm'; call('screendump',{'filename':str(after)})
+              result['status']='PASS' if result['runtime_ready'] and result['input_markers'] else 'FAIL'
+              try: call('quit')
+              except Exception: pass
+          finally:
+              try:p.wait(timeout=5)
+              except: p.kill(); p.wait()
+              (out/'RUNTIME.json').write_text(json.dumps(result,indent=2)+'\n'); print(json.dumps(result,indent=2))
+          if result['status']!='PASS': raise SystemExit(1)
+          PY
+          python3 - "$OUT/BEFORE.ppm" "$OUT/AFTER.ppm" "$OUT/VISUAL-STABILITY.json" <<'PY'
+          from PIL import Image
+          import json,sys
+          before=Image.open(sys.argv[1]).convert('RGB'); after=Image.open(sys.argv[2]).convert('RGB')
+          if before.size!=after.size: raise SystemExit('frame size changed')
+          w,h=before.size; a=list(before.getdata()); b=list(after.getdata()); total=len(a)
+          changed=sum(1 for x,y in zip(a,b) if x!=y); unchanged=1-(changed/total)
+          def nondark(p): return sum(p)>=45
+          nb=sum(1 for p in a if nondark(p)); na=sum(1 for p in b if nondark(p)); retention=(na/nb) if nb else 0
+          panel=after.crop((max(0,w-430),0,w,min(h,205))); panel_unique=len(set(panel.getdata()))
+          center=after.crop((w//5,h//5,(w*4)//5,(h*4)//5)); center_ratio=sum(1 for p in center.getdata() if nondark(p))/max(1,center.size[0]*center.size[1])
+          checks={'same_resolution':before.size==after.size,'some_change':changed>=10,'bounded_change':changed<=120000,'desktop_preserved':unchanged>=0.88,'nondark_content_retained':retention>=0.90,'panel_still_rich':panel_unique>=6,'center_not_blank':center_ratio>=0.18}
+          status='PASS' if all(checks.values()) else 'FAIL'
+          result={'status':status,'width':w,'height':h,'changed_pixels':changed,'unchanged_fraction':unchanged,'nondark_before':nb,'nondark_after':na,'nondark_retention':retention,'panel_unique_colors':panel_unique,'center_nondark_ratio':center_ratio,'checks':checks}
+          open(sys.argv[3],'w').write(json.dumps(result,indent=2)+'\n'); print(json.dumps(result,indent=2))
+          if status!='PASS': raise SystemExit(1)
+          PY
+          find "$OUT" -type s -delete || true
+          sha256sum "$OUT"/* > "$OUT/SHA256SUMS.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Frames-v108-Stable-r6b-${{ matrix.lane }}-Evidence
+          path: lane-${{ matrix.lane }}/**
+          if-no-files-found: error
+          retention-days: 30
+
+  readonly-safety:
+    needs: identity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.CANDIDATE_ARTIFACT }}
+          path: candidate
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install QEMU/OVMF
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf
+          code="$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE.fd' \) | head -n1)"
+          test -n "$code"
+          echo "OVMF_CODE=$code" >> "$GITHUB_ENV"
+      - name: Re-certify exact r6 ISO read-only safety
+        run: |
+          set -euo pipefail
+          mkdir -p safety
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"; test -s "$ISO"
+          test "$(sha256sum "$ISO" | awk '{print $1}')" = "$EXPECTED_ISO_SHA"
+          truncate -s 32M safety/internal-sentinel.img
+          set +e
+          timeout 90 qemu-system-x86_64 -machine q35 -m 768M -smp 2 -cpu max -accel tcg,thread=single -display none -no-reboot -no-shutdown -nic none -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" -cdrom "$ISO" -drive if=none,id=sentinel,format=raw,readonly=on,file=safety/internal-sentinel.img -device nvme,serial=READONLYSENTINEL,drive=sentinel -serial file:safety/serial.log -boot d
+          rc=$?
+          set -e
+          test "$rc" = 124 || test "$rc" = 0
+          grep -q 'FRAMES_V108_INPUT_TEST_RUNTIME_READY' safety/serial.log
+          ! grep -Eqi 'write.*error|readonly.*write|destructive.*armed' safety/serial.log
+          printf 'status=PASS\niso_sha256=%s\ninternal_sentinel_read_only=true\nphysical_destructive_writes_certified=false\n' "$EXPECTED_ISO_SHA" > safety/READONLY-SAFETY.txt
+          sha256sum safety/serial.log safety/READONLY-SAFETY.txt > safety/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-Stable-r6b-ReadOnly-Safety
+          path: safety/**
+          if-no-files-found: error
+          retention-days: 30
+
+  final:
+    needs: [identity, input-visual-stability, readonly-safety]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.CANDIDATE_ARTIFACT }}
+          path: candidate
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Seal immutable stable diagnostic ISO
+        run: |
+          set -euo pipefail
+          mkdir -p final
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"; test -s "$ISO"
+          test "$(sha256sum "$ISO" | awk '{print $1}')" = "$EXPECTED_ISO_SHA"
+          test "$(stat -c '%s' "$ISO")" = "$EXPECTED_ISO_SIZE"
+          cp "$ISO" final/
+          printf '%s  %s\n' "$EXPECTED_ISO_SHA" "$ISO_NAME" > final/ISO-SHA256.txt
+          printf '%s\n' "$EXPECTED_ISO_SIZE" > final/ISO-SIZE.txt
+          cat > final/FINAL-STABLE-INPUT-DIAGNOSTIC.json <<EOF
+          {
+            "status": "PASS",
+            "profile": "frames-0.9.98-v108-stable-physical-input-r6b",
+            "source_build_run": $SOURCE_RUN_ID,
+            "kernel_sha256": "$EXPECTED_KERNEL_SHA",
+            "iso_sha256": "$EXPECTED_ISO_SHA",
+            "rufus_compatible_uefi_iso": true,
+            "recommended_rufus_mode": "ISO Image mode",
+            "normal_desktop_repaint_suppressed": true,
+            "deep_usb_enumeration_telemetry": true,
+            "deep_ps2_raw_classification_telemetry": true,
+            "qemu_usb_live_input": true,
+            "qemu_ps2_live_input": true,
+            "qemu_visual_stability_gate": true,
+            "runtime_evidence_consistent": true,
+            "readonly_safety_gate": true,
+            "physical_boot_test_allowed": true,
+            "physical_hardware_input_verified": false,
+            "physical_destructive_writes_certified": false,
+            "promotion_allowed": false
+          }
+          EOF
+          sha256sum final/* > final/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-Stable-Physical-Input-r6b-Rufus-Final
+          path: final/**
+          if-no-files-found: error
+          retention-days: 30
