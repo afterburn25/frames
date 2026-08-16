@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/frames-v108-physical-input-r16-interaction-cert.yml'
       - 'tools/ci/patch_v108_physical_input_r16_interaction.py'
+      - 'tools/ci/patch_v108_physical_input_r16b_abi.py'
       - 'tools/ci/r16_patch_b64/**'
       - 'tools/ci/qemu_desktop_interaction_gate_r16.py'
       - 'tools/ci/qemu_usb_multicontroller_gate_r16.py'
@@ -21,7 +22,8 @@ env:
   SRC_SHA: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
   R15_SHA: fa0f42f558f0004f7663f79b49c3049c57c896203cf18646b1ec6f999824f941
   R16_PATCH_SHA: 50c9e84a156dbdcb2c82fc459cb69f6a82f20c2e3dd5bfba1c12bf04fd03f19c
-  R16_SHA: 8fd8fcf0be5160bed4524e1dc6e45cac659ab7a5fc9c2f1fbb9c14de32e00ffd
+  R16_PRE_SHA: 8fd8fcf0be5160bed4524e1dc6e45cac659ab7a5fc9c2f1fbb9c14de32e00ffd
+  R16_SHA: 8cd489eddc44a7a3efa0eb903e715c1f6ca243d9369cfaf2b9e358d019ded2fe
   ISO_NAME: Frames-0.9.98-v108-Physical-Input-Repair-r16-Interaction-Rufus-UEFI.iso
 
 jobs:
@@ -68,7 +70,9 @@ jobs:
           F="$RUNNER_TEMP/r16cert/src/Frames-0.9.98"
           cp r15-candidate/evidence/kernel-r15.nx "$F/kernel/main.nx"
           cp "$F/kernel/main.nx" evidence/kernel-r15.nx
-          python3 tools/ci/patch_v108_physical_input_r16_interaction.py "$F/kernel/main.nx" | tee evidence/R16-SHA.txt
+          python3 tools/ci/patch_v108_physical_input_r16_interaction.py "$F/kernel/main.nx" | tee evidence/R16-PRE-SHA.txt
+          test "$(sha256sum "$F/kernel/main.nx" | awk '{print $1}')" = "$R16_PRE_SHA"
+          python3 tools/ci/patch_v108_physical_input_r16b_abi.py "$F/kernel/main.nx" | tee evidence/R16-SHA.txt
           test "$(sha256sum "$F/kernel/main.nx" | awk '{print $1}')" = "$R16_SHA"
           cp "$F/kernel/main.nx" evidence/kernel-r16.nx
           diff -u evidence/kernel-r15.nx evidence/kernel-r16.nx > evidence/R15-R16.patch || true
