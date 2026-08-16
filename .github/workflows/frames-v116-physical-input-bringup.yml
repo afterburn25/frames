@@ -35,7 +35,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y clang lld python3 unzip mtools dosfstools gdisk xorriso
+          sudo apt-get install -y clang lld python3 python3-pil unzip mtools dosfstools gdisk xorriso
 
       - name: Reconstruct sealed source and v116 architecture
         shell: bash
@@ -85,7 +85,6 @@ jobs:
           test "$(sha256sum "$S/kernel/main.nx" | awk '{print $1}')" = "$INPUT_PATCHED_MAIN_SHA256"
           grep -q 'xhci_reset_connected_port_from' "$S/kernel/main.nx"
           grep -q 'ps2_mouse_decode_live' "$S/kernel/main.nx"
-          grep -q 'FRAMES_LIVE_USB_GUI_CURSOR_OK' "$S/kernel/main.nx" || true
           sha256sum "$S/kernel/main.nx" "$S/boot/uefi/frames_boot.c" > "$E/PATCHED-SOURCE-SHA256.txt"
           echo "SPLASH=$SPLASH" >> "$GITHUB_ENV"
 
@@ -118,7 +117,7 @@ jobs:
           dd if="$ESP" of="$RUNNER_TEMP/iso-root/efiboot.img" bs=512 skip="$EF" count="$((EL-EF+1))" status=none
           ISO="$GITHUB_WORKSPACE/Frames-0.9.106-v116-Physical-Input-Bringup-UEFI.iso"
           xorriso -as mkisofs -R -J -V 'FRAMES_INPUT' -eltorito-alt-boot -e efiboot.img -no-emul-boot -o "$ISO" "$RUNNER_TEMP/iso-root" > "$E/XORRISO.log" 2>&1
-          test -s "$ISO"; sha256sum "$ISO" > "$E/ISO-SHA256.txt"; echo "ISO=$ISO" >> "$GITHUB_ENV"
+          test -s "$ISO"; sha256sum "$ISO" > "$E/ISO-SHA256.txt"
 
       - uses: actions/upload-artifact@v4
         with:
