@@ -1,0 +1,144 @@
+name: Frames v108 Physical Input r18 Finalize r6
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-usb-hub-topology-r1 ]
+    paths: [ '.github/workflows/frames-v108-physical-input-r18-finalize-r6.yml' ]
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SOURCE_RUN: '31975226687'
+  ISO_NAME: Frames-0.9.98-v108-Physical-Input-Repair-r18-USB-xHCI-Menu-Stability-Rufus-UEFI.iso
+  R18_SHA: dd0386720bba6dce4c1fd0576e995dd6a2932638633147914589b342cc3dfe22
+
+jobs:
+  repaired-gates:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [smoothness, context-menu]
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: v108-usb-hub-topology-r1 }
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r18-Candidate-r5
+          path: candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN }}
+      - name: Install runtime tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf python3 python3-pil
+          O="$(find /usr/share/OVMF -type f \( -name OVMF_CODE_4M.fd -o -name OVMF_CODE.fd \) | head -n1)"
+          test -s "$O"; echo "OVMF=$O" >> "$GITHUB_ENV"
+      - name: Verify exact unchanged r18 candidate
+        run: |
+          test "$(sha256sum candidate/evidence/kernel-r18.nx | awk '{print $1}')" = "$R18_SHA"
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"; test -s "$ISO"
+          EXPECT="$(awk '{print $1}' candidate/evidence/ISO-SHA256.txt)"
+          test "$(sha256sum "$ISO" | awk '{print $1}')" = "$EXPECT"
+      - name: Run corrected ${{ matrix.lane }} gate
+        run: |
+          set -euo pipefail
+          mkdir -p gate
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"
+          EXPECT="$(awk '{print $1}' candidate/evidence/ISO-SHA256.txt)"
+          case '${{ matrix.lane }}' in
+            smoothness)
+              python3 tools/ci/qemu_ps2_cursor_smoothness_r18.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$EXPECT"
+              grep -q '"status": "PASS"' gate/SMOOTHNESS.json ;;
+            context-menu)
+              python3 tools/ci/qemu_context_menu_gate_r18.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$EXPECT"
+              grep -q '"status": "PASS"' gate/CONTEXT-MENU.json ;;
+          esac
+          echo PASS > gate/RESULT.status
+          sha256sum gate/* 2>/dev/null > gate/SHA256SUMS.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Frames-v108-r18-r6-${{ matrix.lane }}-Evidence
+          path: gate/**
+          if-no-files-found: warn
+          retention-days: 30
+
+  final:
+    needs: repaired-gates
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r18-Candidate-r5
+          path: candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN }}
+      - name: Download original r5 evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: Frames-v108-r18-r5-*-Evidence
+          path: original
+          merge-multiple: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN }}
+      - name: Download repaired r6 evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: Frames-v108-r18-r6-*-Evidence
+          path: repaired
+          merge-multiple: false
+      - name: Aggregate successful original lanes and repaired gates
+        run: |
+          set -euo pipefail
+          for lane in usb-direct usb-hub usb-hub-multi usb-multicontroller usb-keyboard ps2 text-edit focus-persistence desktop-interaction model safety; do
+            test "$(cat original/Frames-v108-r18-r5-$lane-Evidence/RESULT.status)" = PASS
+          done
+          for lane in smoothness context-menu; do
+            test "$(cat repaired/Frames-v108-r18-r6-$lane-Evidence/RESULT.status)" = PASS
+          done
+          test "$(sha256sum candidate/evidence/kernel-r18.nx | awk '{print $1}')" = "$R18_SHA"
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"; test -s "$ISO"
+          EXPECT="$(awk '{print $1}' candidate/evidence/ISO-SHA256.txt)"; test "$(sha256sum "$ISO" | awk '{print $1}')" = "$EXPECT"
+          mkdir final; cp "$ISO" final/; sha256sum "$ISO" | tee final/ISO-SHA256.txt; stat -c '%s' "$ISO" | tee final/ISO-SIZE.txt
+          cat > final/CERTIFICATION.txt <<EOF
+          Frames 0.9.98 v108 r18 — xHCI Physical Enumeration + Menu Stability
+          status=PASS_VM_PENDING_PHYSICAL
+          source_sha256=$R18_SHA
+          iso_sha256=$EXPECT
+          exact_candidate_run=$SOURCE_RUN
+          vm_usb_direct=PASS
+          vm_usb_hub=PASS
+          vm_usb_hub_multi=PASS
+          vm_usb_multicontroller=PASS
+          vm_usb_keyboard=PASS
+          vm_ps2_delivery=PASS
+          vm_ps2_smoothness=PASS_REPAIRED_GATE
+          vm_text_edit=PASS
+          vm_focus_persistence=PASS
+          vm_context_menu_fixed_hover_select_dismiss_repeat=PASS_REPAIRED_GATE
+          vm_desktop_interaction=PASS
+          vm_model=PASS
+          readonly_internal_media=PASS
+          physical_r17_text_focus=PASS
+          physical_r17_usb_mouse=FAIL_NO_CURSOR
+          physical_r17_usb_keyboard=FAIL_NO_RESPONSE
+          physical_r17_motion_refresh=FAIL
+          physical_r17_context_menu_interaction=FAIL
+          physical_r18=PENDING
+          destructive_writes=BLOCKED
+          frames_1_0_promoted=NO
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r18-Rufus-Final-r6
+          path: final/**
+          if-no-files-found: error
+          retention-days: 30
