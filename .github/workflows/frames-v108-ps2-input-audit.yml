@@ -1,0 +1,56 @@
+name: Frames v108 PS2 Input Audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-physical-input-bringup ]
+    paths: [ '.github/workflows/frames-v108-ps2-input-audit.yml' ]
+
+permissions:
+  contents: read
+
+env:
+  KIT_SHA: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
+  SRC_SHA: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
+
+jobs:
+  ps2-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: v108-physical-input-bringup }
+      - name: Reconstruct exact certified v108
+        shell: bash
+        run: |
+          set -euo pipefail
+          K=Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip; test "$(sha256sum "$K"|awk '{print $1}')" = "$KIT_SHA"
+          mkdir -p "$RUNNER_TEMP/k" "$RUNNER_TEMP/s" ps2-audit; unzip -q "$K" -d "$RUNNER_TEMP/k"
+          Z="$RUNNER_TEMP/k/Frames-0.9.98-Source-v108.zip"; test "$(sha256sum "$Z"|awk '{print $1}')" = "$SRC_SHA"; unzip -q "$Z" -d "$RUNNER_TEMP/s"
+          echo "SRC=$RUNNER_TEMP/s/Frames-0.9.98/kernel/main.nx" >> "$GITHUB_ENV"
+      - name: Inspect PS2 live path and later repair applicability
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$SRC" ps2-audit/PS2-AUDIT.json ps2-audit/PS2-EXCERPTS.txt <<'PY'
+          from pathlib import Path
+          import json,sys,hashlib
+          p=Path(sys.argv[1]); s=p.read_text(); lines=s.splitlines()
+          terms=['ps2_poll_fallback','ps2_mouse_decode_byte','ps2_mouse_decode_packet','ps2_phase_acquire_byte','ps2_phase_finish_lock','ps2_phase_reset','generic_pointer_emit_relative','ps2_irq_raw_push','ps2_irq_drain','AUX','io_read8(100)','io_write8(100','io_write8(96']
+          counts={t:s.count(t) for t in terms}
+          result={'status':'PASS','kernel_sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'counts':counts,'has_packet_phase_learning':counts['ps2_phase_acquire_byte']>0,'has_generic_pointer_bridge':counts['generic_pointer_emit_relative']>0,'has_irq_raw_queue':counts['ps2_irq_raw_push']>0}
+          Path(sys.argv[2]).write_text(json.dumps(result,indent=2)+'\n')
+          out=[]
+          for t in terms:
+            out.append('===== '+t+' =====')
+            hits=0
+            for i,l in enumerate(lines):
+              if t.lower() in l.lower():
+                hits+=1
+                if hits<=30:
+                  a=max(0,i-4); b=min(len(lines),i+8); out.extend(f'{n+1:06d}: {lines[n]}' for n in range(a,b)); out.append('')
+          Path(sys.argv[3]).write_text('\n'.join(out))
+          print(json.dumps(result,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with: { name: Frames-v108-PS2-Input-Audit, path: 'ps2-audit/**', if-no-files-found: error, retention-days: 30 }
