@@ -82,13 +82,13 @@ jobs:
           sleep 30
           printf 'screendump %s\ninfo status\nquit\n' "$SHOT" | nc -U "$MON" > "$GITHUB_WORKSPACE/v72-desktop-proof/QEMU-MONITOR.txt" 2>&1 || true
           wait "$PID" || true
-          grep -E 'FRAMES_(FILESYSTEM|NETWORK_CORE|DISPLAY|DESKTOP|INTEGRATED_GUI|GUI_|READY)' "$SERIAL" | tee "$GITHUB_WORKSPACE/v72-desktop-proof/DESKTOP-MARKERS.txt" || true
+          grep -E 'FRAMES_(FILESYSTEM|NETWORK_CORE|DISPLAY|DESKTOP|GUI_|READY)' "$SERIAL" | tee "$GITHUB_WORKSPACE/v72-desktop-proof/DESKTOP-MARKERS.txt" || true
           grep -q 'FRAMES_DESKTOP_POLICY_OK' "$SERIAL"
           grep -q 'FRAMES_NETWORK_CORE_OK' "$SERIAL"
           grep -q 'FRAMES_DESKTOP_PHASE1_OK' "$SERIAL"
           grep -q 'FRAMES_GUI_APP_CONTRACT_OK' "$SERIAL"
           grep -q 'FRAMES_DESKTOP_PHASE5_OK' "$SERIAL"
-          grep -q 'FRAMES_INTEGRATED_GUI_OK' "$SERIAL"
+          grep -q 'FRAMES_GUI_DESKTOP_INTEGRATED_OK' "$SERIAL"
           test -s "$SHOT"
       - name: Upload proof
         if: always()
