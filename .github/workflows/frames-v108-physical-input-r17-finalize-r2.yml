@@ -1,0 +1,146 @@
+name: Frames v108 Physical Input r17 Finalize r2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-usb-hub-topology-r1 ]
+    paths:
+      - '.github/workflows/frames-v108-physical-input-r17-finalize-r2.yml'
+      - 'tools/ci/qemu_usb_hub_multichild_gate_r17.py'
+      - 'tools/ci/qemu_ps2_delivery_gate_r17.py'
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SOURCE_RUN: '31973170624'
+  R17_SHA: 990a52e11163359e65307c25752504827398b288d4a1ef763675039b47103732
+  ISO_SHA: 89fa7e4732b9c17736c3d944ea719b3af0f885b261c94c1874a2bd807ca9f6ab
+  ISO_NAME: Frames-0.9.98-v108-Physical-Input-Repair-r17-USB-Focus-Rufus-UEFI.iso
+
+jobs:
+  repaired-gates:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [usb-hub-multi, ps2]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-usb-hub-topology-r1
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r17-Candidate
+          path: candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN }}
+      - name: Install runtime tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf python3
+          O="$(find /usr/share/OVMF -type f \( -name OVMF_CODE_4M.fd -o -name OVMF_CODE.fd \) | head -n1)"
+          test -s "$O"; echo "OVMF=$O" >> "$GITHUB_ENV"
+      - name: Run corrected ${{ matrix.lane }} gate
+        run: |
+          set -euo pipefail
+          mkdir -p gate
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"
+          test -s "$ISO"
+          test "$(sha256sum "$ISO" | awk '{print $1}')" = "$ISO_SHA"
+          case '${{ matrix.lane }}' in
+            usb-hub-multi)
+              python3 tools/ci/qemu_usb_hub_multichild_gate_r17.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$ISO_SHA"
+              grep -q '"status": "PASS"' gate/MULTICHILD-R17.json ;;
+            ps2)
+              python3 tools/ci/qemu_ps2_delivery_gate_r17.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$ISO_SHA"
+              grep -q '"status": "PASS"' gate/PS2-DELIVERY.json ;;
+          esac
+          echo PASS > gate/RESULT.status
+          sha256sum gate/* 2>/dev/null > gate/SHA256SUMS.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Frames-v108-r17-r2-${{ matrix.lane }}-Evidence
+          path: gate/**
+          if-no-files-found: warn
+          retention-days: 30
+
+  final:
+    needs: repaired-gates
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r17-Candidate
+          path: candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN }}
+      - name: Download original successful r17 evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: 'Frames-v108-r17-*-Evidence'
+          path: source-gates
+          merge-multiple: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN }}
+      - name: Download repaired r17 evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: 'Frames-v108-r17-r2-*-Evidence'
+          path: repaired-gates
+          merge-multiple: false
+      - name: Aggregate and seal exact r17 candidate
+        run: |
+          set -euo pipefail
+          for lane in usb-direct usb-hub usb-multicontroller usb-keyboard smoothness text-edit focus-persistence right-click desktop-interaction model safety; do
+            test "$(cat source-gates/Frames-v108-r17-$lane-Evidence/RESULT.status)" = PASS
+          done
+          test "$(cat repaired-gates/Frames-v108-r17-r2-usb-hub-multi-Evidence/RESULT.status)" = PASS
+          test "$(cat repaired-gates/Frames-v108-r17-r2-ps2-Evidence/RESULT.status)" = PASS
+          test "$(sha256sum candidate/evidence/kernel-r17.nx | awk '{print $1}')" = "$R17_SHA"
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"
+          test -s "$ISO"
+          test "$(sha256sum "$ISO" | awk '{print $1}')" = "$ISO_SHA"
+          mkdir final
+          cp "$ISO" final/
+          sha256sum "$ISO" | tee final/ISO-SHA256.txt
+          stat -c '%s' "$ISO" | tee final/ISO-SIZE.txt
+          cat > final/CERTIFICATION.txt <<'EOF'
+          Frames 0.9.98 v108 r17 — USB HID + Focus Physical Candidate
+          status=PASS_VM_PENDING_PHYSICAL
+          source_sha256=990a52e11163359e65307c25752504827398b288d4a1ef763675039b47103732
+          iso_sha256=89fa7e4732b9c17736c3d944ea719b3af0f885b261c94c1874a2bd807ca9f6ab
+          vm_usb_mouse_direct=PASS
+          vm_usb_mouse_hub=PASS
+          vm_usb_mouse_keyboard_then_mouse_hub=PASS
+          vm_usb_mouse_multicontroller=PASS
+          vm_usb_keyboard_fallback=PASS
+          vm_ps2_end_to_end_cursor=PASS
+          vm_ps2_smoothness=PASS
+          vm_text_edit=PASS
+          vm_text_focus_persistence=PASS
+          vm_desktop_right_click_context=PASS
+          vm_window_drag=PASS
+          vm_bottom_edge=PASS
+          readonly_internal_media=PASS
+          physical_r15_usb_mouse=FAIL_NO_CURSOR
+          physical_r15_usb_keyboard=FAIL_NO_RESPONSE
+          physical_r15_touchpad=PARTIAL_IMPROVED_OCCASIONAL_KICKBACK
+          physical_r15_tap_to_click=FAIL
+          physical_r15_text_focus=FAIL_HOVER_LIFETIME
+          physical_r17=PENDING
+          destructive_writes=BLOCKED
+          frames_1_0_promoted=NO
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r17-Rufus-Final-r2
+          path: final/**
+          if-no-files-found: error
+          retention-days: 30
