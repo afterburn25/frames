@@ -1,157 +1,181 @@
 # Frames — Canonical Project State
 
-> This file is the authoritative cross-chat handoff for active Frames engineering.
-> Repository/evidence overrides chat summaries or prior claims.
+> Authoritative cross-chat handoff for active Frames engineering.
+> Repository/evidence overrides chat summaries and prior claims.
 
 Last updated: 2026-08-16
 
-## Project identity
-
-- Frames is an independent operating system, not Windows- or Linux-based.
-- Native systems language/toolchain: Nexus.
-- Boot chain: UEFI -> BOOTX64.EFI -> FramesKernel.fkrn.
-- Native application formats: FEX/FAPP.
-- Evidence model: fail-closed, exact-source/hash based, QEMU/OVMF-first, then real-hardware confirmation for hardware claims.
+## Project identity / safety
+- Frames is an independent OS using Nexus.
+- Boot: UEFI -> BOOTX64.EFI -> FramesKernel.fkrn.
+- Evidence: fail-closed, exact-source/hash, QEMU/OVMF-first, then physical confirmation for hardware claims.
 - Frames 1.0 is NOT promoted.
+- Physical destructive writes remain uncertified and blocked.
+- Installation/persistent internal-media modification remain locked.
+- User-facing physical-test artifacts must be Rufus-compatible UEFI ISOs; raw IMG is CI-only.
 
 ## Fresh certified foundation — Frames 0.9.98 v108 r9
-
-The unchanged authoritative v108 r9 certification was freshly rerun on 2026-08-16 and passed end-to-end.
-
-- workflow: `.github/workflows/main.yml`
-- run `31831716862`, attempt 2: PASS
-- workflow source commit `7333a6670a38c9180e7d72c2a3df444409c36164`
+- workflow `.github/workflows/main.yml`
+- fresh run `31831716862`, attempt 2: PASS
+- source commit `7333a6670a38c9180e7d72c2a3df444409c36164`
 - runtime kit SHA-256 `61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a`
 - nested source SHA-256 `5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d`
 - exact certified `kernel/main.nx` SHA-256 `ffc5721eca68844357dbdca63b0edf266e7e210f9d162eecde8cae0067f210a8`
-- fresh evidence artifact `9257820749`
+- evidence artifact `9257820749`
 - evidence ZIP SHA-256 `b7589b75190186b3886e76e8e571bbee1d58884e8a5516338ba59c994427ce74`
 
-Active input branch: `v108-physical-input-bringup`.
+Active branch: `v108-physical-input-bringup`.
+All current physical-input work is reconstructed from the exact certified v108 source; v109-v116 transforms are excluded.
 
-All current input work is reconstructed from the exact certified v108 source. v109-v116 transforms are intentionally excluded from this bring-up train.
+## Authoritative real-hardware result from r6
+The user's laptop booted the stable r6 Rufus diagnostic ISO and supplied baseline, USB-movement and touchpad-movement photos.
 
-## Authoritative physical input result — USB FAIL / PS2 TOUCHPAD INGRESS PROVEN
-
-The user's real laptop booted the stable r6 Rufus diagnostic ISO and supplied three close-up telemetry photos: settled baseline, USB-mouse movement, and built-in-touchpad movement.
-
-### External USB mouse — FAIL before HID
-
-Baseline and USB-movement photos remained effectively unchanged:
+### External USB mouse — physical FAIL before HID
+Observed unchanged while moving USB mouse:
 - `USB H R P = 0, 0, 16`
 - `USB S T C = 5, 8, 0, 0`
-- no USB live-report count increase;
-- no internal pointer-coordinate movement attributable to USB.
+- no USB live-report increase
+- no pointer-coordinate movement from USB
 
-Interpretation:
-- stage 5 means the first 8 bytes of the USB device descriptor were obtained;
-- 8 scan tries were exhausted;
-- device class remained unknown (`0`) because enumeration never reached the full-descriptor/HID-discovery stage;
-- therefore the immediate USB blocker is the xHCI transition after descriptor-8, before full device descriptor/HID discovery.
+Meaning:
+- stage 5: first 8 bytes of USB device descriptor obtained;
+- 8 scan attempts exhausted;
+- class still 0;
+- failure occurs after descriptor-8, before full descriptor/HID discovery.
 
-The previously discovered USB-hub traversal gap remains real, but the physical telemetry now points to this earlier stage-5 address/descriptor transition as the first physical blocker to repair.
+A separate QEMU topology probe also proves v108 lacks USB-hub traversal:
+- workflow `.github/workflows/frames-v108-usb-hub-topology-probe.yml`
+- run `31929194248`
+- direct xHCI mouse: supported
+- mouse behind hub: `NO_HID_BEHIND_TOPOLOGY`
 
-### Built-in touchpad / PS2-AUX — LIVE HARDWARE PATH PROVEN
+The laptop's first known blocker, however, is the earlier physical stage-5 transition.
 
-Before touchpad movement the panel showed essentially no live PS2 packet traffic and internal pointer coordinates around `X=396, Y=290`.
-
-After moving the built-in touchpad, the physical panel showed approximately:
+### Built-in touchpad — physical PS/2/AUX ingress PROVEN
+Before touchpad motion: internal pointer around `396,290` with essentially no live packet count.
+After motion, physical panel approximately showed:
 - `PS2 E PK = 1, 21`
 - `P2 O A K = 1410, 1410, 0`
 - `P2 R PH PK = 1410, 0, 21`
 - `P2 SY R1 R2 = 245, 1047, 71`
-- last candidate bytes `P2 B0 B1 B2 = 45, 16, 49`
+- `P2 B0 B1 B2 = 45, 16, 49`
 - `SRC = 2`
-- internal pointer coordinates changed to approximately `X=1194, Y=0`.
+- internal pointer moved to about `1194,0`
 
-This proves on the real laptop:
-- i8042/PS2 input bytes are arriving;
-- the bytes are AUX-classified;
-- Frames decodes at least some packets;
-- the pointer source becomes PS2 (`SRC=2`);
-- the internal GUI pointer coordinates change in response to real touchpad motion.
+Therefore on the real laptop:
+- i8042/PS2 bytes arrive;
+- they classify as AUX;
+- Frames decodes some packets;
+- source becomes PS2;
+- internal GUI pointer coordinates change from real touchpad motion.
 
-Therefore the built-in touchpad is NOT an I2C-only dead end on this laptop. The immediate remaining touchpad work is visible cursor presentation plus motion-quality/packet-rejection tuning, not basic transport discovery.
+Touchpad is not an I2C-only dead end on this machine. Remaining physical questions are visible cursor behavior and motion quality. High reject counts indicate later packet synchronization tuning may still be needed.
 
-The large reject counters also show that packet synchronization/quality can still be improved after visible cursor movement is restored.
+### r6 framebuffer observation
+The earlier full-screen repaint problem is fixed. During physical touchpad motion only the diagnostic box flickers/refreshes. That is expected telemetry redraw.
 
-### Framebuffer behavior
+## r7 result — VM PASS, superseded before physical handoff
+r7 added:
+- EP0 current transfer-ring dequeue pointer before second xHCI Address Device command;
+- xHCI completion-code telemetry;
+- cursor-only background save/restore and motion presentation.
 
-The old full-screen repaint behavior is gone in r6. During touchpad activity, only the diagnostic box flickers/refreshes. That is expected because r6 intentionally redraws the telemetry panel while suppressing normal desktop/window-manager repaints.
+Exact final r7 source SHA-256:
+`d458aa61d92ff33bcf7e529354deec7cd345d5d96188c95b08842853fa3e3e2b`
 
-This validates the r6 stabilization change. The next repair can safely add cursor-only redraw without re-enabling full-desktop repainting.
+Workflow run `31931069383`: build, USB VM input, PS2 VM input, read-only safety and final seal all PASS.
 
-## Confirmed USB topology gap
+r7 ISO:
+- SHA-256 `745236c199f88b15234ac7aa1bcd3a807c4cb960124aae90873733a62a101d35`
+- size `18,728,960`
 
-Workflow `.github/workflows/frames-v108-usb-hub-topology-probe.yml` corrected run `31929194248`:
-- direct xHCI USB mouse: `SUPPORTED`;
-- USB mouse behind a USB hub: `NO_HID_BEHIND_TOPOLOGY`.
+Independent screenshot inspection then found a static ghost cursor caused by existing desktop compose code reading cursor fields with wrong offsets (`+16/+24` instead of `+8/+16`). r7 was therefore NOT handed to the user for physical testing.
 
-Conclusion: v108 still lacks USB-hub traversal. This remains a required USB capability, but the current laptop first stalls earlier at physical stage 5.
+## Active physical candidate — r8 single-cursor + r7 USB repair
+r8 fixes the ghost cursor while retaining the r7 xHCI repair.
 
-## Superseded stable r6 diagnostic
+Patch:
+- `tools/ci/patch_v108_physical_input_r8_cursor_offsets.py`
+- r7 input SHA `d458aa61d92ff33bcf7e529354deec7cd345d5d96188c95b08842853fa3e3e2b`
+- exact r8 `kernel/main.nx` SHA `b0e7893dea8306b44ea044b5e712fb4568223b5bdd599b9d369f19e523bad037`
 
-Stable r6 was the diagnostic ISO that produced the decisive physical telemetry above:
-- `Frames-0.9.98-v108-Stable-Physical-Input-Diagnostic-r6-Rufus-UEFI.iso`
-- SHA-256 `4aa3ddfbe70668f0d362fcb9c8ea04c77a96977b417eed090c7bfc8f4177fd22`
-- size `18,722,816 bytes`
-- Rufus mode: ISO Image mode
-- immutable re-cert run `31929841882`: PASS
+r8 cursor repair:
+- fixes all eight incorrect cursor structure reads;
+- canonical cursor fields are `+8 = X`, `+16 = Y`, `+24 = width`;
+- performs one clean desktop redraw at input-runtime startup with the cursor temporarily hidden;
+- restores cursor pointer, captures clean backing pixels and draws one correctly positioned cursor;
+- subsequent movement redraws only old/new 8x16 cursor rectangles plus telemetry;
+- continuous full-desktop repaint remains disabled.
 
-Do not ask the user to retest r6; it has already served its diagnostic purpose.
+r7 USB repair retained in r8:
+- after descriptor-8, EP0 input-context dequeue uses the current software transfer-ring enqueue pointer before second Address Device;
+- updated EP0 max-packet size retained;
+- telemetry fourth USB stage value exposes xHCI command completion/error code.
 
-## Active repair — r7 physical cursor + xHCI descriptor/address transition
+### r8 certification
+Authoritative successful workflow:
+- `.github/workflows/frames-v108-physical-input-r8b-rufus.yml`
+- run `31931560447`: PASS
 
-Active patch:
-- `tools/ci/patch_v108_physical_input_r7.py`
-- exact source input: r6 kernel SHA-256 `de8cd41f707268bc0d7bb2ff5ef925ba0e8981650703afdb065b1a62a1d6cca1`
-- exact r7 kernel output SHA-256 `b94070bfe399162a8bb5bef1694c92100716d500d9e85737896901ef3f5aa8e7`
+Parallel required lanes:
+- build/package: PASS
+- USB VM live input + single-cursor visual gate: PASS
+- PS2 VM live input + single-cursor visual gate: PASS
+- read-only safety: PASS
+- final seal: PASS
 
-Touchpad/cursor repair:
-- retain stable diagnostic mode;
-- save/restore only the small cursor backing rectangle;
-- update only old/new cursor rectangles plus telemetry;
-- do not call normal `appearance_render(process)` or `wm_render_all` in the physical-input loop;
-- emit `FRAMES_V108_PHYSICAL_CURSOR_VISIBLE_OK` after actual pointer-coordinate movement is rendered.
+Exact r8 payload:
+- `BOOTX64.EFI` SHA-256 `69942fa4f886c949b1375abc0fdc9198af86234b690646f9ec9ea29ccae69f04`
+- `FramesKernel.fkrn` SHA-256 `61db147e58337dee9c559774772f70890df2422bebf61f99f8d43d5fcbbb8267`
+- source `kernel/main.nx` SHA-256 `b0e7893dea8306b44ea044b5e712fb4568223b5bdd599b9d369f19e523bad037`
 
-USB repair:
-- after the descriptor-8 control transfer, update EP0's input-context dequeue pointer to the current software control-ring enqueue position before the second Address Device command;
-- preserve the updated EP0 max-packet size;
-- expose the xHCI command-completion/error code on the physical telemetry panel as the fourth USB stage value.
+Exact r8 physical-test ISO:
+- `Frames-0.9.98-v108-Physical-Input-Repair-r8-Rufus-UEFI.iso`
+- SHA-256 `042b73cbd926b75b33102b1b1a8d5f26efcc00840409f74d38bcadfa88d12f44`
+- size `18,728,960 bytes`
+- Rufus mode: **ISO Image mode**
+- final artifact ID `9259478279`
+- final artifact ZIP SHA-256 `12bf34630a71f207f4edced9314f540817e30bc55820924595f78977c407dcb7`
 
-Rationale: mature xHCI stacks refresh EP0's dequeue/enqueue position before the later Address Device transition. The physical stage-5 result directly targets this transition.
+Independent local artifact verification:
+- final ZIP manifest: PASS
+- USB evidence manifest: PASS
+- PS2 evidence manifest: PASS
+- exact ISO SHA/size: PASS
+- read-only safety status: PASS
 
-Certification workflow:
-- `.github/workflows/frames-v108-physical-input-r7-rufus.yml`
-- active run `31930792343`
-- independent USB, PS2, and read-only safety lanes run in parallel after build;
-- final ISO is not released unless all required lanes pass.
+VM visual evidence:
+- PS2 lane: PASS, one cursor only, initial cursor at about `396,290`, moved to about `404,294`, 395 framebuffer pixels changed, legacy ghost absent before and after.
+- USB lane: PASS, one cursor only, initial cursor at about `396,290`, moved to about `404,294`, 235 framebuffer pixels changed, legacy ghost absent before and after.
+- no full-screen repaint in either lane.
 
-## Physical artifact delivery policy
+This is VM evidence only. It does NOT claim the user's physical USB mouse or touchpad visible cursor is fixed yet.
 
-- Every user-facing Frames physical-test artifact must be a Rufus-compatible UEFI `.iso`.
-- Raw `.img` may be used internally by CI/QEMU only.
-- Every delivered ISO must have an exact SHA-256 and be boot-tested in QEMU/OVMF first.
-- State the validated Rufus mode for every artifact; do not make the user guess.
+## Next physical test — r8
+Use only exact ISO SHA:
+`042b73cbd926b75b33102b1b1a8d5f26efcc00840409f74d38bcadfa88d12f44`
 
-## Safety policy
+Rufus: **ISO Image mode**.
 
-- Physical destructive writes remain uncertified and blocked.
-- Installation, persistent internal-media modification and release promotion remain locked.
-- Frames 1.0 remains NOT promoted.
+Physical test order:
+1. boot r8 and wait for the input telemetry panel;
+2. move built-in touchpad slowly right/left/up/down;
+3. check whether the single visible cursor now moves; diagnostic box flicker is acceptable, full-screen repaint is not;
+4. then move external USB mouse;
+5. if USB still fails, photograph the `USB S T C E` row; the fourth `E` value is the xHCI completion/error code;
+6. if touchpad moves but is jumpy/erratic, report that behavior; packet-quality tuning is the next touchpad task.
+
+Physical destructive writes remain blocked during this test.
 
 ## Automatic progression
-
-- Run independent workflows/lanes in parallel whenever practical.
-- Failure -> diagnose -> repair -> rerun automatically.
-- Pass -> independently verify -> update this file -> continue automatically.
-- Do not stop merely to report routine intermediate results.
-- Stop only when real physical hardware/user action is genuinely required or a safety boundary requires authorization.
+- run independent workflows/lanes in parallel whenever practical;
+- failure -> diagnose -> repair -> rerun automatically;
+- pass -> independently verify -> update this file -> continue automatically;
+- stop only for genuine physical hardware/user action or a safety/authorization boundary.
 
 ## New-chat startup
-
 1. Read `PROJECT_STATE.md`.
 2. Read `CONTINUITY_PROTOCOL.md`.
 3. Inspect the active branch/run/evidence named here.
 4. Repository/evidence overrides older chat summaries.
-5. Update this file whenever the milestone, decisive failure, artifact identity, safety boundary or next action changes.
+5. Update this file whenever milestone, decisive failure, artifact identity, safety boundary or next action changes.
