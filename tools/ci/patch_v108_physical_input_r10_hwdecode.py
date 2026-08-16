@@ -200,4 +200,4 @@ s=s[:st]+blk+s[en:]
 
 p.write_text(s)
 out=hashlib.sha256(p.read_bytes()).hexdigest(); print(out)
-if out!='4c11c930183bf612a685edcced654aa9fb9b1377c0c568cf9f64904910178c50': raise SystemExit(f'unexpected r10 output hash: {out}')
+if out!='b2dee4fc2c1ca3ad68d4428febf564a2143948ee797ea74ee532ac87b2c14ab6': raise SystemExit(f'unexpected r10 output hash: {out}')
