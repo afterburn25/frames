@@ -1,4 +1,5 @@
 name: Frames v108 Physical Input r14 Real-Hardware Repair Certification
+# Triggered after workflow registration so this push is evaluated by Actions.
 
 on:
   workflow_dispatch:
