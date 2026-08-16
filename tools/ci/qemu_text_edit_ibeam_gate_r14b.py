@@ -59,9 +59,9 @@ def main():
             time.sleep(.1)
         if not result['runtime_ready']: raise RuntimeError('runtime readiness timeout')
 
-        # Position using the same feedback-controlled standard-PS/2 path already used by
-        # the smoothness certifier. This avoids flooding i8042 and proves the real GUI cursor
-        # actually reaches the textbox before the I-beam assertion is evaluated.
+        # Feedback-controlled standard-PS/2 walk. The key transition under test is that the
+        # normal arrow cursor DISAPPEARS exactly as Frames draws the I-beam over the textbox,
+        # so an arrow-template miss is accepted only when the I-beam runtime marker appears.
         time.sleep(.2); im=capture('START'); pos=locate_cursor(im)
         if pos is None: raise RuntimeError('initial cursor not found')
         result['initial_cursor']=list(pos)
@@ -70,8 +70,7 @@ def main():
         im=capture('WARM'); warm=locate_cursor(im,pos[0]+2,pos[1],12)
         if warm is None: raise RuntimeError('cursor missing after PS2 warm-up')
         pos=warm
-        target_y=570
-        step_index=0
+        target_y=570; step_index=0; entered_ibeam=False
         while pos[1] < target_y and step_index < 120:
             req=min(3,target_y-pos[1])
             call('input-send-event',{'events':[{'type':'rel','data':{'axis':'y','value':req}}]})
@@ -83,18 +82,21 @@ def main():
                 moved=locate_cursor(frame,expected[0],expected[1],12)
                 if moved is None: moved=locate_cursor(frame,pos[0],pos[1],12)
                 if moved is not None and moved!=pos: break
+                t=ser.read_text(errors='ignore') if ser.exists() else ''
+                if 'FRAMES_V108_IBEAM_OK' in t:
+                    result['ibeam']=True; entered_ibeam=True; pos=expected; break
+            step_index+=1
+            if entered_ibeam: break
             if moved is None or moved==pos: raise RuntimeError(f'cursor failed while walking to textbox at {pos}')
             if moved[1] <= pos[1]: raise RuntimeError(f'cursor wrong direction while walking to textbox {pos}->{moved}')
-            pos=moved; step_index+=1
-        result['textbox_hover_cursor']=list(pos)
-        result['textbox_walk_steps']=step_index
+            pos=moved
+        result['textbox_hover_cursor']=list(pos); result['textbox_walk_steps']=step_index
         hover=capture('HOVER')
-        # x stays near 398 and y is now inside the textbox. The rendered cursor itself may be
-        # an I-beam, so the arrow-template locator is no longer used after this point.
-        for _ in range(60):
-            t=ser.read_text(errors='ignore') if ser.exists() else ''
-            if 'FRAMES_V108_IBEAM_OK' in t: result['ibeam']=True; break
-            time.sleep(.05)
+        if not result['ibeam']:
+            for _ in range(60):
+                t=ser.read_text(errors='ignore') if ser.exists() else ''
+                if 'FRAMES_V108_IBEAM_OK' in t: result['ibeam']=True; break
+                time.sleep(.05)
         if not result['ibeam']: raise RuntimeError('I-beam marker not reached after verified textbox hover')
 
         call('input-send-event',{'events':[{'type':'btn','data':{'down':True,'button':'left'}}]}); time.sleep(.08)
