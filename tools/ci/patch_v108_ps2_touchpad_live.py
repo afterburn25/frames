@@ -2,7 +2,7 @@
 from pathlib import Path
 import hashlib,sys
 p=Path(sys.argv[1]); s=p.read_text()
-if 'FRAMES_V108_PS2_GUI_CURSOR_OK' not in s or 'fn v108_input_backend_prepare(input_state:u64) -> u64 { return 1; }' not in s:
+if 'serial_marker_v108_ps2_gui_cursor_ok' not in s or 'fn v108_input_backend_prepare(input_state:u64) -> u64 { return 1; }' not in s:
     raise SystemExit('apply patch_v108_live_input_common.py first')
 for off in ('input_state+3136','input_state+3144','input_state+3152','input_state+3160','input_state+3168','input_state+3176','input_state+3184'):
     if off in s: raise SystemExit(f'PS2 state offset already used: {off}')
