@@ -1,0 +1,246 @@
+name: Frames Boot Splash Phase 1 Certification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ boot-splash-phase1 ]
+    paths:
+      - '.github/workflows/frames-boot-splash-phase1-certification.yml'
+      - 'bootux/**'
+      - 'architecture/integration/**'
+      - 'architecture/v109/**'
+      - 'architecture/v110/**'
+      - 'architecture/v111/**'
+      - 'architecture/v112/**'
+      - 'architecture/v113/**'
+      - 'architecture/v114/**'
+      - 'architecture/v115/**'
+      - 'architecture/v116/**'
+
+permissions:
+  contents: read
+
+env:
+  V101_KIT_SHA256: 84f0a5c6b47d10e11237ab1d6d4c34507a4d525b98bbe58ffc6aa20e3a8dbca5
+  V101_SOURCE_SHA256: ce58e0eceb770e5b9bc3842ce096deccd9640d986ac0acfec5065305efef2b65
+  V101_LOADER_SHA256: 8a35e0f3bdbfab8f9e166cae1ad308d28f906226919f86e60deedb4148b19f9d
+  SPLASH_LOADER_SHA256: 3e1eb3dc31bad6c58e54bdfe0b7f1cf5886ca4660e4a98a0429265717b7be1e6
+
+jobs:
+  certify-splash:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: boot-splash-phase1
+
+      - name: Install build and proof tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 python3-pil unzip qemu-system-x86 ovmf netcat-openbsd mtools dosfstools gdisk file
+
+      - name: Reconstruct exact v101 full product source
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/splash-evidence"; mkdir -p "$E" "$RUNNER_TEMP/v101-kit" "$RUNNER_TEMP/v101-source"
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.91-Integrated-Connected-Services-Certification-Kit-v101.zip"
+          test -s "$KIT"
+          test "$(sha256sum "$KIT" | awk '{print $1}')" = "$V101_KIT_SHA256"
+          unzip -q "$KIT" -d "$RUNNER_TEMP/v101-kit"
+          SRCZIP="$(find "$RUNNER_TEMP/v101-kit" -type f \( -iname 'Frames-0.9.91-Source*.zip' -o -iname '*0.9.91*Source*.zip' \) -print | sort | head -n1 || true)"
+          if [ -z "$SRCZIP" ]; then SRCZIP="$(find "$RUNNER_TEMP/v101-kit" -type f -iname '*Source*.zip' -print | sort | head -n1 || true)"; fi
+          test -n "$SRCZIP"; test -s "$SRCZIP"
+          test "$(sha256sum "$SRCZIP" | awk '{print $1}')" = "$V101_SOURCE_SHA256"
+          unzip -q "$SRCZIP" -d "$RUNNER_TEMP/v101-source"
+          PRODUCT=""
+          while IFS= read -r vf; do
+            d="${vf%/VERSION}"; v="$(tr -d '\r\n' < "$vf")"
+            if [ "$v" = "0.9.91" ] && [ -f "$d/kernel/main.nx" ] && [ -f "$d/boot/uefi/frames_boot.c" ]; then PRODUCT="$d"; break; fi
+          done < <(find "$RUNNER_TEMP/v101-source" -type f -name VERSION -print | sort)
+          test -n "$PRODUCT"
+          test "$(sha256sum "$PRODUCT/boot/uefi/frames_boot.c" | awk '{print $1}')" = "$V101_LOADER_SHA256"
+          echo "PRODUCT=$PRODUCT" >> "$GITHUB_ENV"
+          printf 'product=%s\nversion=%s\nkit_sha256=%s\nsource_sha256=%s\nloader_sha256=%s\n' "$PRODUCT" "$(cat "$PRODUCT/VERSION")" "$V101_KIT_SHA256" "$V101_SOURCE_SHA256" "$V101_LOADER_SHA256" > "$E/BASE-IDENTITY.txt"
+
+      - name: Port certified v109 through v116 architecture onto product kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/splash-evidence"
+          PORT="$GITHUB_WORKSPACE/architecture/integration/port_architecture_to_product.py"
+          : > "$E/PORT-SUCCESS.txt"
+          while read -r label rel; do
+            python3 "$PORT" "$label" "$GITHUB_WORKSPACE/$rel" "$PRODUCT" "$E" | tee -a "$E/PORT-SUCCESS.txt"
+          done <<'EOF'
+          v109 architecture/v109/make_unified_device_architecture_v109.py
+          v110 architecture/v110/make_driver_runtime_v110.py
+          v111 architecture/v111/make_async_io_service_runtime_v111.py
+          v112 architecture/v112/make_device_service_integration_v112.py
+          v113 architecture/v113/make_driver_execution_hal_v113.py
+          v114 architecture/v114/make_kernel_concurrency_driver_scheduling_v114.py
+          v115 architecture/v115/make_driver_migration_unified_input_v115.py
+          v116 architecture/v116/make_usb_core_xhci_migration_v116.py
+          EOF
+          sha256sum "$PRODUCT/kernel/main.nx" > "$E/V116-PRODUCT-KERNEL-SHA256.txt"
+
+      - name: Build canonical splash asset and patch UEFI loader
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/splash-evidence"
+          LOGO="$PRODUCT/assets/branding/FramesLogo.png"
+          SPLASH="$RUNNER_TEMP/SPLASH.FSP"
+          test -s "$LOGO"
+          sha256sum "$LOGO" > "$E/FRAMES-LOGO-SHA256.txt"
+          python3 bootux/make_splash_asset.py "$LOGO" "$SPLASH" | tee "$E/SPLASH-ASSET.json"
+          test -s "$SPLASH"
+          sha256sum "$SPLASH" > "$E/SPLASH-ASSET-SHA256.txt"
+          python3 bootux/patch_uefi_splash.py "$PRODUCT/boot/uefi/frames_boot.c" | tee "$E/SPLASH-PATCH.log"
+          test "$(sha256sum "$PRODUCT/boot/uefi/frames_boot.c" | awk '{print $1}')" = "$SPLASH_LOADER_SHA256"
+          clang -fsyntax-only -ffreestanding -fshort-wchar -mno-red-zone -mno-sse -mno-sse2 -Wno-unused-function "$PRODUCT/boot/uefi/frames_boot.c"
+          sha256sum "$PRODUCT/boot/uefi/frames_boot.c" > "$E/SPLASH-LOADER-SHA256.txt"
+          echo "SPLASH=$SPLASH" >> "$GITHUB_ENV"
+
+      - name: Build splash-enabled full product
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/splash-evidence"
+          cd "$PRODUCT"
+          chmod +x tools/*.sh tools/*.py sdk/*.sh 2>/dev/null || true
+          find toolchain -type f -name nexus -exec chmod +x {} + 2>/dev/null || true
+          ./tools/build.sh 2>&1 | tee "$E/BUILD.log"
+          python3 tools/make_esp.py 2>&1 | tee "$E/MAKE-ESP.log"
+          if [ -f tools/sdk_selftest.py ]; then python3 tools/sdk_selftest.py 2>&1 | tee "$E/SDK-SELFTEST.log"; fi
+          if [ -f tools/verify_release.py ]; then python3 tools/verify_release.py 2>&1 | tee "$E/VERIFY-RELEASE.log"; fi
+          test -s build/BOOTX64.EFI; test -s build/FramesKernel.fkrn; test -s build/System.fex
+          sha256sum build/BOOTX64.EFI build/FramesKernel.fkrn build/System.fex > "$E/BUILD-IDENTITY.txt"
+
+      - name: Inject splash into product ESP and prove exact payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/splash-evidence"
+          cd "$PRODUCT"
+          ESP="$(find build -maxdepth 1 -type f -iname '*ESP*.img' -print | sort | head -n1 || true)"
+          test -n "$ESP"; test -s "$ESP"
+          FIRST="$(sgdisk -i 1 "$ESP" | awk -F: '/First sector/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); split($2,a," "); print a[1]; exit}')"
+          LAST="$(sgdisk -i 1 "$ESP" | awk -F: '/Last sector/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); split($2,a," "); print a[1]; exit}')"
+          test -n "$FIRST"; test -n "$LAST"
+          OFFSET=$((FIRST * 512))
+          MTOOLS="$ESP@@$OFFSET"
+          mdir -i "$MTOOLS" ::/FRAMES > "$E/EFI-FRAMES-BEFORE.txt"
+          mcopy -o -i "$MTOOLS" "$SPLASH" ::/FRAMES/SPLASH.FSP
+          mdir -i "$MTOOLS" ::/FRAMES > "$E/EFI-FRAMES-AFTER.txt"
+          mkdir -p "$RUNNER_TEMP/splash-roundtrip"
+          mcopy -o -i "$MTOOLS" ::/FRAMES/SPLASH.FSP "$RUNNER_TEMP/splash-roundtrip/SPLASH.FSP"
+          test "$(sha256sum "$RUNNER_TEMP/splash-roundtrip/SPLASH.FSP" | awk '{print $1}')" = "$(sha256sum "$SPLASH" | awk '{print $1}')"
+          printf 'esp=%s\nfirst=%s\nlast=%s\noffset=%s\n' "$ESP" "$FIRST" "$LAST" "$OFFSET" > "$E/ESP-LAYOUT.txt"
+          echo "ESP=$ESP" >> "$GITHUB_ENV"
+
+      - name: Locate OVMF firmware
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=""; vars=""
+          for p in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd; do [ -f "$p" ] && code="$p" && break; done
+          for p in /usr/share/OVMF/OVMF_VARS_4M.fd /usr/share/OVMF/OVMF_VARS.fd; do [ -f "$p" ] && vars="$p" && break; done
+          test -n "$code"; test -n "$vars"
+          echo "OVMF_CODE=$code" >> "$GITHUB_ENV"; echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"
+          printf 'OVMF_CODE=%s\nOVMF_VARS=%s\n' "$code" "$vars" > "$GITHUB_WORKSPACE/splash-evidence/OVMF-IDENTITY.txt"
+
+      - name: QEMU GOP splash framebuffer and runtime continuation proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/splash-evidence"
+          cp "$OVMF_VARS" "$RUNNER_TEMP/splash-vars.fd"
+          MON="$RUNNER_TEMP/splash-mon.sock"; SERIAL="$E/SERIAL.log"
+          rm -f "$MON"
+          qemu-system-x86_64 -machine q35 -m 1024 -smp 2 -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" -drive if=pflash,format=raw,file="$RUNNER_TEMP/splash-vars.fd" -drive if=virtio,format=raw,file="$ESP" -boot menu=off -serial file:"$SERIAL" -monitor unix:"$MON",server=on,wait=off -display none -vga std -no-reboot &
+          PID=$!
+          for i in $(seq 1 60); do [ -S "$MON" ] && break; sleep 0.1; done
+          test -S "$MON"
+          python3 - "$MON" "$E" <<'PY'
+          import socket,sys,time,pathlib
+          mon=sys.argv[1]; out=pathlib.Path(sys.argv[2])
+          s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect(mon); s.settimeout(0.05)
+          try: s.recv(4096)
+          except Exception: pass
+          for i in range(30):
+              s.sendall(f'screendump {out}/SPLASH-{i:02d}.ppm\n'.encode())
+              time.sleep(0.15)
+          s.close()
+          PY
+          python3 bootux/verify_splash_frame.py "$E"/SPLASH-*.ppm | tee "$E/SPLASH-FRAME-PROOF.json"
+          WINNER="$(python3 - "$E/SPLASH-FRAME-PROOF.json" <<'PY'
+          import json,sys
+          print(json.load(open(sys.argv[1]))['winner']['file'])
+          PY
+          )"
+          cp "$E/$WINNER" "$E/SPLASH-PROOF.ppm"
+          rm -f "$E"/SPLASH-*.ppm
+          found=0
+          for i in $(seq 1 50); do
+            if [ -s "$SERIAL" ] && grep -q 'FRAMES_PRE1_SNAPSHOT_READY' "$SERIAL"; then found=1; break; fi
+            sleep 1
+          done
+          test "$found" = 1
+          grep -q 'FRAMES_KERNEL_START' "$SERIAL"
+          grep -q 'FRAMES_HAL_RUNTIME_V6_OK' "$SERIAL"
+          grep -q 'FRAMES_CONCURRENCY_RUNTIME_V7_OK' "$SERIAL"
+          grep -q 'FRAMES_UNIFIED_INPUT_RUNTIME_V8_OK' "$SERIAL"
+          grep -q 'FRAMES_USB_MIGRATION_RUNTIME_V9_OK' "$SERIAL"
+          grep -q 'FRAMES_PRE1_SNAPSHOT_READY' "$SERIAL"
+          python3 - "$MON" "$E/FINAL-FRAME.ppm" <<'PY'
+          import socket,sys,time
+          s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect(sys.argv[1]); s.settimeout(0.1)
+          try: s.recv(4096)
+          except Exception: pass
+          s.sendall(f'screendump {sys.argv[2]}\n'.encode()); time.sleep(0.3); s.sendall(b'quit\n'); time.sleep(0.2); s.close()
+          PY
+          wait "$PID" || true
+
+      - name: Final fail-closed splash certification
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/splash-evidence"
+          test -s "$E/SPLASH-PROOF.ppm"; test -s "$E/FINAL-FRAME.ppm"; test -s "$E/SERIAL.log"
+          grep -q 'SPLASH.FSP' "$E/EFI-FRAMES-AFTER.txt"
+          grep -q 'FRAMES_USB_MIGRATION_RUNTIME_V9_OK' "$E/SERIAL.log"
+          python3 - "$E" <<'PY'
+          import json,pathlib,sys
+          e=pathlib.Path(sys.argv[1])
+          frame=json.loads((e/'SPLASH-FRAME-PROOF.json').read_text())
+          checks={
+            'base_identity':(e/'BASE-IDENTITY.txt').is_file(),
+            'v116_port':(e/'V116-PRODUCT-KERNEL-SHA256.txt').is_file(),
+            'splash_asset':(e/'SPLASH-ASSET-SHA256.txt').is_file(),
+            'patched_loader':(e/'SPLASH-LOADER-SHA256.txt').is_file(),
+            'esp_payload':'SPLASH.FSP' in (e/'EFI-FRAMES-AFTER.txt').read_text(errors='replace'),
+            'framebuffer_proof':frame.get('status')=='PASS',
+            'kernel_start':'FRAMES_KERNEL_START' in (e/'SERIAL.log').read_text(errors='replace'),
+            'v116_runtime':'FRAMES_USB_MIGRATION_RUNTIME_V9_OK' in (e/'SERIAL.log').read_text(errors='replace'),
+            'runtime_snapshot':'FRAMES_PRE1_SNAPSHOT_READY' in (e/'SERIAL.log').read_text(errors='replace')
+          }
+          status='PASS' if all(checks.values()) else 'FAIL'
+          out={'status':status,'profile':'frames-boot-splash-phase1-certification','base_product':'Frames 0.9.91 v101 full product','architecture':'certified v109-v116 integration','checks':checks,'promotion_allowed':False,'next_milestone':'Frames Bootable ISO Phase 1'}
+          (e/'FINAL-BOOT-SPLASH-CERTIFICATION.json').write_text(json.dumps(out,indent=2)+'\n')
+          if status!='PASS': raise SystemExit(1)
+          PY
+          cd "$E"
+          find . -maxdepth 1 -type f ! -name EVIDENCE-FILES-SHA256.txt -print0 | sort -z | xargs -0 sha256sum > EVIDENCE-FILES-SHA256.txt
+
+      - name: Upload splash certification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-Boot-Splash-Phase1-Evidence
+          path: splash-evidence/
+          if-no-files-found: error
+          retention-days: 30
