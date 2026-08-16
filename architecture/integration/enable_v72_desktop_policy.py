@@ -26,7 +26,10 @@ print(f'patched boot_policy_flags {old} -> {new}')
 
 block = r'''if((boot_policy_flags & 2048ULL)!=0 && !hello_fapp_verified){
         EFI_STATUS appst=load_file(bs,image,L"\\Frames\\HELLO.FAP",&hello_fapp_file,&hello_fapp_size);
-        if(EFI_ERROR(appst) || !fapp_extract_verify(hello_fapp_file,hello_fapp_size,&hello_fapp_fex,&hello_fapp_fex_size)) fatal(L"Desktop policy HELLO.FAP verification failed",appst);
+        if(EFI_ERROR(appst)) fatal(L"Desktop policy HELLO.FAP load failed",appst);
+        if(!hello_fapp_file || hello_fapp_size==0) fatal(L"Desktop policy HELLO.FAP loaded empty",EFI_LOAD_ERROR);
+        if(!fapp_extract_verify(hello_fapp_file,hello_fapp_size,&hello_fapp_fex,&hello_fapp_fex_size)) fatal(L"Desktop policy HELLO.FAP package verification failed",EFI_SECURITY_VIOLATION);
+        if(!hello_fapp_fex || hello_fapp_fex_size==0) fatal(L"Desktop policy HELLO.FAP verified empty payload",EFI_SECURITY_VIOLATION);
         hello_fapp_verified=1;
         boot_policy_flags|=4096ULL;
         print16(L"[DESKTOP] Desktop policy HELLO.FAP verified; module 1 armed\r\n");
@@ -54,7 +57,7 @@ if not match:
     raise SystemExit('boot-module allocation semantic anchor not found')
 
 # Avoid duplicate injection if a source already contains the desktop-policy block.
-pre = s[max(0, match.start()-1200):match.start()]
+pre = s[max(0, match.start()-1600):match.start()]
 if 'Desktop policy HELLO.FAP verified; module 1 armed' not in pre:
     s = s[:match.start()] + block + s[match.start():]
     print('patched desktop policy to verify HELLO.FAP before boot-module allocation')
