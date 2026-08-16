@@ -1,0 +1,46 @@
+{
+  "profile": "frames-v116-physical-hardware-full-gui-validation",
+  "candidate": {
+    "iso_name": "Frames-0.9.106-v116-Full-Interactive-Desktop-GUI-UEFI.iso",
+    "iso_sha256": "abeead78504b6562ee6ecef47027c95803594dd21527cfc3120205a5ef9b7068",
+    "iso_size_bytes": 67160064,
+    "certified_gui_commit": "8a730a580b98026189eac897d0dec9efde58c07e",
+    "certified_vm_iso_run": 31923853583
+  },
+  "hardware": {
+    "manufacturer": "",
+    "model": "",
+    "cpu": "",
+    "ram": "",
+    "gpu_or_display_adapter": "",
+    "firmware_notes": "",
+    "boot_media_type": "USB"
+  },
+  "observations": {
+    "uefi_media_detected_and_launched": null,
+    "approved_splash_visible": null,
+    "kernel_desktop_transition_completed": null,
+    "full_multi_window_desktop_visible": null,
+    "file_manager_visible": null,
+    "settings_visible": null,
+    "nexus_or_terminal_window_visible": null,
+    "desktop_taskbar_visible": null,
+    "mouse_cursor_visible": null,
+    "physical_pointer_moves_cursor": null,
+    "pointer_buttons_operate": null,
+    "keyboard_focus_input_operates": null,
+    "unexpected_freeze_panic_reboot": null,
+    "unexpected_destructive_write_prompt": null
+  },
+  "evidence": {
+    "splash_photo_supplied": false,
+    "desktop_photo_supplied": false,
+    "failure_photo_supplied": false,
+    "notes": ""
+  },
+  "safety": {
+    "physical_destructive_writes_certified": false,
+    "promotion_allowed": false
+  },
+  "result": "PENDING"
+}
