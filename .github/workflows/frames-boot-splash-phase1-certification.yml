@@ -184,8 +184,8 @@ jobs:
           print(json.load(open(sys.argv[1]))['winner']['file'])
           PY
           )"
-          cp "$E/$WINNER" "$E/SPLASH-PROOF.ppm"
-          rm -f "$E"/SPLASH-*.ppm
+          cp "$E/$WINNER" "$E/BOOT-SPLASH-PROOF.ppm"
+          rm -f "$E"/SPLASH-[0-9][0-9].ppm
           found=0
           for i in $(seq 1 50); do
             if [ -s "$SERIAL" ] && grep -q 'FRAMES_PRE1_SNAPSHOT_READY' "$SERIAL"; then found=1; break; fi
@@ -212,23 +212,26 @@ jobs:
         run: |
           set -euo pipefail
           E="$GITHUB_WORKSPACE/splash-evidence"
-          test -s "$E/SPLASH-PROOF.ppm"; test -s "$E/FINAL-FRAME.ppm"; test -s "$E/SERIAL.log"
-          grep -q 'SPLASH.FSP' "$E/EFI-FRAMES-AFTER.txt"
+          test -s "$E/BOOT-SPLASH-PROOF.ppm"; test -s "$E/FINAL-FRAME.ppm"; test -s "$E/SERIAL.log"
+          grep -Eq 'SPLASH[[:space:]]+FSP|SPLASH\.FSP' "$E/EFI-FRAMES-AFTER.txt"
           grep -q 'FRAMES_USB_MIGRATION_RUNTIME_V9_OK' "$E/SERIAL.log"
           python3 - "$E" <<'PY'
-          import json,pathlib,sys
+          import json,pathlib,re,sys
           e=pathlib.Path(sys.argv[1])
           frame=json.loads((e/'SPLASH-FRAME-PROOF.json').read_text())
+          esp=(e/'EFI-FRAMES-AFTER.txt').read_text(errors='replace')
+          serial=(e/'SERIAL.log').read_text(errors='replace')
           checks={
             'base_identity':(e/'BASE-IDENTITY.txt').is_file(),
             'v116_port':(e/'V116-PRODUCT-KERNEL-SHA256.txt').is_file(),
             'splash_asset':(e/'SPLASH-ASSET-SHA256.txt').is_file(),
             'patched_loader':(e/'SPLASH-LOADER-SHA256.txt').is_file(),
-            'esp_payload':'SPLASH.FSP' in (e/'EFI-FRAMES-AFTER.txt').read_text(errors='replace'),
+            'splash_proof_retained':(e/'BOOT-SPLASH-PROOF.ppm').is_file(),
+            'esp_payload':bool(re.search(r'SPLASH\s+FSP|SPLASH\.FSP',esp)),
             'framebuffer_proof':frame.get('status')=='PASS',
-            'kernel_start':'FRAMES_KERNEL_START' in (e/'SERIAL.log').read_text(errors='replace'),
-            'v116_runtime':'FRAMES_USB_MIGRATION_RUNTIME_V9_OK' in (e/'SERIAL.log').read_text(errors='replace'),
-            'runtime_snapshot':'FRAMES_PRE1_SNAPSHOT_READY' in (e/'SERIAL.log').read_text(errors='replace')
+            'kernel_start':'FRAMES_KERNEL_START' in serial,
+            'v116_runtime':'FRAMES_USB_MIGRATION_RUNTIME_V9_OK' in serial,
+            'runtime_snapshot':'FRAMES_PRE1_SNAPSHOT_READY' in serial
           }
           status='PASS' if all(checks.values()) else 'FAIL'
           out={'status':status,'profile':'frames-boot-splash-phase1-certification','base_product':'Frames 0.9.91 v101 full product','architecture':'certified v109-v116 integration','checks':checks,'promotion_allowed':False,'next_milestone':'Frames Bootable ISO Phase 1'}
