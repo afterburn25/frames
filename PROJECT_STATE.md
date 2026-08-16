@@ -1,7 +1,7 @@
 # Frames — Canonical Project State
 
 > This file is the authoritative cross-chat handoff for active Frames engineering.
-> When chat memory, summaries, prior messages, or assumptions disagree with this file and current repository/evidence, repository/evidence wins.
+> Repository/evidence overrides chat summaries or prior claims.
 
 Last updated: 2026-08-16
 
@@ -14,108 +14,87 @@ Last updated: 2026-08-16
 - Evidence model: fail-closed, exact-source/hash based, QEMU/OVMF-first, then real-hardware confirmation for hardware claims.
 - Frames 1.0 is NOT promoted.
 
-## Current certified architecture baseline
+## Freshly certified working foundation — Frames 0.9.98 v108 r9
 
-- Frames 0.9.106 / architecture v116 remains the certified architecture baseline for the active GUI/input work.
-- Frames 0.9.98 v108 r9 remains the sealed reconstruction source used by current integration workflows.
-- v109-v116 transforms remain hash-checked before product integration changes.
+On 2026-08-16 the authoritative Frames 0.9.98 v108 r9 workflow was re-run from the unchanged sealed source and passed end-to-end.
 
-## VM-rendered full GUI result
+Authoritative workflow:
+- `.github/workflows/main.yml`
+- `Frames 0.9.98 Integrated Secure Online Services Certification v108 r9`
+- GitHub run `31831716862`, attempt 2: PASS
+- source commit used by the authoritative workflow: `7333a6670a38c9180e7d72c2a3df444409c36164`
 
-The full-interactive desktop renderer is real and remains VM-certified as a rendering/composition result:
+Exact sealed identity:
+- Frames version: `0.9.98`
+- source revision: `v108-train`
+- runtime kit: `Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip`
+- runtime kit SHA-256: `61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a`
+- nested source: `Frames-0.9.98-Source-v108.zip`
+- source SHA-256: `5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d`
+- workflow revision: `v108-integrated-secure-online-services-r9`
+- train: `0.9.92-0.9.98`
 
-- branch: `full-interactive-desktop-gui`
-- GUI candidate commit: `8a730a580b98026189eac897d0dec9efde58c07e`
-- workflow run: `31923853583`
-- QEMU framebuffer visibly shows File Manager, Settings, Nexus/terminal-style window, native window chrome, desktop/taskbar and cursor.
-- approved splash -> kernel -> rendered desktop passes in QEMU/OVMF.
+Fresh rerun evidence:
+- artifact ID: `9257820749`
+- artifact name: `frames-0.9.98-integrated-secure-online-services-evidence-v108`
+- artifact ZIP SHA-256: `b7589b75190186b3886e76e8e571bbee1d58884e8a5516338ba59c994427ce74`
+- `FINAL-SECURE-ONLINE-SERVICES-CERTIFICATION.json`: PASS
+- `FINAL-MANIFEST-VERIFY.json`: PASS with zero mismatches
+- `RUNTIME-EVIDENCE.json`: PASS
+- integrated QEMU connected + secure-online desktop gate: PASS
+- Developer Preview / HelixFS / FAPP regression gate: PASS
+- SDK tooling regression gate: PASS
+- aggregate evidence and final enforcement: PASS
 
-This no longer qualifies as proof of **interactive** GUI input on physical hardware.
+Important limits preserved by the v108 certification:
+- physical boot approved: false
+- physical media writes unlocked: false
+- live external TLS certified: false
+- certificate signature verification certified: false
+- physical network hardware certified: false
+- Frames 1.0 promoted: false
 
-## Physical-media/USB packaging result
+## Later architecture work
 
-USB-compatible full-GUI ISO packaging remains technically valid:
+Frames 0.9.106 / architecture v116 remains separately certified architecture work. It is NOT the foundation for the next physical input repair unless explicitly reintroduced later.
 
-- ISO: `Frames-0.9.106-v116-Full-Interactive-Desktop-GUI-USB-Compatible-UEFI.iso`
-- SHA-256: `7d1c212ad71778a84579e91c2e12ebafe3801a8bcd8a0a0856e506d47ebe20c7`
-- size: `67,401,728 bytes`
-- media compatibility run: `31924483046` PASS
-- extracted GPT/FAT32 xHCI USB boot run: `31924646428` PASS
+The recent full-GUI v116 physical image is rejected as physical-interaction evidence because the user's real machine rendered the desktop but USB mouse and touch produced no visible movement.
 
-Those passes prove boot/media/rendering in QEMU. They do NOT prove physical pointer/touch input.
-
-## Decisive physical result — FAIL
-
-On 2026-08-16 the user physically booted the current USB-compatible full-GUI candidate on the real UEFI test machine.
-
-Observed:
-
-- boot succeeded;
-- desktop rendered;
-- USB mouse produced no visible cursor movement;
-- touch input produced no visible movement/interaction;
-- the resulting desktop therefore behaved like a static/mock-style desktop rather than an interactive desktop.
-
-Result: **Physical Hardware Full-GUI Boot Validation FAIL for interaction.**
-
-Do not describe the current physical image as a proven full interactive GUI.
-
-## Important certification correction — `FRAMES_FULL_GUI_INPUT_OK`
-
-The current full-GUI patch emits `FRAMES_FULL_GUI_INPUT_OK` after exercising internal `gui_input_focus(...)` calls between existing windows. That marker proves an internal GUI focus path, not live hardware input.
-
-Therefore:
-
-- `FRAMES_FULL_GUI_INPUT_OK` is NOT accepted as physical mouse/touch proof;
-- future interactive certification must require real hardware/backend activity and an observable cursor/event change;
-- a rendered cursor by itself is not input proof.
-
-## Relevant prior pointer engineering that must be carried forward
-
-Do not restart pointer work from scratch.
-
-Repository history contains a dedicated Frames 0.9.98 physical pointer train including:
-
-- Pointer Diagnostics CI v2 with PS/2 and xHCI USB HID lanes;
-- r46 USB startup handoff fix: avoids synchronous first-report/decode gating and lets continuous HID processing own live reports;
-- r48-r55 physical PS/2/USB/protocol diagnostics;
-- r55 physical protocol telemetry including USB enumeration stages and raw touchpad/AUX protocol bytes.
-
-The full-GUI v116 path did not establish that these physical-input fixes were correctly ported into the live desktop path.
+Do not use that v116 GUI result to claim physical input functionality.
 
 ## Active milestone
 
-**Physical Input Bring-Up for Full GUI**
+**Physical Input Bring-Up from exact certified Frames 0.9.98 v108 r9**
 
-Active development branch should be:
+The user explicitly requested that input work restart only after automatically certifying through `0.9.98 v108`.
 
-`physical-input-bringup`
+Next input work must therefore reconstruct the exact sealed v108 source directly and must NOT apply v109-v116 transforms before the physical input problem is understood.
 
-Current objective:
+Work USB mouse and built-in touchpad in tandem:
 
-Make the rendered full GUI genuinely interactive on physical hardware by proving and fixing the complete live chain:
-
-1. physical device/controller enumeration;
-2. USB HID mouse and/or PS/2/touch source activity;
-3. live report/packet acquisition after boot;
-4. decode/normalization into Generic Pointer/Core events;
-5. GUI event delivery;
-6. actual cursor coordinate change;
+1. identify the physical touchpad transport: PS/2-compatible, USB HID, I2C-HID/absolute, or other;
+2. USB/xHCI enumeration across multiple connected devices/ports;
+3. live HID report acquisition after boot;
+4. PS/2 AUX packet acquisition and phase synchronization where available;
+5. Generic Pointer/Core event generation;
+6. actual GUI cursor-coordinate change;
 7. pointer buttons;
-8. keyboard focus/input;
-9. touch path separately identified and implemented if it is I2C-HID/absolute rather than USB/PS2.
+8. keyboard/focus only after pointer movement is proven;
+9. add I2C-HID/absolute touchpad support if the hardware proves that transport is required.
 
-The next physical candidate must include machine-readable/live on-screen telemetry sufficient to distinguish enumeration failure, report failure, decode failure, core-event failure and GUI-delivery failure.
+## Physical-input evidence standard
 
-## Next engineering actions
+No marker based only on initialization/readiness/focus switching counts as live input proof.
 
-1. Reconstruct the exact v116 + full-GUI candidate in CI.
-2. Inspect the live input functions and compare them with the r46/r55 physical-input train.
-3. Port the proven r46 USB startup handoff semantics where still missing.
-4. Integrate live physical input counters/telemetry into the full-GUI candidate without hiding the desktop.
-5. Add a fail-closed QEMU regression requiring injected USB mouse events to change the actual Frames cursor coordinates, not merely focus state.
-6. Build a new physical diagnostic/full-GUI ISO only after that regression passes.
-7. Physical test remains required before restoring the phrase `full interactive GUI` for hardware.
+Before another physical boot is requested, automated testing should prove as much of the following as possible:
+- actual emulated USB HID reports are received;
+- actual emulated PS/2 packets are received;
+- those reports/packets create Generic Pointer/Core events;
+- cursor coordinates actually change in the running GUI;
+- before/after framebuffer captures differ at the cursor location;
+- diagnostic telemetry can distinguish enumeration, report, decode, core-event and GUI-delivery failures on real hardware.
+
+Physical hardware remains the final authority for the laptop touchpad and USB mouse.
 
 ## Safety policy
 
