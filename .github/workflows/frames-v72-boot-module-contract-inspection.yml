@@ -1,0 +1,43 @@
+name: Frames v72 Boot Module Contract Inspection
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v116-full-product-v101-integration ]
+    paths:
+      - '.github/workflows/frames-v72-boot-module-contract-inspection.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v116-full-product-v101-integration
+      - name: Inspect loader module-table construction
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/v72-module-contract"
+          TMP="$RUNNER_TEMP/v72-module-contract"
+          rm -rf "$OUT" "$TMP"
+          mkdir -p "$OUT" "$TMP"
+          unzip -q "$GITHUB_WORKSPACE/Frames-0.9.62-Source-v72-r1.zip" -d "$TMP"
+          SRC="$(find "$TMP" -type f -name VERSION -print | while read -r f; do [ "$(tr -d '\r\n' < "$f")" = '0.9.62' ] && dirname "$f" && break; done)"
+          test -n "$SRC"
+          echo "source=$SRC" > "$OUT/IDENTITY.txt"
+          grep -Rni -C 12 -E 'boot_module|module_count|module_table|System\.fex|FEX64|system_fex|boot_modules' "$SRC/boot" > "$OUT/LOADER-MODULES.txt" || true
+          grep -n -C 20 -E 'gui_app_host_init|table\+64|count<2|fex_validate_image' "$SRC/kernel/main.nx" > "$OUT/KERNEL-CONSUMER.txt" || true
+          grep -Rni -C 8 -E 'System\.fex|FramesKernel\.fkrn' "$SRC/tools" "$SRC/boot" > "$OUT/PACKAGING.txt" || true
+          test -s "$OUT/LOADER-MODULES.txt"
+      - name: Upload inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v72-Boot-Module-Contract-Inspection
+          path: v72-module-contract/
+          if-no-files-found: error
+          retention-days: 30
