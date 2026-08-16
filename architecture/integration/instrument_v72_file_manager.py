@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import re, sys
+import sys
 
 if len(sys.argv) != 2:
     raise SystemExit('usage: instrument_v72_file_manager.py PATH_TO_kernel_main.nx')
 
 p=Path(sys.argv[1])
 s=p.read_text()
-pat=re.compile(r'fn file_manager_phase1_compose\(state:u64,surface:u64,process:u64,wm:u64\) -> u64 \{.*?\n\}', re.S)
-m=pat.search(s)
-if not m:
+start_marker='fn file_manager_phase1_compose(state:u64,surface:u64,process:u64,wm:u64) -> u64 {'
+end_marker='\nfn serial_marker_settings_window_ok() -> void {'
+start=s.find(start_marker)
+if start < 0:
     raise SystemExit('file_manager_phase1_compose not found')
+end=s.find(end_marker,start)
+if end < 0:
+    raise SystemExit('settings marker boundary not found after file manager')
 new='''fn file_manager_phase1_compose(state:u64,surface:u64,process:u64,wm:u64) -> u64 {
     serial_desktop_diag(85,state); serial_desktop_diag(86,surface); serial_desktop_diag(87,process); serial_desktop_diag(88,wm);
     if state==0 || surface==0 || process==0 || wm==0 { return 0; }
@@ -38,9 +42,11 @@ new='''fn file_manager_phase1_compose(state:u64,surface:u64,process:u64,wm:u64) 
     if desktop_draw_cursor(surface,volatile_read64(cursor+16),volatile_read64(cursor+24))==0 { return 0; }
     if dirty_add(dirty,0,(sw*65536)+sh,16)==0 || present_enqueue(present,0,(sw*65536)+sh,16)==0 || present_flush(present,surface,timing)==0 { return 0; }
     serial_desktop_diag(50,mounts); serial_desktop_diag(51,4); serial_desktop_diag(52,2); serial_desktop_diag(53,value); serial_desktop_diag(54,checksum); serial_desktop_diag(55,id); serial_marker_fileman_phase1_ok(); serial_marker_desktop_phase8_ok(); return 1;
-}'''
-ns,n=pat.subn(new,s,count=1)
-if n!=1:
-    raise SystemExit(f'file manager replacement count={n}')
+}
+'''
+ns=s[:start]+new+s[end:]
+# Structural guard: the next phase must remain defined after the replacement.
+if 'fn settings_phase1_compose(state:u64,surface:u64,process:u64,wm:u64) -> u64 {' not in ns:
+    raise SystemExit('settings_phase1_compose lost during instrumentation')
 p.write_text(ns)
-print('instrumented file_manager_phase1_compose stages 85-99')
+print('instrumented file_manager_phase1_compose stages 85-99 with bounded replacement')
