@@ -128,6 +128,8 @@ jobs:
           cd "$PRODUCT"
           ESP="$(find build -maxdepth 1 -type f -iname '*ESP*.img' -print | sort | head -n1 || true)"
           test -n "$ESP"; test -s "$ESP"
+          ESP="$(readlink -f "$ESP")"
+          test -s "$ESP"
           FIRST="$(sgdisk -i 1 "$ESP" | awk -F: '/First sector/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); split($2,a," "); print a[1]; exit}')"
           LAST="$(sgdisk -i 1 "$ESP" | awk -F: '/Last sector/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); split($2,a," "); print a[1]; exit}')"
           test -n "$FIRST"; test -n "$LAST"
