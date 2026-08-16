@@ -1,0 +1,57 @@
+name: Frames v108 USB Input Audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-physical-input-bringup ]
+    paths: [ '.github/workflows/frames-v108-usb-input-audit.yml' ]
+
+permissions:
+  contents: read
+
+env:
+  KIT_SHA: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
+  SRC_SHA: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
+
+jobs:
+  usb-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: v108-physical-input-bringup }
+      - name: Reconstruct exact certified v108
+        shell: bash
+        run: |
+          set -euo pipefail
+          K=Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip; test "$(sha256sum "$K"|awk '{print $1}')" = "$KIT_SHA"
+          mkdir -p "$RUNNER_TEMP/k" "$RUNNER_TEMP/s" usb-audit; unzip -q "$K" -d "$RUNNER_TEMP/k"
+          Z="$RUNNER_TEMP/k/Frames-0.9.98-Source-v108.zip"; test "$(sha256sum "$Z"|awk '{print $1}')" = "$SRC_SHA"; unzip -q "$Z" -d "$RUNNER_TEMP/s"
+          echo "SRC=$RUNNER_TEMP/s/Frames-0.9.98/kernel/main.nx" >> "$GITHUB_ENV"
+      - name: Inspect USB live path and r46/r54 applicability
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$SRC" usb-audit/USB-AUDIT.json usb-audit/USB-EXCERPTS.txt <<'PY'
+          from pathlib import Path
+          import json,sys,hashlib
+          p=Path(sys.argv[1]); s=p.read_text(); lines=s.splitlines()
+          terms=['xhci_reset_first_port','xhci_reset_connected_port_from','xhci_discover_boot_hid','xhci_configure_boot_hid','xhci_read_first_hid_report','input_decode_boot_hid','xhci_hid_arm_continuous','xhci_hid_poll_continuous','desktop_input_runtime','gui_input_dispatch','cursor_move','usb_hid_report_ready']
+          counts={t:s.count(t) for t in terms}
+          old1='if usb_hid_found != 0 { usb_hid_configured = xhci_configure_boot_hid(xhci_state,phys_state); if usb_hid_configured != 0 { usb_hid_report_ready = xhci_read_first_hid_report(xhci_state,phys_state); } }'
+          new1='if usb_hid_found != 0 { usb_hid_configured = xhci_configure_boot_hid(xhci_state,phys_state); if usb_hid_configured != 0 { usb_hid_report_ready = 1; } }'
+          old2='if input_queue_ready != 0 { if usb_hid_report_ready != 0 { input_decode_ready = input_decode_boot_hid(xhci_state,input_state); } else { ps2_poll_fallback(input_state); } }'
+          new2='if input_queue_ready != 0 { if usb_hid_report_ready != 0 { input_decode_ready = 1; } else { ps2_poll_fallback(input_state); } }'
+          result={'status':'PASS','kernel_sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'counts':counts,'r46_old_first_report_site':s.count(old1),'r46_fixed_first_report_site':s.count(new1),'r46_old_decode_site':s.count(old2),'r46_fixed_decode_site':s.count(new2),'r54_multiport_present':counts['xhci_reset_connected_port_from']>0}
+          Path(sys.argv[2]).write_text(json.dumps(result,indent=2)+'\n')
+          out=[]
+          for t in terms:
+            out.append('===== '+t+' =====')
+            for i,l in enumerate(lines):
+              if t in l:
+                a=max(0,i-3); b=min(len(lines),i+7); out.extend(f'{n+1:06d}: {lines[n]}' for n in range(a,b)); out.append('')
+          Path(sys.argv[3]).write_text('\n'.join(out))
+          print(json.dumps(result,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with: { name: Frames-v108-USB-Input-Audit, path: 'usb-audit/**', if-no-files-found: error, retention-days: 30 }
