@@ -1,0 +1,112 @@
+name: Frames v108 Physical Input r18 Certification r5
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-usb-hub-topology-r1 ]
+    paths: [ '.github/workflows/frames-v108-physical-input-r18-cert-r5.yml' ]
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  ISO_NAME: Frames-0.9.98-v108-Physical-Input-Repair-r18-USB-xHCI-Menu-Stability-Rufus-UEFI.iso
+  R18_SHA: dd0386720bba6dce4c1fd0576e995dd6a2932638633147914589b342cc3dfe22
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: v108-usb-hub-topology-r1 }
+      - run: sudo apt-get update && sudo apt-get install -y clang lld python3 unzip mtools dosfstools gdisk xorriso
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r17-Candidate
+          path: r17-candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: '31973170624'
+      - name: Build exact r18 candidate
+        run: bash tools/ci/build_r18_candidate.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r18-Candidate-r5
+          path: |
+            out/*.iso
+            evidence/**
+          if-no-files-found: error
+          retention-days: 30
+
+  gates:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [usb-direct, usb-hub, usb-hub-multi, usb-multicontroller, usb-keyboard, ps2, smoothness, text-edit, focus-persistence, context-menu, desktop-interaction, model, safety]
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: v108-usb-hub-topology-r1 }
+      - uses: actions/download-artifact@v4
+        with: { name: Frames-v108-r18-Candidate-r5, path: candidate }
+      - name: Install runtime tools
+        if: matrix.lane != 'model'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf python3 python3-pil
+          O="$(find /usr/share/OVMF -type f \( -name OVMF_CODE_4M.fd -o -name OVMF_CODE.fd \) | head -n1)"
+          test -s "$O"; echo "OVMF=$O" >> "$GITHUB_ENV"
+      - name: Run ${{ matrix.lane }} gate
+        run: bash tools/ci/run_r18_gate.sh '${{ matrix.lane }}' candidate '${{ env.OVMF }}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Frames-v108-r18-r5-${{ matrix.lane }}-Evidence
+          path: gate/**
+          if-no-files-found: warn
+          retention-days: 30
+
+  final:
+    needs: [build, gates]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: Frames-v108-r18-Candidate-r5, path: candidate }
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Frames-v108-r18-r5-*-Evidence
+          path: gates
+          merge-multiple: false
+      - name: Seal exact VM-certified r18 ISO
+        run: |
+          set -euo pipefail
+          for lane in usb-direct usb-hub usb-hub-multi usb-multicontroller usb-keyboard ps2 smoothness text-edit focus-persistence context-menu desktop-interaction model safety; do test "$(cat gates/Frames-v108-r18-r5-$lane-Evidence/RESULT.status)" = PASS; done
+          test "$(sha256sum candidate/evidence/kernel-r18.nx | awk '{print $1}')" = "$R18_SHA"
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"; test -s "$ISO"
+          EXPECT="$(awk '{print $1}' candidate/evidence/ISO-SHA256.txt)"; test "$(sha256sum "$ISO" | awk '{print $1}')" = "$EXPECT"
+          mkdir final; cp "$ISO" final/; sha256sum "$ISO" | tee final/ISO-SHA256.txt; stat -c '%s' "$ISO" | tee final/ISO-SIZE.txt
+          cat > final/CERTIFICATION.txt <<EOF
+          Frames 0.9.98 v108 r18 — xHCI Physical Enumeration + Menu Stability
+          status=PASS_VM_PENDING_PHYSICAL
+          source_sha256=$R18_SHA
+          iso_sha256=$EXPECT
+          vm_regression_lanes=13_PASS
+          physical_r17_text_focus=PASS
+          physical_r17_usb_mouse=FAIL_NO_CURSOR
+          physical_r17_usb_keyboard=FAIL_NO_RESPONSE
+          physical_r17_motion_refresh=FAIL
+          physical_r17_context_menu_interaction=FAIL
+          physical_r18=PENDING
+          destructive_writes=BLOCKED
+          frames_1_0_promoted=NO
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r18-Rufus-Final-r5
+          path: final/**
+          if-no-files-found: error
+          retention-days: 30
