@@ -150,6 +150,9 @@ jobs:
       matrix:
         lane: [usb, ps2]
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-physical-input-bringup
       - uses: actions/download-artifact@v4
         with:
           name: Frames-v108-r10-Candidate
