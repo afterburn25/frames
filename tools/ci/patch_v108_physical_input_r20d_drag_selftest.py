@@ -23,11 +23,11 @@ extra=marker('serial_marker_v108_drag_policy_selftest_ok_v120','FRAMES_V108_DRAG
     unsafe { volatile_write64(state+8,swx+20); volatile_write64(state+16,swy+18); volatile_write64(state+96,0); volatile_write64(state+128,0); volatile_write64(state+176,0); volatile_write64(state+392,0); volatile_write64(state+464,0); }
     if gui_input_buttons(state,wm,1,surface)==0 { return 0; }
     if volatile_read64(state+392)!=1 || volatile_read64(state+176)!=0 { return 0; }
-    if gui_input_pointer_move(state,10,1)==0 { return 0; }
+    if gui_input_pointer_move(state,wm,10,1)==0 { return 0; }
     if volatile_read64(state+176)!=0 { return 0; }
-    if gui_input_pointer_move(state,6,2)==0 { return 0; }
+    if gui_input_pointer_move(state,wm,6,2)==0 { return 0; }
     if volatile_read64(state+176)!=0 { return 0; }
-    if gui_input_pointer_move(state,2,1)==0 { return 0; }
+    if gui_input_pointer_move(state,wm,2,1)==0 { return 0; }
     if volatile_read64(state+176)!=1 || volatile_read64(state+128)!=0 { return 0; }
     if gui_input_buttons(state,wm,0,surface)==0 || volatile_read64(state+176)!=0 || volatile_read64(state+392)!=0 { return 0; }
     unsafe { volatile_write64(state+8,sx); volatile_write64(state+16,sy); volatile_write64(state+96,sb); volatile_write64(state+160,swx); volatile_write64(state+168,swy); volatile_write64(state+176,sdrag); volatile_write64(state+184,spx); volatile_write64(state+192,spy); volatile_write64(state+200,scount); volatile_write64(state+128,smenu); volatile_write64(state+392,spend); volatile_write64(state+400,scx); volatile_write64(state+408,scy); volatile_write64(state+416,stime); volatile_write64(state+424,soffx); volatile_write64(state+432,soffy); volatile_write64(state+448,sarms); volatile_write64(state+464,sconfirm); }
