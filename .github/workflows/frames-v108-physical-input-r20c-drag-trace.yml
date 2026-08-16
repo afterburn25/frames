@@ -1,0 +1,87 @@
+name: Frames v108 Physical Input r20c Drag Trace
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-usb-hub-topology-r1 ]
+    paths:
+      - '.github/workflows/frames-v108-physical-input-r20c-drag-trace.yml'
+      - 'tools/ci/patch_v108_physical_input_r20c_drag_trace.py'
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SOURCE_RUN: '31978210763'
+  KIT_SHA: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
+  SRC_SHA: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
+  BASE_SHA: 17cf352e42806cbe2246cca92fc09993060f4f159c72e3785fbf4177b98ba453
+  TRACE_SHA: f991b6eae0f1bc787ab9f0657fdf8220e830de61b891f874882ff01c895f2247
+  ISO_NAME: Frames-0.9.98-v108-r20c-Drag-Trace.iso
+
+jobs:
+  trace:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: v108-usb-hub-topology-r1 }
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 unzip mtools dosfstools gdisk xorriso qemu-system-x86 ovmf python3-pil
+      - name: Fetch exact r20b source
+        uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r20b-Candidate
+          path: prior
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN }}
+      - name: Reconstruct and instrument
+        run: |
+          set -euo pipefail
+          test "$(sha256sum prior/evidence/kernel-r20.nx | awk '{print $1}')" = "$BASE_SHA"
+          rm -rf "$RUNNER_TEMP/t" out payload evidence; mkdir -p "$RUNNER_TEMP/t/kit" "$RUNNER_TEMP/t/src" out payload evidence
+          K=Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip; test "$(sha256sum "$K"|awk '{print $1}')" = "$KIT_SHA"; unzip -q "$K" -d "$RUNNER_TEMP/t/kit"
+          Z="$RUNNER_TEMP/t/kit/Frames-0.9.98-Source-v108.zip"; test "$(sha256sum "$Z"|awk '{print $1}')" = "$SRC_SHA"; unzip -q "$Z" -d "$RUNNER_TEMP/t/src"
+          F="$RUNNER_TEMP/t/src/Frames-0.9.98"; cp prior/evidence/kernel-r20.nx "$F/kernel/main.nx"
+          python3 tools/ci/patch_v108_physical_input_r20c_drag_trace.py "$F/kernel/main.nx" | tee evidence/TRACE-SHA.txt
+          test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$TRACE_SHA"
+          echo "F=$F" >> "$GITHUB_ENV"
+      - name: Build trace ISO
+        run: |
+          set -euo pipefail
+          find "$F" -type f -name '*.sh' -exec chmod +x {} +; find "$F/toolchain" -type f -name nexus -exec chmod +x {} +
+          cd "$F"; ./tools/build.sh; python3 tools/make_esp.py; python3 tools/sdk_selftest.py; python3 tools/make_desktop_preview_image.py; python3 tools/verify_desktop_preview_image.py --image build/Frames-0.9.98-Desktop-Preview.img --require-pass; python3 tools/verify_release.py
+          cp build/Frames-0.9.98-Desktop-Preview.img "$GITHUB_WORKSPACE/out/raw.img"; cd "$GITHUB_WORKSPACE"
+          FIRST="$(sgdisk -i 1 out/raw.img|awk -F: '/First sector/{gsub(/ /,"",$2);split($2,a,"(");print a[1]}')"; LAST="$(sgdisk -i 1 out/raw.img|awk -F: '/Last sector/{gsub(/ /,"",$2);split($2,a,"(");print a[1]}')"
+          dd if=out/raw.img of=out/esp.img bs=512 skip="$FIRST" count=$((LAST-FIRST+1)) status=none; mcopy -s -i out/esp.img '::/EFI' payload/; mcopy -s -i out/esp.img '::/FRAMES' payload/
+          dd if=/dev/zero of=out/efiboot.img bs=1M count=16 status=none; mkfs.fat -F 16 -n FRAMESBOOT out/efiboot.img >/dev/null; mmd -i out/efiboot.img ::/EFI ::/EFI/BOOT ::/FRAMES
+          mcopy -i out/efiboot.img payload/EFI/BOOT/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI; for f in payload/FRAMES/*; do mcopy -i out/efiboot.img "$f" ::/FRAMES/; done
+          ROOT="$RUNNER_TEMP/root"; mkdir -p "$ROOT"; cp out/efiboot.img "$ROOT/"; cp -a payload/EFI payload/FRAMES "$ROOT/"
+          xorriso -as mkisofs -iso-level 3 -R -J -V FRAMES_R20C_TRACE -eltorito-alt-boot -e efiboot.img -no-emul-boot -o "out/$ISO_NAME" "$ROOT" >/dev/null 2>&1
+          sha256sum "out/$ISO_NAME" | tee evidence/ISO-SHA256.txt
+          O="$(find /usr/share/OVMF -type f \( -name OVMF_CODE_4M.fd -o -name OVMF_CODE.fd \)|head -n1)"; echo "OVMF=$O" >> "$GITHUB_ENV"
+      - name: Run focused drag trace
+        id: drag
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          EXPECT="$(awk '{print $1}' evidence/ISO-SHA256.txt)"
+          python3 tools/ci/qemu_drag_hover_gate_r20.py --ovmf "$OVMF" --iso "out/$ISO_NAME" --out evidence/drag --expected-iso-sha "$EXPECT"
+      - name: Extract trace classification
+        if: always()
+        run: |
+          set -euo pipefail
+          S=evidence/drag/serial.log; test -s "$S"
+          for m in FRAMES_V108_LEFT_EDGE_TRACE FRAMES_V108_DRAG_PENDING_TRACE FRAMES_V108_LEFT_OUTSIDE_TRACE FRAMES_V108_DRAG_PENDING_MOVE_TRACE FRAMES_V108_DRAG_ARM_OK FRAMES_V108_WINDOW_DRAG_OK FRAMES_V108_FULL_REPAINT_V120; do printf '%s=%s\n' "$m" "$(grep -c "$m" "$S" || true)"; done | tee evidence/TRACE-COUNTS.txt
+          cat evidence/drag/DRAG-HOVER.json | tee evidence/DRAG-HOVER.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Frames-v108-r20c-Drag-Trace-Evidence
+          path: evidence/**
+          if-no-files-found: error
+          retention-days: 30
