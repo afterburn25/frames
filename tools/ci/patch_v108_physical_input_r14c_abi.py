@@ -8,10 +8,14 @@ old='''fn v108_input_pointer_draw(surface:u64,state:u64,input_state:u64,x:u64,y:
 new='''fn v108_input_pointer_draw(surface:u64,state:u64,input_state:u64,pos:u64) -> u64 {\n    if surface==0 || state==0 || input_state==0 { return 0; } let x=pos/65536; let y=pos%65536; let py=v108_test_y(state);'''
 if s.count(old)!=1: raise SystemExit('pointer ABI signature anchor')
 s=s.replace(old,new,1)
-if s.count('v108_input_pointer_draw(surface,state,input_state,cx,cy);')!=2: raise SystemExit('cx/cy pointer ABI call anchors')
-s=s.replace('v108_input_pointer_draw(surface,state,input_state,cx,cy);','v108_input_pointer_draw(surface,state,input_state,(cx*65536)+cy);')
-if s.count('v108_input_pointer_draw(surface,state,input_state,newx,newy);')!=1: raise SystemExit('newx/newy pointer ABI call anchor')
-s=s.replace('v108_input_pointer_draw(surface,state,input_state,newx,newy);','v108_input_pointer_draw(surface,state,input_state,(newx*65536)+newy);',1)
+repls=[
+('v108_input_pointer_draw(surface,state,input_state,cx,cy);','v108_input_pointer_draw(surface,state,input_state,(cx*65536)+cy);'),
+('v108_input_pointer_draw(surface,state,input_state,cx,cy)==0','v108_input_pointer_draw(surface,state,input_state,(cx*65536)+cy)==0'),
+('v108_input_pointer_draw(surface,state,input_state,newx,newy);','v108_input_pointer_draw(surface,state,input_state,(newx*65536)+newy);'),
+]
+for a,b in repls:
+    if s.count(a)!=1: raise SystemExit(f'pointer ABI call anchor {a}')
+    s=s.replace(a,b,1)
 p.write_text(s)
 out=hashlib.sha256(p.read_bytes()).hexdigest(); print(out)
-if out!='a59b20a3247389f7977c788756314f16fc6ac27a4dadc21dfad226f73b2eea76': raise SystemExit(f'unexpected r14c source hash {out}')
+if out!='fc1dec191b3ccf90e096d2b21d15f9fd1fae2c2e69fc0ae6be2da27f9ee347e4': raise SystemExit(f'unexpected r14c source hash {out}')
