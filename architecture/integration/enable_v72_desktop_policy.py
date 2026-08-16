@@ -24,10 +24,6 @@ new = old | 1 | 2048
 s = s[:start] + prefix + str(new) + suffix + s[end:]
 print(f'patched boot_policy_flags {old} -> {new}')
 
-# Desktop Phase 5 consumes boot module 1. In older v72 sources the loader's
-# module-count statement was compact; the full v101 product source formats the
-# same producer/consumer contract differently. Locate the semantic assignment
-# instead of depending on one exact whitespace/type spelling.
 block = r'''if((boot_policy_flags & 2048ULL)!=0 && !hello_fapp_verified){
         EFI_STATUS appst=load_file(bs,image,L"\\Frames\\HELLO.FAP",&hello_fapp_file,&hello_fapp_size);
         if(EFI_ERROR(appst) || !fapp_extract_verify(hello_fapp_file,hello_fapp_size,&hello_fapp_fex,&hello_fapp_fex_size)) fatal(L"Desktop policy HELLO.FAP verification failed",appst);
@@ -37,11 +33,12 @@ block = r'''if((boot_policy_flags & 2048ULL)!=0 && !hello_fapp_verified){
     }
     '''
 
-# Prefer the actual module-count assignment that is conditional on
-# hello_fapp_verified. This covers compact v72 and spaced/full-product variants.
+# Inject immediately before the loader's module-table allocation. This accepts
+# both the original v72 two-module form and the full v101 product's richer
+# HELLO.FAP + theme + appearance module count without rewriting that architecture.
 patterns = [
-    r'(?m)^[ \t]*(?:UINTN|UINT64|size_t|u64|unsigned\s+long(?:\s+long)?|unsigned\s+int)?[ \t]*mod_count[ \t]*=[ \t]*hello_fapp_verified[ \t]*\?[ \t]*2[ \t]*:[ \t]*1[ \t]*;',
-    r'(?m)^[ \t]*mod_count[ \t]*=[ \t]*hello_fapp_verified[ \t]*\?[ \t]*2[ \t]*:[ \t]*1[ \t]*;',
+    r'(?m)^[ \t]*(?:UINTN|UINT64|size_t|u64|unsigned\s+long(?:\s+long)?|unsigned\s+int)?[ \t]*mod_count[ \t]*=[^;]*hello_fapp_verified[^;]*;',
+    r'(?m)^[ \t]*mod_count[ \t]*=[^;]*hello_fapp_verified[^;]*;',
 ]
 match = None
 for pat in patterns:
@@ -50,14 +47,18 @@ for pat in patterns:
         break
 
 if not match:
-    # Fail closed, but print all nearby semantic candidates into Actions logs so
-    # another source formatting drift can be repaired from evidence immediately.
     print('boot-module allocation anchor not found; semantic candidates:')
     for i, line in enumerate(s.splitlines(), 1):
         if 'mod_count' in line or 'hello_fapp_verified' in line:
             print(f'{i}: {line}')
     raise SystemExit('boot-module allocation semantic anchor not found')
 
-s = s[:match.start()] + block + s[match.start():]
+# Avoid duplicate injection if a source already contains the desktop-policy block.
+pre = s[max(0, match.start()-1200):match.start()]
+if 'Desktop policy HELLO.FAP verified; module 1 armed' not in pre:
+    s = s[:match.start()] + block + s[match.start():]
+    print('patched desktop policy to verify HELLO.FAP before boot-module allocation')
+else:
+    print('desktop policy HELLO.FAP verification block already present')
+
 p.write_text(s)
-print('patched desktop policy to verify HELLO.FAP before boot-module allocation')
