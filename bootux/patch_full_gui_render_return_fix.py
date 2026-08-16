@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import hashlib, sys
+import hashlib, subprocess, sys
 
 if len(sys.argv) != 2:
     raise SystemExit('usage: patch_full_gui_render_return_fix.py PATH_TO_main.nx')
@@ -17,5 +17,6 @@ if span.count(old)!=1:
 span=span.replace(old,new,1)
 s=s[:start]+span+s[end:]
 p.write_text(s)
+subprocess.run([sys.executable,str(Path(__file__).with_name('patch_full_gui_layout_r2.py')),str(p)],check=True)
 print('full_gui_render_return_fix=PASS')
 print('patched_kernel_sha256='+hashlib.sha256(p.read_bytes()).hexdigest())
