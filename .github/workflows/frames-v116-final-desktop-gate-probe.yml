@@ -1,0 +1,105 @@
+name: Frames v116 Final Desktop Gate Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ integrated-gui-physical-iso ]
+    paths:
+      - '.github/workflows/frames-v116-final-desktop-gate-probe.yml'
+
+permissions:
+  contents: read
+
+env:
+  V108_KIT_SHA256: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
+  V108_SOURCE_SHA256: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
+  V116_MAIN_SHA256: a8c569ca5c6b9facd85176a0fe97c8b369f9e4bbf50153f41a1b7777636a3ed5
+
+jobs:
+  inspect-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: integrated-gui-physical-iso
+
+      - name: Reconstruct exact v116 product kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/final-desktop-gate-probe"; mkdir -p "$E" "$RUNNER_TEMP/v108-kit" "$RUNNER_TEMP/v108-src"
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip"
+          test "$(sha256sum "$KIT" | awk '{print $1}')" = "$V108_KIT_SHA256"
+          unzip -q "$KIT" -d "$RUNNER_TEMP/v108-kit"
+          Z="$RUNNER_TEMP/v108-kit/Frames-0.9.98-Source-v108.zip"
+          test "$(sha256sum "$Z" | awk '{print $1}')" = "$V108_SOURCE_SHA256"
+          unzip -q "$Z" -d "$RUNNER_TEMP/v108-src"
+          K="$RUNNER_TEMP/v108-src/Frames-0.9.98/kernel/main.nx"
+          for p in \
+            architecture/v109/make_unified_device_architecture_v109.py \
+            architecture/v110/make_driver_runtime_v110.py \
+            architecture/v111/make_async_io_service_runtime_v111.py \
+            architecture/v112/make_device_service_integration_v112.py \
+            architecture/v113/make_driver_execution_hal_v113.py \
+            architecture/v114/make_kernel_concurrency_driver_scheduling_v114.py \
+            architecture/v115/make_driver_migration_unified_input_v115.py \
+            architecture/v116/make_usb_core_xhci_migration_v116.py; do python3 "$p" "$K"; done
+          test "$(sha256sum "$K" | awk '{print $1}')" = "$V116_MAIN_SHA256"
+          python3 architecture/integration/decouple_v72_network_from_filesystem.py "$K"
+          python3 architecture/integration/instrument_v72_gui_app_host.py "$K"
+          python3 architecture/integration/instrument_v72_file_manager.py "$K"
+          python3 architecture/integration/inspect_v72_post_phase7_gate.py "$K" "$E/POST-PHASE7.txt"
+          echo "K=$K" >> "$GITHUB_ENV"
+          sha256sum "$K" > "$E/REPAIRED-KERNEL-SHA256.txt"
+
+      - name: Capture exact phase12 marker and final certification logic
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/final-desktop-gate-probe"
+          python3 - "$K" "$E" <<'PY'
+          from pathlib import Path
+          import re,sys
+          p=Path(sys.argv[1]); e=Path(sys.argv[2]); s=p.read_text(); lines=s.splitlines()
+          needles=['fn serial_marker_integrated_gui_ok','serial_marker_integrated_gui_ok();','serial_marker_desktop_cert_fail','FRAMES_DESKTOP_CERT_FAIL','desktop_cert','appearance_system','appearance_ready']
+          out=[]
+          hits=[]
+          for i,line in enumerate(lines):
+              if any(n.lower() in line.lower() for n in needles): hits.append(i)
+          for i in hits:
+              lo=max(0,i-80); hi=min(len(lines),i+140)
+              out.append(f'===== context around line {i+1}: {lines[i][:180]} =====')
+              out.extend(f'{j+1:07d}: {lines[j]}' for j in range(lo,hi))
+          (e/'FINAL-DESKTOP-GATE-CONTEXT.txt').write_text('\n'.join(out)+'\n')
+          # Extract complete named functions where possible.
+          for fn in ['serial_marker_integrated_gui_ok','serial_marker_desktop_cert_fail','desktop_certification_gate','desktop_cert_gate','desktop_runtime_certification']:
+              m=re.search(rf'fn {re.escape(fn)}\([^\n]*\) -> [^{{]+\{{',s)
+              if not m: continue
+              start=m.start(); depth=0; end=None
+              for k in range(m.end()-1,len(s)):
+                  if s[k]=='{': depth+=1
+                  elif s[k]=='}':
+                      depth-=1
+                      if depth==0: end=k+1; break
+              if end: (e/f'FUNCTION-{fn}.txt').write_text(s[start:end]+'\n')
+          # Capture every callsite of the failure marker with a compact context.
+          chunks=[]
+          for m in re.finditer(r'serial_marker_desktop_cert_fail\(\)',s):
+              line=s.count('\n',0,m.start())
+              lo=max(0,line-25); hi=min(len(lines),line+36)
+              chunks.append(f'===== desktop_cert_fail call line {line+1} =====')
+              chunks.extend(f'{j+1:07d}: {lines[j]}' for j in range(lo,hi))
+          (e/'DESKTOP-CERT-FAIL-CALLS.txt').write_text('\n'.join(chunks)+'\n')
+          print(f'hits={len(hits)} fail_calls={len(list(re.finditer(r"serial_marker_desktop_cert_fail\\(\\)",s)))}')
+          PY
+          test -s "$E/DESKTOP-CERT-FAIL-CALLS.txt"
+          grep -nE 'serial_marker_integrated_gui_ok|serial_marker_desktop_phase12_ok|serial_marker_desktop_cert_fail|appearance' "$E/FINAL-DESKTOP-GATE-CONTEXT.txt" | head -n 200 > "$E/KEY-LINES.txt" || true
+
+      - name: Upload final gate probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v116-Final-Desktop-Gate-Probe
+          path: final-desktop-gate-probe/
+          if-no-files-found: error
+          retention-days: 30
