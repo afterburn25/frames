@@ -9,8 +9,6 @@ esp = Path(sys.argv[2])
 loader = root / 'boot/uefi/frames_boot.c'
 s = loader.read_text(errors='replace')
 
-# v72's desktop loader requests the FAPP1 package as \Frames\HELLO.FAP.
-# Parse it when possible; fall back only when the exact literal is visibly present.
 m = re.search(r'load_file\([^\n]*L"([^"\n]*HELLO\.FAP)"', s, re.I)
 if m:
     expected = m.group(1).replace('\\\\', '\\')
@@ -25,16 +23,8 @@ def packages():
     return [p for p in root.rglob('*') if p.is_file() and p.suffix.lower() in ('.fap','.fapp') and p.stat().st_size > 0]
 
 candidates = packages()
-
-# If the sealed source has no ready package, build a deterministic FAPP1 container
-# matching fapp_extract_verify(): ZIP local entries must be STORE/no data descriptor,
-# APP-MANIFEST.json must be first, APP.FEX second, and the manifest must bind the
-# complete FEX SHA-256. This is a boot-contract proof package, not a production app.
 if not candidates:
-    fex_candidates = []
-    for p in root.rglob('*.fex'):
-        if p.is_file() and p.stat().st_size >= 128:
-            fex_candidates.append(p)
+    fex_candidates = [p for p in root.rglob('*.fex') if p.is_file() and p.stat().st_size >= 128]
     system = root / 'build' / 'System.fex'
     if system.exists() and system.stat().st_size >= 128:
         payload = system
@@ -54,7 +44,6 @@ if not candidates:
         'sha256': digest,
         'purpose': 'v72-desktop-contract-proof'
     }
-    # Compact JSON is intentional: the loader searches exact no-whitespace tokens.
     manifest_bytes = json.dumps(manifest, separators=(',', ':')).encode('utf-8')
     out = root / 'build' / 'HELLO.FAP'
     with zipfile.ZipFile(out, 'w', compression=zipfile.ZIP_STORED, allowZip64=False) as z:
@@ -82,6 +71,22 @@ candidate = sorted(candidates, key=score, reverse=True)[0]
 print(f'candidate_fapp={candidate}')
 print(f'candidate_size={candidate.stat().st_size}')
 
+# make_esp.py emits a partitioned disk image, not a bare FAT volume. Find the
+# actual FAT32 boot sector and use mtools' image@@byte-offset syntax.
+data = esp.read_bytes()
+fat_offset = None
+for off in range(0, len(data) - 512 + 1, 512):
+    sec = data[off:off+512]
+    if sec[510:512] != b'\x55\xaa':
+        continue
+    if sec[82:90] == b'FAT32   ' or sec[54:62] == b'FAT16   ':
+        fat_offset = off
+        break
+if fat_offset is None:
+    raise SystemExit('unable to locate FAT boot sector inside ESP disk image')
+print(f'fat_partition_offset={fat_offset}')
+image_spec = f'{esp}@@{fat_offset}'
+
 uefi = expected.replace('\\','/').lstrip('/')
 parts = [x for x in uefi.split('/') if x]
 if len(parts) < 2:
@@ -89,8 +94,8 @@ if len(parts) < 2:
 cur='::'
 for d in parts[:-1]:
     cur += '/' + d
-    subprocess.run(['mmd','-i',str(esp),cur],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    subprocess.run(['mmd','-i',image_spec,cur],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 dest='::/' + '/'.join(parts)
-subprocess.check_call(['mcopy','-o','-i',str(esp),str(candidate),dest])
-subprocess.check_call(['mdir','-i',str(esp),'::/' + '/'.join(parts[:-1])])
+subprocess.check_call(['mcopy','-o','-i',image_spec,str(candidate),dest])
+subprocess.check_call(['mdir','-i',image_spec,'::/' + '/'.join(parts[:-1])])
 print(f'wired_fapp={dest}')
