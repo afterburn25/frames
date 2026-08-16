@@ -1,0 +1,45 @@
+name: Frames v108 USB Hub Signature Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-usb-hub-topology-r1 ]
+    paths:
+      - '.github/workflows/frames-v108-usb-hub-signature-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: v108-usb-hub-topology-r1 }
+      - name: Decode hub r2 patch source and print oversized helper contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re,base64,zlib
+          p=Path('tools/ci/patch_v108_usb_hub_topology_r2.py').read_text()
+          m=re.search(r"b64decode\('([^']+)'\)",p)
+          if not m: raise SystemExit('compressed payload not found')
+          src=zlib.decompress(base64.b64decode(m.group(1))).decode()
+          Path('decoded-hub-r2.py').write_text(src)
+          targets=['usb_setup_value_v113','xhci_hub_prepare_parent_v113','xhci_address_hub_child_v113','xhci_hub_find_boot_hid_v113']
+          for t in targets:
+              print('\n===',t,'===')
+              found=False
+              for i,line in enumerate(src.splitlines(),1):
+                  if t in line:
+                      found=True
+                      lo=max(1,i-3); hi=min(len(src.splitlines()),i+3)
+                      lines=src.splitlines()
+                      for n in range(lo,hi+1): print(f'{n}: {lines[n-1]}')
+              if not found: print('NOT FOUND')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-USB-Hub-R2-Decoded-Patch
+          path: decoded-hub-r2.py
+          retention-days: 7
