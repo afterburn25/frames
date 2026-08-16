@@ -224,7 +224,7 @@ jobs:
           python3 - "$SERIAL" "$E/RAW-TRANSITION-ORDER.json" <<'PY'
           import json,sys
           s=open(sys.argv[1],errors='replace').read()
-          marks=['FRAMES_KERNEL_START','FRAMES_USB_MIGRATION_RUNTIME_V9_OK','FRAMES_DESKTOP_POLICY_OK','FRAMES_GUI_PHYSICAL_TEST_POLICY_OK','FRAMES_DESKTOP_PHASE12_OK','FRAMES_APPEARANCE_SYSTEM_OK','FRAMES_INTEGRATED_GUI_OK','FRAMES_GUI_PHYSICAL_TEST_READY']
+          marks=['FRAMES_KERNEL_START','FRAMES_DESKTOP_POLICY_OK','FRAMES_GUI_PHYSICAL_TEST_POLICY_OK','FRAMES_USB_MIGRATION_RUNTIME_V9_OK','FRAMES_DESKTOP_PHASE12_OK','FRAMES_APPEARANCE_SYSTEM_OK','FRAMES_INTEGRATED_GUI_OK','FRAMES_GUI_PHYSICAL_TEST_READY']
           pos={m:s.find(m) for m in marks}; ok=all(pos[m]>=0 for m in marks) and all(pos[marks[i]]<pos[marks[i+1]] for i in range(len(marks)-1)) and 'FRAMES_DESKTOP_CERT_FAIL' not in s
           open(sys.argv[2],'w').write(json.dumps({'status':'PASS' if ok else 'FAIL','positions':pos,'desktop_cert_fail_absent':'FRAMES_DESKTOP_CERT_FAIL' not in s},indent=2)+'\n')
           if not ok: raise SystemExit(1)
@@ -318,7 +318,7 @@ jobs:
           python3 - "$SERIAL" "$E/ISO-TRANSITION-ORDER.json" <<'PY'
           import json,sys
           s=open(sys.argv[1],errors='replace').read()
-          marks=['FRAMES_KERNEL_START','FRAMES_USB_MIGRATION_RUNTIME_V9_OK','FRAMES_DESKTOP_POLICY_OK','FRAMES_GUI_PHYSICAL_TEST_POLICY_OK','FRAMES_DESKTOP_PHASE12_OK','FRAMES_APPEARANCE_SYSTEM_OK','FRAMES_INTEGRATED_GUI_OK','FRAMES_GUI_PHYSICAL_TEST_READY']
+          marks=['FRAMES_KERNEL_START','FRAMES_DESKTOP_POLICY_OK','FRAMES_GUI_PHYSICAL_TEST_POLICY_OK','FRAMES_USB_MIGRATION_RUNTIME_V9_OK','FRAMES_DESKTOP_PHASE12_OK','FRAMES_APPEARANCE_SYSTEM_OK','FRAMES_INTEGRATED_GUI_OK','FRAMES_GUI_PHYSICAL_TEST_READY']
           pos={m:s.find(m) for m in marks}; ok=all(pos[m]>=0 for m in marks) and all(pos[marks[i]]<pos[marks[i+1]] for i in range(len(marks)-1)) and 'FRAMES_DESKTOP_CERT_FAIL' not in s
           open(sys.argv[2],'w').write(json.dumps({'status':'PASS' if ok else 'FAIL','positions':pos,'desktop_cert_fail_absent':'FRAMES_DESKTOP_CERT_FAIL' not in s},indent=2)+'\n')
           if not ok: raise SystemExit(1)
