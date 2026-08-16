@@ -1,0 +1,235 @@
+name: Frames v116 Physical Input Bringup
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ physical-input-bringup ]
+    paths:
+      - '.github/workflows/frames-v116-physical-input-bringup.yml'
+      - 'bootux/patch_physical_input_bringup.py'
+
+permissions:
+  contents: read
+
+env:
+  V108_KIT_SHA256: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
+  V108_SOURCE_SHA256: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
+  V101_KIT_SHA256: 84f0a5c6b47d10e11237ab1d6d4c34507a4d525b98bbe58ffc6aa20e3a8dbca5
+  V101_SOURCE_SHA256: ce58e0eceb770e5b9bc3842ce096deccd9640d986ac0acfec5065305efef2b65
+  APPROVED_LOGO_SHA256: ea3542453493238c0f50a6c703150d482edc0d5b875a6dfe678c15a42ab7ae0e
+  APPROVED_SPLASH_SHA256: 70e9ca0c9e31b56b720f3cf0bd22c5eacc35b51797782ad0f03172c2038b9fbd
+  V116_MAIN_SHA256: a8c569ca5c6b9facd85176a0fe97c8b369f9e4bbf50153f41a1b7777636a3ed5
+  INPUT_PATCHED_MAIN_SHA256: 7de812bc657a3077c2adb9099e2924a2f24a5271600d6cc9c2687692209a2a76
+
+jobs:
+  build-input-candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: physical-input-bringup
+
+      - name: Install build and ISO tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 unzip mtools dosfstools gdisk xorriso
+
+      - name: Reconstruct sealed source and v116 architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/input-build-evidence"; mkdir -p "$E" "$RUNNER_TEMP/v108-kit" "$RUNNER_TEMP/v108-src"
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip"
+          test -s "$KIT"; test "$(sha256sum "$KIT" | awk '{print $1}')" = "$V108_KIT_SHA256"
+          unzip -q "$KIT" -d "$RUNNER_TEMP/v108-kit"
+          Z="$RUNNER_TEMP/v108-kit/Frames-0.9.98-Source-v108.zip"
+          test -s "$Z"; test "$(sha256sum "$Z" | awk '{print $1}')" = "$V108_SOURCE_SHA256"
+          unzip -q "$Z" -d "$RUNNER_TEMP/v108-src"
+          S="$RUNNER_TEMP/v108-src/Frames-0.9.98"
+          for p in \
+            architecture/v109/make_unified_device_architecture_v109.py \
+            architecture/v110/make_driver_runtime_v110.py \
+            architecture/v111/make_async_io_service_runtime_v111.py \
+            architecture/v112/make_device_service_integration_v112.py \
+            architecture/v113/make_driver_execution_hal_v113.py \
+            architecture/v114/make_kernel_concurrency_driver_scheduling_v114.py \
+            architecture/v115/make_driver_migration_unified_input_v115.py \
+            architecture/v116/make_usb_core_xhci_migration_v116.py; do python3 "$p" "$S/kernel/main.nx"; done
+          test "$(sha256sum "$S/kernel/main.nx" | awk '{print $1}')" = "$V116_MAIN_SHA256"
+          echo "S=$S" >> "$GITHUB_ENV"
+
+      - name: Reconstruct full GUI and apply physical input repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/input-build-evidence"; mkdir -p "$RUNNER_TEMP/v101-kit" "$RUNNER_TEMP/v101-src"
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.91-Integrated-Connected-Services-Certification-Kit-v101.zip"
+          test -s "$KIT"; test "$(sha256sum "$KIT" | awk '{print $1}')" = "$V101_KIT_SHA256"
+          unzip -q "$KIT" -d "$RUNNER_TEMP/v101-kit"
+          Z="$(find "$RUNNER_TEMP/v101-kit" -type f -iname '*0.9.91*Source*.zip' -print | sort | head -n1)"
+          test -s "$Z"; test "$(sha256sum "$Z" | awk '{print $1}')" = "$V101_SOURCE_SHA256"
+          unzip -q "$Z" -d "$RUNNER_TEMP/v101-src"
+          V101="$RUNNER_TEMP/v101-src/Frames-0.9.91"; LOGO="$V101/assets/branding/FramesLogo.png"; SPLASH="$RUNNER_TEMP/SPLASH.FSP"
+          test "$(sha256sum "$LOGO" | awk '{print $1}')" = "$APPROVED_LOGO_SHA256"
+          python3 bootux/make_splash_asset.py "$LOGO" "$SPLASH" > "$E/SPLASH-ASSET.json"
+          test "$(sha256sum "$SPLASH" | awk '{print $1}')" = "$APPROVED_SPLASH_SHA256"
+          python3 bootux/patch_v108_uefi_approved_splash.py "$S/boot/uefi/frames_boot.c"
+          python3 bootux/patch_integrated_gui_physical_test_policy.py "$S/boot/uefi/frames_boot.c" "$S/kernel/main.nx"
+          python3 bootux/patch_full_interactive_desktop_gui.py "$S/kernel/main.nx"
+          python3 bootux/patch_full_gui_render_return_fix.py "$S/kernel/main.nx"
+          test "$(sha256sum "$S/kernel/main.nx" | awk '{print $1}')" = cca9a6021c972c9b54269c9ab678c4c7f5503d14b6472b12ba8fb0c76abc6413
+          python3 bootux/patch_physical_input_bringup.py "$S/kernel/main.nx" | tee "$E/INPUT-PATCH.log"
+          test "$(sha256sum "$S/kernel/main.nx" | awk '{print $1}')" = "$INPUT_PATCHED_MAIN_SHA256"
+          grep -q 'xhci_reset_connected_port_from' "$S/kernel/main.nx"
+          grep -q 'ps2_mouse_decode_live' "$S/kernel/main.nx"
+          grep -q 'FRAMES_LIVE_USB_GUI_CURSOR_OK' "$S/kernel/main.nx" || true
+          sha256sum "$S/kernel/main.nx" "$S/boot/uefi/frames_boot.c" > "$E/PATCHED-SOURCE-SHA256.txt"
+          echo "SPLASH=$SPLASH" >> "$GITHUB_ENV"
+
+      - name: Build repaired GUI image
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/input-build-evidence"; cd "$S"
+          chmod +x tools/*.sh tools/*.py sdk/*.sh 2>/dev/null || true
+          find toolchain -type f -name nexus -exec chmod +x {} + 2>/dev/null || true
+          ./tools/build.sh 2>&1 | tee "$E/BUILD.log"
+          python3 tools/sdk_selftest.py --require-pass > "$E/SDK-SELFTEST.json"
+          python3 tools/make_esp.py > "$E/MAKE-ESP.log" 2>&1
+          python3 tools/make_desktop_preview_image.py > "$E/MAKE-DESKTOP-PREVIEW.log" 2>&1
+          python3 tools/verify_release.py > "$E/RELEASE-VERIFY.log"
+          test -s build/Frames-0.9.98-ESP.img; test -s build/Frames-0.9.98-Desktop-Preview.img
+
+      - name: Compose GUI payload and build USB-compatible ISO
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/input-build-evidence"; ESP="$(readlink -f "$S/build/Frames-0.9.98-ESP.img")"; DESK="$(readlink -f "$S/build/Frames-0.9.98-Desktop-Preview.img")"
+          EF="$(sgdisk -i 1 "$ESP" | awk -F: '/First sector/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); split($2,a," "); print a[1]; exit}')"; EL="$(sgdisk -i 1 "$ESP" | awk -F: '/Last sector/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); split($2,a," "); print a[1]; exit}')"; DF="$(sgdisk -i 1 "$DESK" | awk -F: '/First sector/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); split($2,a," "); print a[1]; exit}')"
+          EM="$ESP@@$((EF*512))"; DM="$DESK@@$((DF*512))"; mkdir -p "$RUNNER_TEMP/gui" "$RUNNER_TEMP/iso-root/EFI/BOOT" "$RUNNER_TEMP/iso-root/FRAMES"
+          for f in DESKTOP.CFG HELLO.FAP THEME.FTH APPEAR.CFG; do mcopy -o -i "$DM" "::/FRAMES/$f" "$RUNNER_TEMP/gui/$f"; mcopy -o -i "$EM" "$RUNNER_TEMP/gui/$f" "::/FRAMES/$f"; done
+          printf 'FRAMES_INTEGRATED_GUI_PHYSICAL_TEST_V1\n' > "$RUNNER_TEMP/gui/GUITEST.CFG"; mcopy -o -i "$EM" "$RUNNER_TEMP/gui/GUITEST.CFG" ::/FRAMES/GUITEST.CFG
+          mcopy -o -i "$EM" "$SPLASH" ::/FRAMES/SPLASH.FSP
+          mcopy -o -i "$EM" ::/EFI/BOOT/BOOTX64.EFI "$RUNNER_TEMP/iso-root/EFI/BOOT/BOOTX64.EFI"
+          for f in FramesKernel.fkrn System.fex DESKTOP.CFG HELLO.FAP THEME.FTH APPEAR.CFG GUITEST.CFG SPLASH.FSP; do mcopy -o -i "$EM" "::/FRAMES/$f" "$RUNNER_TEMP/iso-root/FRAMES/$f"; done
+          dd if="$ESP" of="$RUNNER_TEMP/iso-root/efiboot.img" bs=512 skip="$EF" count="$((EL-EF+1))" status=none
+          ISO="$GITHUB_WORKSPACE/Frames-0.9.106-v116-Physical-Input-Bringup-UEFI.iso"
+          xorriso -as mkisofs -R -J -V 'FRAMES_INPUT' -eltorito-alt-boot -e efiboot.img -no-emul-boot -o "$ISO" "$RUNNER_TEMP/iso-root" > "$E/XORRISO.log" 2>&1
+          test -s "$ISO"; sha256sum "$ISO" > "$E/ISO-SHA256.txt"; echo "ISO=$ISO" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v116-Physical-Input-Bringup-Candidate
+          path: |
+            Frames-0.9.106-v116-Physical-Input-Bringup-UEFI.iso
+            input-build-evidence/**
+          if-no-files-found: error
+          retention-days: 30
+
+  qemu-live-input:
+    needs: build-input-candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [usb, ps2]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: physical-input-bringup
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v116-Physical-Input-Bringup-Candidate
+          path: candidate
+      - name: Install QEMU tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf python3 netcat-openbsd
+      - name: Exercise real emulated ${{ matrix.lane }} device through GUI
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/evidence-${{ matrix.lane }}"; mkdir -p "$OUT"
+          ISO="$(find candidate -name '*.iso' -type f -print -quit)"; test -s "$ISO"
+          CODE="$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE.fd' \) | head -n1)"; VARS="$(find /usr/share/OVMF -type f \( -name 'OVMF_VARS_4M.fd' -o -name 'OVMF_VARS.fd' \) | head -n1)"; test -n "$CODE"; test -n "$VARS"; cp "$VARS" "$RUNNER_TEMP/vars.fd"
+          QMP="$RUNNER_TEMP/input-qmp.sock"; SERIAL="$OUT/SERIAL.log"; rm -f "$QMP"
+          EXTRA=()
+          if [ '${{ matrix.lane }}' = usb ]; then
+            truncate -s 8M "$RUNNER_TEMP/dummy-usb.img"
+            EXTRA=(-device qemu-xhci,id=xhci -drive if=none,id=dummy,format=raw,file="$RUNNER_TEMP/dummy-usb.img" -device usb-storage,drive=dummy,bus=xhci.0 -device usb-mouse,bus=xhci.0,id=framesmouse)
+          fi
+          qemu-system-x86_64 -machine q35 -m 1024 -smp 2 -drive if=pflash,format=raw,readonly=on,file="$CODE" -drive if=pflash,format=raw,file="$RUNNER_TEMP/vars.fd" -cdrom "$ISO" -boot d -serial file:"$SERIAL" -qmp unix:"$QMP",server=on,wait=off -display none -vga std -no-reboot -no-shutdown "${EXTRA[@]}" &
+          PID=$!; trap 'kill $PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 100); do [ -S "$QMP" ] && break; sleep .1; done; test -S "$QMP"
+          found=0; for i in $(seq 1 120); do if [ -s "$SERIAL" ] && grep -q 'FRAMES_GUI_PHYSICAL_TEST_READY' "$SERIAL"; then found=1; break; fi; sleep 1; done; test "$found" = 1
+          python3 - "$QMP" "$OUT" <<'PY'
+          import json,socket,sys,time,pathlib
+          sock=sys.argv[1]; out=pathlib.Path(sys.argv[2]); s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect(sock); f=s.makefile('rwb',buffering=0)
+          def recv():
+              while True:
+                  line=f.readline()
+                  if not line: raise RuntimeError('qmp eof')
+                  obj=json.loads(line)
+                  if 'return' in obj or 'error' in obj: return obj
+          json.loads(f.readline()); f.write(b'{"execute":"qmp_capabilities"}\n'); recv()
+          f.write(b'{"execute":"query-mice"}\n'); mice=recv(); (out/'QUERY-MICE.json').write_text(json.dumps(mice,indent=2)+'\n')
+          f.write((json.dumps({'execute':'screendump','arguments':{'filename':str(out/'BEFORE.ppm')}})+'\n').encode()); recv()
+          for dx,dy in [(8,0),(8,0),(0,6),(-4,0),(0,-3)]:
+              ev=[]
+              if dx: ev.append({'type':'rel','data':{'axis':'x','value':dx}})
+              if dy: ev.append({'type':'rel','data':{'axis':'y','value':dy}})
+              f.write((json.dumps({'execute':'input-send-event','arguments':{'events':ev}})+'\n').encode()); recv(); time.sleep(.12)
+          time.sleep(1.0)
+          f.write((json.dumps({'execute':'screendump','arguments':{'filename':str(out/'AFTER.ppm')}})+'\n').encode()); recv(); f.close(); s.close()
+          PY
+          if [ '${{ matrix.lane }}' = usb ]; then
+            for m in FRAMES_LIVE_USB_HID_REPORT_OK FRAMES_LIVE_USB_GUI_CURSOR_OK; do grep -q "$m" "$SERIAL"; done
+          else
+            for m in FRAMES_PS2_MOUSE_ENABLE_OK FRAMES_LIVE_PS2_PACKET_OK FRAMES_LIVE_PS2_GUI_CURSOR_OK; do grep -q "$m" "$SERIAL"; done
+          fi
+          python3 - "$OUT/BEFORE.ppm" "$OUT/AFTER.ppm" "$OUT/FRAME-DIFF.json" <<'PY'
+          import sys,json,hashlib
+          a=open(sys.argv[1],'rb').read(); b=open(sys.argv[2],'rb').read(); changed=sum(x!=y for x,y in zip(a,b)); ratio=changed/max(1,min(len(a),len(b)))
+          r={'status':'PASS' if a!=b and changed>100 else 'FAIL','changed_bytes':changed,'changed_ratio':ratio,'before_sha256':hashlib.sha256(a).hexdigest(),'after_sha256':hashlib.sha256(b).hexdigest()}; open(sys.argv[3],'w').write(json.dumps(r,indent=2)+'\n'); print(json.dumps(r))
+          if r['status']!='PASS': raise SystemExit(1)
+          PY
+          ! grep -q 'FRAMES_DESKTOP_CERT_FAIL' "$SERIAL"
+          kill $PID 2>/dev/null || true; wait $PID 2>/dev/null || true; trap - EXIT
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Frames-v116-Physical-Input-${{ matrix.lane }}-Evidence
+          path: evidence-${{ matrix.lane }}/**
+          if-no-files-found: error
+          retention-days: 30
+
+  certify-input-candidate:
+    needs: [build-input-candidate, qemu-live-input]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v116-Physical-Input-Bringup-Candidate
+          path: candidate
+      - name: Seal candidate identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          ISO="$(find candidate -name '*.iso' -type f -print -quit)"; test -s "$ISO"
+          mkdir -p final
+          sha256sum "$ISO" | tee final/ISO-SHA256.txt
+          cat > final/FINAL-PHYSICAL-INPUT-BRINGUP.json <<EOF
+          {"status":"PASS","profile":"frames-v116-physical-input-bringup","qemu_usb_live_input":true,"qemu_ps2_live_input":true,"physical_hardware_verified":false,"touchpad_i2c_hid_implemented":false,"physical_destructive_writes_certified":false,"promotion_allowed":false}
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v116-Physical-Input-Bringup-Final
+          path: final/**
+          if-no-files-found: error
+          retention-days: 30
