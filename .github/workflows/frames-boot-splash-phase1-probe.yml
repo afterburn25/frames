@@ -1,0 +1,68 @@
+name: Frames Boot Splash Phase 1 Loader Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ boot-splash-phase1 ]
+    paths:
+      - '.github/workflows/frames-boot-splash-phase1-probe.yml'
+      - 'bootux/**'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-loader:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: boot-splash-phase1
+
+      - name: Extract exact Frames 0.9.91 v101 product source
+        shell: bash
+        run: |
+          set -euo pipefail
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.91-Integrated-Connected-Services-Certification-Kit-v101.zip"
+          test -s "$KIT"
+          mkdir -p "$RUNNER_TEMP/v101-kit" "$RUNNER_TEMP/v101-source" "$GITHUB_WORKSPACE/boot-splash-probe"
+          sha256sum "$KIT" | tee "$GITHUB_WORKSPACE/boot-splash-probe/V101-KIT-SHA256.txt"
+          unzip -q "$KIT" -d "$RUNNER_TEMP/v101-kit"
+          SRCZIP="$(find "$RUNNER_TEMP/v101-kit" -type f \( -iname 'Frames-0.9.91-Source*.zip' -o -iname '*0.9.91*Source*.zip' \) -print | sort | head -n1 || true)"
+          if [ -z "$SRCZIP" ]; then SRCZIP="$(find "$RUNNER_TEMP/v101-kit" -type f -iname '*Source*.zip' -print | sort | head -n1 || true)"; fi
+          test -n "$SRCZIP"; test -s "$SRCZIP"
+          sha256sum "$SRCZIP" | tee "$GITHUB_WORKSPACE/boot-splash-probe/V101-SOURCE-SHA256.txt"
+          unzip -q "$SRCZIP" -d "$RUNNER_TEMP/v101-source"
+          PRODUCT=""
+          while IFS= read -r vf; do
+            d="${vf%/VERSION}"
+            v="$(tr -d '\r\n' < "$vf")"
+            if [ "$v" = "0.9.91" ] && [ -f "$d/kernel/main.nx" ]; then PRODUCT="$d"; break; fi
+          done < <(find "$RUNNER_TEMP/v101-source" -type f -name VERSION -print | sort)
+          test -n "$PRODUCT"
+          echo "PRODUCT=$PRODUCT" >> "$GITHUB_ENV"
+          printf 'product=%s\nversion=%s\n' "$PRODUCT" "$(cat "$PRODUCT/VERSION")" > "$GITHUB_WORKSPACE/boot-splash-probe/PRODUCT-IDENTITY.txt"
+
+      - name: Capture boot-loader implementation and boot assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/boot-splash-probe"
+          LOADER="$(find "$PRODUCT" -type f \( -path '*/boot/uefi/frames_boot.c' -o -iname 'frames_boot.c' \) -print | sort | head -n1 || true)"
+          test -n "$LOADER"; test -s "$LOADER"
+          cp "$LOADER" "$E/frames_boot.c"
+          sha256sum "$LOADER" > "$E/FRAMES-BOOT-C-SHA256.txt"
+          grep -nE 'EFI_GRAPHICS_OUTPUT_PROTOCOL|GraphicsOutput|Gop|GOP|Blt|SetMode|QueryMode|HorizontalResolution|VerticalResolution|PixelsPerScanLine|ConOut|ClearScreen|OutputString|Print|efi_main|UefiMain|boot_policy_flags|FramesBootInfo' "$LOADER" > "$E/LOADER-GRAPHICS-SYMBOLS.txt" || true
+          find "$PRODUCT/boot" -maxdepth 4 -type f -printf '%P %s bytes\n' 2>/dev/null | sort > "$E/BOOT-TREE.txt" || true
+          find "$PRODUCT" -maxdepth 5 -type f \( -iname '*.bmp' -o -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.raw' -o -iname '*.logo' -o -iname '*.fth' -o -iname '*.fthm' \) -printf '%P %s bytes\n' | sort > "$E/GRAPHICS-ASSETS.txt" || true
+          grep -nE '^([A-Za-z_][A-Za-z0-9_[:space:]*]+\([^;]*\)[[:space:]]*\{|EFI_STATUS[[:space:]]+EFIAPI)' "$LOADER" > "$E/LOADER-FUNCTION-INDEX.txt" || true
+          test -s "$E/frames_boot.c"
+
+      - name: Upload loader probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-Boot-Splash-Phase1-Loader-Probe
+          path: boot-splash-probe/
+          if-no-files-found: error
+          retention-days: 30
