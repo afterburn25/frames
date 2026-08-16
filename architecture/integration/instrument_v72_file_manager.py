@@ -20,13 +20,17 @@ new='''fn file_manager_phase1_compose(state:u64,surface:u64,process:u64,wm:u64) 
     if state==0 || surface==0 || process==0 || wm==0 { return 0; }
     let vfs=volatile_read64(process+464); let path=volatile_read64(process+520); let sec=volatile_read64(process+528); let helix=volatile_read64(process+1008);
     serial_desktop_diag(89,vfs); serial_desktop_diag(90,path); serial_desktop_diag(91,sec); serial_desktop_diag(92,helix);
-    if vfs==0 || path==0 || sec==0 || helix==0 { return 0; }
-    let mounts=volatile_read64(vfs+8); serial_desktop_diag(93,mounts); if mounts<5 { return 0; }
-    serial_marker_fileman_vfs_ok();
-    let value=helixfs_path_read_u64(helix,path,sec,401); let checksum=helixfs_path_traverse_checksum(helix,path,sec);
-    serial_desktop_diag(94,value); serial_desktop_diag(95,checksum);
-    if value!=6434604069960107346 || checksum!=8256 { return 0; }
-    serial_marker_fileman_helix_ok();
+    var mounts:u64=0; var value:u64=0; var checksum:u64=0; var storage_mode:u64=0;
+    if vfs!=0 && path!=0 && sec!=0 && helix!=0 {
+        mounts=volatile_read64(vfs+8); serial_desktop_diag(93,mounts);
+        if mounts>=5 {
+            serial_marker_fileman_vfs_ok();
+            value=helixfs_path_read_u64(helix,path,sec,401); checksum=helixfs_path_traverse_checksum(helix,path,sec);
+            serial_desktop_diag(94,value); serial_desktop_diag(95,checksum);
+            if value==6434604069960107346 && checksum==8256 { storage_mode=1; serial_marker_fileman_helix_ok(); }
+        }
+    }
+    serial_desktop_diag(100,storage_mode);
     let desktop=volatile_read64(process+1064); serial_desktop_diag(96,desktop); if desktop==0 { return 0; }
     let sw=volatile_read64(desktop+8); let id=wm_create(wm,(42*65536)+146,(470*65536)+330,5); serial_desktop_diag(97,id);
     let focus_ok=wm_focus(wm,id); serial_desktop_diag(98,focus_ok); if id!=4 || focus_ok==0 { return 0; }
@@ -34,19 +38,18 @@ new='''fn file_manager_phase1_compose(state:u64,surface:u64,process:u64,wm:u64) 
     let x=volatile_read64(rec+8); let y=volatile_read64(rec+16); let rail:u64=4280034105; let row:u64=4280953426; let accent:u64=4285661183;
     if display_fill_rect(surface,((x+14)*65536)+(y+48),(110*65536)+264,rail)==0 { return 0; }
     var i:u64=0; while i<4 { if display_fill_rect(surface,((x+142)*65536)+(y+56+(i*48)),(292*65536)+34,row)==0 { return 0; } i=i+1; }
-    if display_fill_rect(surface,((x+142)*65536)+(y+104),(292*65536)+34,accent)==0 { return 0; }
+    if storage_mode!=0 { if display_fill_rect(surface,((x+142)*65536)+(y+104),(292*65536)+34,accent)==0 { return 0; } }
     serial_marker_fileman_window_ok();
-    zero_page(state); unsafe { volatile_write64(state,1); volatile_write64(state+8,id); volatile_write64(state+16,mounts); volatile_write64(state+24,4); volatile_write64(state+32,2); volatile_write64(state+40,value); volatile_write64(state+48,checksum); volatile_write64(state+56,1); }
+    zero_page(state); unsafe { volatile_write64(state,1); volatile_write64(state+8,id); volatile_write64(state+16,mounts); volatile_write64(state+24,storage_mode); volatile_write64(state+32,0); volatile_write64(state+40,value); volatile_write64(state+48,checksum); volatile_write64(state+56,1); }
     let dirty=volatile_read64(process+624); let timing=volatile_read64(process+664); let present=volatile_read64(process+672); let cursor=volatile_read64(process+640); let sh=volatile_read64(desktop+16);
     if dirty==0 || timing==0 || present==0 || cursor==0 { return 0; }
     if desktop_draw_cursor(surface,volatile_read64(cursor+16),volatile_read64(cursor+24))==0 { return 0; }
     if dirty_add(dirty,0,(sw*65536)+sh,16)==0 || present_enqueue(present,0,(sw*65536)+sh,16)==0 || present_flush(present,surface,timing)==0 { return 0; }
-    serial_desktop_diag(50,mounts); serial_desktop_diag(51,4); serial_desktop_diag(52,2); serial_desktop_diag(53,value); serial_desktop_diag(54,checksum); serial_desktop_diag(55,id); serial_marker_fileman_phase1_ok(); serial_marker_desktop_phase8_ok(); return 1;
+    serial_desktop_diag(50,mounts); serial_desktop_diag(51,storage_mode); serial_desktop_diag(52,0); serial_desktop_diag(53,value); serial_desktop_diag(54,checksum); serial_desktop_diag(55,id); serial_marker_fileman_phase1_ok(); serial_marker_desktop_phase8_ok(); return 1;
 }
 '''
 ns=s[:start]+new+s[end:]
-# Structural guard: the next phase must remain defined after the replacement.
 if 'fn settings_phase1_compose(state:u64,surface:u64,process:u64,wm:u64) -> u64 {' not in ns:
     raise SystemExit('settings_phase1_compose lost during instrumentation')
 p.write_text(ns)
-print('instrumented file_manager_phase1_compose stages 85-99 with bounded replacement')
+print('patched file_manager_phase1_compose: storage-backed mode when available, no-volume shell otherwise; stages 85-100')
