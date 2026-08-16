@@ -32,3 +32,4 @@ a,b=fn_span(s,'fn gui_input_pointer_move'); f=s[a:b]
 f=f.replace('if volatile_read64(state+392)!=0 {\n        if volatile_read64(state+96)%2==0','if volatile_read64(state+392)!=0 {\n        serial_marker_v108_drag_pending_move_trace_v120(); if volatile_read64(state+96)%2==0',1)
 s=s[:a]+f+s[b:]
 p.write_text(s); print(hashlib.sha256(p.read_bytes()).hexdigest())
+# workflow registration trigger
