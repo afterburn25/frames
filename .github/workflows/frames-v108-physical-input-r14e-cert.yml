@@ -1,0 +1,145 @@
+name: Frames v108 Physical Input r14e Certification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-usb-hub-topology-r1 ]
+    paths:
+      - '.github/workflows/frames-v108-physical-input-r14e-cert.yml'
+      - 'tools/ci/build_v108_r14e_candidate.sh'
+      - 'tools/ci/patch_v108_physical_input_r14c_abi.py'
+      - 'tools/ci/qemu_text_edit_ibeam_gate_r14b.py'
+
+permissions:
+  contents: read
+
+env:
+  KIT_SHA: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
+  SRC_SHA: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
+  BASE_SHA: ffc5721eca68844357dbdca63b0edf266e7e210f9d162eecde8cae0067f210a8
+  R14E_SHA: fc1dec191b3ccf90e096d2b21d15f9fd1fae2c2e69fc0ae6be2da27f9ee347e4
+  ISO_NAME: Frames-0.9.98-v108-Physical-Input-Repair-r14e-Text-Edit-Rufus-UEFI.iso
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: v108-usb-hub-topology-r1 }
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 unzip mtools dosfstools gdisk xorriso
+      - name: Reconstruct, audit, build, package
+        run: bash tools/ci/build_v108_r14e_candidate.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r14e-Candidate
+          path: |
+            out/*.iso
+            evidence/**
+          if-no-files-found: error
+          retention-days: 30
+
+  gates:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [usb-direct, usb-hub, usb-hub-multi, ps2, smoothness, interactive, right-click, text-edit, model, safety]
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: v108-usb-hub-topology-r1 }
+      - uses: actions/download-artifact@v4
+        with: { name: Frames-v108-r14e-Candidate, path: candidate }
+      - name: Install runtime tools
+        if: matrix.lane != 'model'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf python3 python3-pil
+          O="$(find /usr/share/OVMF -type f \( -name OVMF_CODE_4M.fd -o -name OVMF_CODE.fd \)|head -n1)"
+          test -s "$O"; echo "OVMF=$O" >> "$GITHUB_ENV"
+      - name: Run ${{ matrix.lane }} gate
+        run: |
+          set -euo pipefail
+          mkdir -p gate
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"
+          EXPECT="$(awk '{print $1}' candidate/evidence/ISO-SHA256.txt)"
+          test -s "$ISO"; test "$(sha256sum "$ISO"|awk '{print $1}')" = "$EXPECT"
+          case '${{ matrix.lane }}' in
+            usb-direct) python3 tools/ci/qemu_usb_hub_topology_gate_r3.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$EXPECT" --topology direct; grep -q '"status": "PASS"' gate/TOPOLOGY.json ;;
+            usb-hub) python3 tools/ci/qemu_usb_hub_topology_gate_r3.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$EXPECT" --topology hub; grep -q '"status": "PASS"' gate/TOPOLOGY.json ;;
+            usb-hub-multi) python3 tools/ci/qemu_usb_hub_multichild_gate_r14.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$EXPECT"; grep -q '"status": "PASS"' gate/MULTICHILD.json ;;
+            ps2) python3 tools/ci/qemu_input_visual_gate_r10.py --ovmf "$OVMF" --iso "$ISO" --lane ps2 --out gate --expected-iso-sha "$EXPECT"; grep -q '"status": "PASS"' gate/RUNTIME.json ;;
+            smoothness) python3 tools/ci/qemu_ps2_cursor_smoothness_r10.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$EXPECT"; grep -q '"status": "PASS"' gate/SMOOTHNESS.json ;;
+            interactive) python3 tools/ci/qemu_input_test_ui_r12.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$EXPECT"; grep -q '"status": "PASS"' gate/INTERACTIVE-INPUT.json ;;
+            right-click) python3 tools/ci/qemu_right_click_gate_r14.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$EXPECT"; grep -q '"status": "PASS"' gate/RIGHT-CLICK.json ;;
+            text-edit) python3 tools/ci/qemu_text_edit_ibeam_gate_r14b.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$EXPECT"; grep -q '"status": "PASS"' gate/TEXT-EDIT.json ;;
+            model) test "$(sha256sum candidate/evidence/kernel-r14e.nx|awk '{print $1}')" = "$R14E_SHA"; grep -Fq 'fn serial_marker_v108_ibeam_ok' candidate/evidence/kernel-r14e.nx; grep -Fq 'fn serial_marker_v108_text_edit_sequence_ok' candidate/evidence/kernel-r14e.nx ;;
+            safety)
+              truncate -s 32M gate/sentinel.img
+              before="$(sha256sum gate/sentinel.img|awk '{print $1}')"
+              set +e
+              timeout 90 qemu-system-x86_64 -machine q35 -m 768M -smp 2 -cpu max -accel tcg,thread=single -display none -no-reboot -no-shutdown -nic none -serial file:gate/serial.log -drive if=pflash,format=raw,readonly=on,file="$OVMF" -cdrom "$ISO" -boot d -drive file=gate/sentinel.img,if=none,format=raw,readonly=on,id=s -device nvme,drive=s,serial=R14E_SENTINEL >/dev/null 2>gate/stderr
+              rc=$?; set -e
+              after="$(sha256sum gate/sentinel.img|awk '{print $1}')"
+              test "$before" = "$after"
+              grep -q 'FRAMES_V108_INPUT_TEST_RUNTIME_READY' gate/serial.log
+              printf 'qemu_rc=%s\nbefore=%s\nafter=%s\n' "$rc" "$before" "$after" > gate/SAFETY.txt ;;
+          esac
+          echo PASS > gate/RESULT.status
+          sha256sum gate/* 2>/dev/null > gate/SHA256SUMS.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Frames-v108-r14e-${{ matrix.lane }}-Evidence
+          path: gate/**
+          if-no-files-found: warn
+          retention-days: 30
+
+  final:
+    needs: [build, gates]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: Frames-v108-r14e-Candidate, path: candidate }
+      - uses: actions/download-artifact@v4
+        with: { pattern: 'Frames-v108-r14e-*-Evidence', path: gates, merge-multiple: false }
+      - name: Seal exact r14e candidate
+        run: |
+          set -euo pipefail
+          for lane in usb-direct usb-hub usb-hub-multi ps2 smoothness interactive right-click text-edit model safety; do test "$(cat gates/Frames-v108-r14e-$lane-Evidence/RESULT.status)" = PASS; done
+          test "$(sha256sum candidate/evidence/kernel-r14e.nx|awk '{print $1}')" = "$R14E_SHA"
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"
+          mkdir final; cp "$ISO" final/
+          sha256sum "$ISO" | tee final/ISO-SHA256.txt
+          stat -c '%s' "$ISO" | tee final/ISO-SIZE.txt
+          cat > final/CERTIFICATION.txt <<'EOF'
+          Frames v108 Physical Input Repair r14e — Real-Hardware + Text Editing Candidate
+          status=PASS_VM_PENDING_PHYSICAL
+          vm_usb_direct=PASS
+          vm_usb_hub_child_hid=PASS
+          vm_usb_hub_keyboard_then_mouse=PASS
+          vm_ps2=PASS
+          vm_ps2_smoothness=PASS
+          vm_click_keyboard_text=PASS
+          vm_right_click_context=PASS
+          vm_textbox_ibeam=PASS
+          vm_blinking_insertion_caret=PASS
+          vm_left_right_delete_backspace=PASS
+          readonly_internal_media=PASS
+          r13_physical_usb_mouse=FAIL_NO_CURSOR
+          r13_physical_touchpad=FAIL_JUMPBACK_REGRESSION
+          r13_physical_keyboard=PARTIAL_INPUT_DELIVERY
+          physical_r14e=PENDING
+          destructive_writes=BLOCKED
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r14e-Rufus-Final
+          path: final/**
+          if-no-files-found: error
+          retention-days: 30
