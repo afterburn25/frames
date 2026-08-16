@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
 
+# r10 uses a taller hardware telemetry panel; keep that changing area out of motion metrics.
 base=Path(__file__).with_name('qemu_ps2_cursor_smoothness.py')
 s=base.read_text()
 old='OVERLAY_X=850; OVERLAY_Y=205'
