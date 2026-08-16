@@ -10,7 +10,7 @@ def sha256(p):
 def main():
     ap=argparse.ArgumentParser(); ap.add_argument('--ovmf',required=True); ap.add_argument('--iso',required=True); ap.add_argument('--out',required=True); ap.add_argument('--expected-iso-sha',required=True)
     a=ap.parse_args(); out=pathlib.Path(a.out); out.mkdir(parents=True,exist_ok=True)
-    result={'status':'FAIL','gate':'r20_drag_hover_integrity','iso_sha256':sha256(a.iso),'runtime_ready':False,'hover_clean':False,'left_down_clean':False,'drag_armed':False,'drag_proxy':False,'no_repaint_while_dragging':False,'release_repaint_once':False,'context_absent':False}
+    result={'status':'FAIL','gate':'r20_drag_hover_integrity','iso_sha256':sha256(a.iso),'runtime_ready':False,'hover_clean':False,'left_down_clean':False,'drag_armed':False,'drag_proxy':False,'no_repaint_while_dragging':False,'release_repaint_once':False,'context_absent':False,'held_motion_packets':0}
     if result['iso_sha256']!=a.expected_iso_sha: raise SystemExit('ISO identity mismatch')
     q=out/'qmp.sock'; ser=out/'serial.log'; err=(out/'qemu.stderr').open('wb')
     cmd=['qemu-system-x86_64','-machine','q35','-m','768M','-smp','2','-cpu','max','-accel','tcg,thread=single','-display','none','-no-reboot','-no-shutdown','-nic','none','-serial',f'file:{ser}','-qmp',f'unix:{q},server=on,wait=off','-drive',f'if=pflash,format=raw,readonly=on,file={a.ovmf}','-cdrom',a.iso,'-boot','d']
@@ -38,6 +38,14 @@ def main():
             if y: ev.append({'type':'rel','data':{'axis':'y','value':y}})
             if ev: call('input-send-event',{'events':ev})
         def btn(name,down): call('input-send-event',{'events':[{'type':'btn','data':{'down':down,'button':name}}]})
+        def held_rel(x=0,y=0):
+            # QMP relative-only events can be emitted as packets with button bits clear on
+            # the PS/2 frontend. Reassert LEFT in the same packet so this gate models a
+            # real touchpad/mouse held-button packet stream instead of a synthetic release.
+            ev=[{'type':'btn','data':{'down':True,'button':'left'}}]
+            if x: ev.append({'type':'rel','data':{'axis':'x','value':x}})
+            if y: ev.append({'type':'rel','data':{'axis':'y','value':y}})
+            call('input-send-event',{'events':ev})
         def home():
             for _ in range(24): rel(-60,-60); time.sleep(.012)
         call('qmp_capabilities'); mice=call('query-mice'); idx=next((m['index'] for m in mice if 'ps/2' in m['name'].lower() or 'ps2' in m['name'].lower()),None)
@@ -63,13 +71,14 @@ def main():
         btn('left',True); time.sleep(.16)
         result['left_down_clean']=(count('FRAMES_V108_FULL_REPAINT_V120')==base_full and count('FRAMES_V108_DRAG_ARM_OK')==base_arm)
         if not result['left_down_clean']: raise RuntimeError('left-down alone activated drag/repaint')
-        for _ in range(8): rel(10,6); time.sleep(.06)
+        for _ in range(8):
+            held_rel(10,6); result['held_motion_packets']+=1; time.sleep(.06)
         time.sleep(.15)
         result['drag_armed']=count('FRAMES_V108_DRAG_ARM_OK')>base_arm and count('FRAMES_V108_WINDOW_DRAG_OK')>base_drag
         result['drag_proxy']='FRAMES_V108_DRAG_PROXY_OK' in text()
         result['no_repaint_while_dragging']=count('FRAMES_V108_FULL_REPAINT_V120')==base_full
         result['context_absent']=count('FRAMES_V108_DESKTOP_CONTEXT_OK')==base_ctx
-        if not result['drag_armed']: raise RuntimeError('intentional hold+move did not arm drag')
+        if not result['drag_armed']: raise RuntimeError('intentional held-button motion did not arm drag')
         if not result['drag_proxy']: raise RuntimeError('drag proxy marker missing')
         if not result['no_repaint_while_dragging']: raise RuntimeError('full desktop repaint occurred while drag held')
         if not result['context_absent']: raise RuntimeError('context menu opened during hover/drag')
