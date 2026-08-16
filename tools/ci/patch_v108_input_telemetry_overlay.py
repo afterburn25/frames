@@ -22,8 +22,8 @@ helpers += text_fn('v108_text_input','INPUT V108 LIVE')
 helpers += text_fn('v108_text_usb','USB H R P')
 helpers += text_fn('v108_text_ps2','PS2 E PK')
 helpers += text_fn('v108_text_src','SRC X Y')
-helpers += '''fn v108_draw_small_u64(surface:u64,x:u64,y:u64,value:u64,color:u64) -> u64 {
-    var divisor:u64=1000000000; var started:u64=0; var pos:u64=0;
+helpers += '''fn v108_draw_small_u64(surface:u64,xy:u64,value:u64,color:u64) -> u64 {
+    let x=xy/65536; let y=xy%65536; var divisor:u64=1000000000; var started:u64=0; var pos:u64=0;
     while divisor>0 {
         let digit=(value/divisor)%10;
         if digit!=0 || started!=0 || divisor==1 {
@@ -44,12 +44,13 @@ fn v108_input_overlay_draw(surface:u64,state:u64,input_state:u64,xhci:u64) -> u6
     v108_text_input(surface,px+10,py+8,white);
     v108_text_usb(surface,px+10,py+28,white);
     var usb_h:u64=0; var usb_p:u64=0; if xhci!=0 { usb_h=volatile_read64(xhci+416); usb_p=volatile_read64(xhci+112); }
-    let usb_r=volatile_read64(input_state+3128); v108_draw_small_u64(surface,px+82,py+28,usb_h,green); v108_draw_small_u64(surface,px+130,py+28,usb_r,green); v108_draw_small_u64(surface,px+178,py+28,usb_p,amber);
-    v108_text_ps2(surface,px+10,py+46,white); v108_draw_small_u64(surface,px+82,py+46,volatile_read64(input_state+3136),green); v108_draw_small_u64(surface,px+142,py+46,volatile_read64(input_state+3176),green);
-    v108_text_src(surface,px+10,py+64,white); v108_draw_small_u64(surface,px+58,py+64,volatile_read64(input_state+3104),amber); v108_draw_small_u64(surface,px+112,py+64,volatile_read64(state+8),white); v108_draw_small_u64(surface,px+220,py+64,volatile_read64(state+16),white);
+    let usb_r=volatile_read64(input_state+3128); v108_draw_small_u64(surface,((px+82)*65536)+(py+28),usb_h,green); v108_draw_small_u64(surface,((px+130)*65536)+(py+28),usb_r,green); v108_draw_small_u64(surface,((px+178)*65536)+(py+28),usb_p,amber);
+    v108_text_ps2(surface,px+10,py+46,white); v108_draw_small_u64(surface,((px+82)*65536)+(py+46),volatile_read64(input_state+3136),green); v108_draw_small_u64(surface,((px+142)*65536)+(py+46),volatile_read64(input_state+3176),green);
+    v108_text_src(surface,px+10,py+64,white); v108_draw_small_u64(surface,((px+58)*65536)+(py+64),volatile_read64(input_state+3104),amber); v108_draw_small_u64(surface,((px+112)*65536)+(py+64),volatile_read64(state+8),white); v108_draw_small_u64(surface,((px+220)*65536)+(py+64),volatile_read64(state+16),white);
     return 1;
 }
-fn v108_input_overlay_present(process:u64,surface:u64,state:u64,input_state:u64,xhci:u64) -> u64 {
+fn v108_input_overlay_present(process:u64,state:u64,input_state:u64,xhci:u64) -> u64 {
+    let surface=volatile_read64(process+616); if surface==0 { return 0; }
     if v108_input_overlay_draw(surface,state,input_state,xhci)==0 { return 0; }
     let dirty=volatile_read64(process+624); let timing=volatile_read64(process+664); let present=volatile_read64(process+672); let w=volatile_read64(surface+16); var px:u64=8; if w>430 { px=w-420; }
     if dirty==0 || timing==0 || present==0 { return 0; }
@@ -64,12 +65,12 @@ if s.count(anchor)!=1: raise SystemExit(f'runtime anchor mismatch: {s.count(anch
 s=s.replace(anchor,helpers+anchor,1)
 
 arm='if xhci!=0 && volatile_read64(xhci+416)==1 { if xhci_hid_arm_continuous(xhci,phys_state)==0 { return 0; } }\n    while true {'
-arm_new='if xhci!=0 && volatile_read64(xhci+416)==1 { if xhci_hid_arm_continuous(xhci,phys_state)==0 { return 0; } }\n    if v108_input_overlay_present(process,surface,state,input_state,xhci)==0 { return 0; } serial_marker_v108_input_telemetry_ok();\n    while true {'
+arm_new='if xhci!=0 && volatile_read64(xhci+416)==1 { if xhci_hid_arm_continuous(xhci,phys_state)==0 { return 0; } }\n    if v108_input_overlay_present(process,state,input_state,xhci)==0 { return 0; } serial_marker_v108_input_telemetry_ok();\n    while true {'
 if s.count(arm)!=1: raise SystemExit(f'initial overlay anchor mismatch: {s.count(arm)}')
 s=s.replace(arm,arm_new,1)
 
 render='if volatile_read64(process+1160)!=0 { appearance_render(process); } else { wm_render_all(wm,surface,dirty); let shell=volatile_read64(process+1088); if shell!=0 { desktop_shell_draw(shell,surface,wm,0); desktop_shell_launcher_draw(shell,surface); } desktop_draw_cursor(surface,newx,newy); }'
-render_new=render+' if v108_input_overlay_present(process,surface,state,input_state,xhci)==0 { return 0; }'
+render_new=render+' if v108_input_overlay_present(process,state,input_state,xhci)==0 { return 0; }'
 if s.count(render)!=1: raise SystemExit(f'event overlay anchor mismatch: {s.count(render)}')
 s=s.replace(render,render_new,1)
 
