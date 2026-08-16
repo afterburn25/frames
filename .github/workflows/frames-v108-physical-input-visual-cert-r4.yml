@@ -1,0 +1,167 @@
+name: Frames v108 Physical Input Visual Certification r4
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-physical-input-bringup ]
+    paths:
+      - '.github/workflows/frames-v108-physical-input-visual-cert-r4.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SOURCE_RUN_ID: 31927431251
+  EXPECTED_IMAGE_SHA: 6918d228725f0cb3185e17f974119b4abf8c8413af1173369fc8d0594f30bab7
+
+jobs:
+  visual-live-input:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [usb, ps2]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-Physical-Input-Test-r2-Candidate
+          path: candidate
+          github-token: ${{ github.token }}
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN_ID }}
+      - name: Verify exact candidate identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMG="$(find candidate -name 'Frames-0.9.98-v108-Physical-Input-Test-r2.img' -print -quit)"
+          test -s "$IMG"
+          test "$(sha256sum "$IMG"|awk '{print $1}')" = "$EXPECTED_IMAGE_SHA"
+          test "$(stat -c '%s' "$IMG")" = 67108864
+      - name: Install QEMU/OVMF
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf python3
+          code="$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE.fd' \) | head -n1)"
+          test -n "$code"
+          echo "OVMF_CODE=$code" >> "$GITHUB_ENV"
+      - name: Prove ${{ matrix.lane }} live motion and preserved desktop
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="visual-${{ matrix.lane }}"; mkdir -p "$OUT"
+          IMG="$(find candidate -name 'Frames-0.9.98-v108-Physical-Input-Test-r2.img' -print -quit)"
+          python3 - "$OVMF_CODE" "$IMG" "$OUT" '${{ matrix.lane }}' <<'PY'
+          import json,pathlib,socket,subprocess,sys,time
+          ovmf,image,out,lane=sys.argv[1:]
+          out=pathlib.Path(out); qmp=out/'qmp.sock'; serial=out/'serial.log'; stderr=out/'qemu.stderr'
+          cmd=['qemu-system-x86_64','-machine','q35','-m','768M','-smp','2','-cpu','max','-accel','tcg,thread=single','-display','none','-no-reboot','-no-shutdown','-nic','none','-serial',f'file:{serial}','-qmp',f'unix:{qmp},server=on,wait=off','-drive',f'if=pflash,format=raw,readonly=on,file={ovmf}','-device','qemu-xhci,id=xhci','-drive',f'if=none,id=bootusb,format=raw,file={image}','-device','usb-storage,drive=bootusb,bus=xhci.0,bootindex=1']
+          if lane=='usb': cmd += ['-device','usb-mouse,bus=xhci.0,id=usbmouse']
+          (out/'qemu-command.json').write_text(json.dumps(cmd,indent=2)+'\n')
+          ef=stderr.open('wb'); p=subprocess.Popen(cmd,stdout=subprocess.DEVNULL,stderr=ef)
+          try:
+              deadline=time.time()+25
+              while time.time()<deadline and not qmp.exists():
+                  if p.poll() is not None: raise RuntimeError(f'qemu exited {p.returncode}')
+                  time.sleep(.05)
+              if not qmp.exists(): raise RuntimeError('qmp timeout')
+              s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect(str(qmp)); f=s.makefile('rwb',buffering=0); json.loads(f.readline())
+              def call(name,args=None):
+                  obj={'execute':name}
+                  if args is not None: obj['arguments']=args
+                  f.write((json.dumps(obj)+'\n').encode())
+                  while True:
+                      r=json.loads(f.readline())
+                      if 'return' in r:return r['return']
+                      if 'error' in r:raise RuntimeError(r['error'])
+              call('qmp_capabilities'); mice=call('query-mice'); (out/'query-mice.json').write_text(json.dumps(mice,indent=2)+'\n')
+              if lane=='usb': idx=next((m['index'] for m in mice if ('hid' in m['name'].lower() or 'usb' in m['name'].lower()) and 'ps/2' not in m['name'].lower()),None)
+              else: idx=next((m['index'] for m in mice if 'ps/2' in m['name'].lower() or 'ps2' in m['name'].lower()),None)
+              if idx is None: raise RuntimeError(f'{lane} frontend missing: {mice}')
+              call('human-monitor-command',{'command-line':f'mouse_set {idx}'})
+              deadline=time.time()+90
+              while time.time()<deadline:
+                  txt=serial.read_text(errors='ignore') if serial.exists() else ''
+                  if 'FRAMES_V108_INPUT_TEST_RUNTIME_READY' in txt and 'FRAMES_V108_INPUT_TELEMETRY_OK' in txt: break
+                  if p.poll() is not None: raise RuntimeError('qemu stopped before runtime ready')
+                  time.sleep(.2)
+              else: raise RuntimeError('runtime readiness timeout')
+              before=out/'BEFORE.ppm'; call('screendump',{'filename':str(before)})
+              required=['FRAMES_V108_USB_LIVE_REPORT_OK','FRAMES_V108_USB_GUI_CURSOR_OK'] if lane=='usb' else ['FRAMES_V108_PS2_ENABLE_OK','FRAMES_V108_PS2_PACKET_OK','FRAMES_V108_PS2_GUI_CURSOR_OK']
+              ok=False
+              for _ in range(40):
+                  call('input-send-event',{'events':[{'type':'rel','data':{'axis':'x','value':12}}]})
+                  time.sleep(.15)
+                  txt=serial.read_text(errors='ignore') if serial.exists() else ''
+                  if all(m in txt for m in required): ok=True; break
+              if not ok: raise RuntimeError(f'{lane} live-input markers missing')
+              time.sleep(1.0)
+              after=out/'AFTER.ppm'; call('screendump',{'filename':str(after)})
+              def read_ppm(path):
+                  b=path.read_bytes(); parts=b.split(b'\n',3)
+                  if parts[0].strip()!=b'P6': raise RuntimeError('bad PPM')
+                  w,h=map(int,parts[1].split()); maxv=int(parts[2]); data=parts[3]
+                  if maxv!=255 or len(data)!=w*h*3: raise RuntimeError('bad PPM payload')
+                  return w,h,data
+              w,h,a=read_ppm(before); w2,h2,b=read_ppm(after)
+              if (w,h)!=(w2,h2): raise RuntimeError('frame dimensions changed')
+              pa=[a[i:i+3] for i in range(0,len(a),3)]; pb=[b[i:i+3] for i in range(0,len(b),3)]
+              changed_idx=[i for i,(x,y) in enumerate(zip(pa,pb)) if x!=y]
+              changed=len(changed_idx); same_ratio=1-(changed/len(pa)); unique_before=len(set(pa)); unique_after=len(set(pb))
+              def region_unique(pixels,x0,y0,x1,y1):
+                  vals=[]
+                  for y in range(y0,y1): vals.extend(pixels[y*w+x0:y*w+x1])
+                  return len(set(vals))
+              sidebar=region_unique(pb,0,0,130,min(h,730)); center=region_unique(pb,450,180,min(w,830),min(h,500)); telemetry=region_unique(pb,max(0,w-430),0,w,min(h,110))
+              visual_ok=(unique_before>=250 and unique_after>=250 and same_ratio>=0.99 and 20<=changed<=5000 and sidebar>=20 and center>=20 and telemetry>=5)
+              result={'status':'PASS' if visual_ok else 'FAIL','lane':lane,'runtime_markers_ok':ok,'width':w,'height':h,'unique_before':unique_before,'unique_after':unique_after,'same_pixel_ratio':same_ratio,'changed_pixels':changed,'sidebar_unique':sidebar,'center_unique':center,'telemetry_unique':telemetry,'frontend_index':idx,'candidate_sha256':'6918d228725f0cb3185e17f974119b4abf8c8413af1173369fc8d0594f30bab7'}
+              (out/'VISUAL-RESULT.json').write_text(json.dumps(result,indent=2)+'\n'); print(json.dumps(result,indent=2))
+              if not visual_ok: raise SystemExit(1)
+              call('quit')
+          finally:
+              try:p.wait(timeout=5)
+              except:p.kill(); p.wait()
+          PY
+          find "$OUT" -type s -delete || true
+          sha256sum "$OUT"/* > "$OUT/SHA256SUMS.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Frames-v108-Physical-Visual-r4-${{ matrix.lane }}-Evidence
+          path: visual-${{ matrix.lane }}/**
+          if-no-files-found: error
+          retention-days: 30
+
+  final:
+    needs: visual-live-input
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Seal corrected visual certification
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p final
+          cat > final/FINAL-VISUAL-CERTIFICATION.json <<'EOF'
+          {
+            "status": "PASS",
+            "profile": "frames-0.9.98-v108-physical-input-visual-r4",
+            "candidate_sha256": "6918d228725f0cb3185e17f974119b4abf8c8413af1173369fc8d0594f30bab7",
+            "usb_live_input_and_cursor_motion": true,
+            "ps2_live_input_and_cursor_motion": true,
+            "desktop_render_preserved": true,
+            "telemetry_visible": true,
+            "physical_hardware_verified": false,
+            "physical_destructive_writes_certified": false,
+            "promotion_allowed": false
+          }
+          EOF
+          sha256sum final/* > final/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-Physical-Visual-r4-Final
+          path: final/**
+          if-no-files-found: error
+          retention-days: 30
