@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/frames-v108-physical-input-r7-rufus.yml'
       - 'tools/ci/patch_v108_physical_input_r7.py'
+      - 'tools/ci/patch_v108_physical_input_r7_compilefix.py'
 
 permissions:
   contents: read
@@ -18,7 +19,8 @@ env:
   R2_MAIN_SHA: 8cf33253489331e200643fa004992fece4eaf86b6feccaa3e00c06883927f675
   R5_MAIN_SHA: d0421388cd288a7073ca750915b1b51ceeee62acfe524a6785f855e42f9b1e7f
   R6_MAIN_SHA: de8cd41f707268bc0d7bb2ff5ef925ba0e8981650703afdb065b1a62a1d6cca1
-  R7_MAIN_SHA: b94070bfe399162a8bb5bef1694c92100716d500d9e85737896901ef3f5aa8e7
+  R7_PRE_SHA: b94070bfe399162a8bb5bef1694c92100716d500d9e85737896901ef3f5aa8e7
+  R7_MAIN_SHA: d458aa61d92ff33bcf7e529354deec7cd345d5d96188c95b08842853fa3e3e2b
   ISO_NAME: Frames-0.9.98-v108-Physical-Input-Repair-r7-Rufus-UEFI.iso
 
 jobs:
@@ -58,12 +60,16 @@ jobs:
           python3 tools/ci/patch_v108_stable_input_diag_runtime.py "$F/kernel/main.nx" > evidence/r6-sha.txt
           test "$(sha256sum "$F/kernel/main.nx" | awk '{print $1}')" = "$R6_MAIN_SHA"
           cp "$F/kernel/main.nx" evidence/kernel-r6.nx
-          python3 tools/ci/patch_v108_physical_input_r7.py "$F/kernel/main.nx" | tee evidence/r7-sha.txt
+          python3 tools/ci/patch_v108_physical_input_r7.py "$F/kernel/main.nx" | tee evidence/r7-pre-sha.txt
+          test "$(sha256sum "$F/kernel/main.nx" | awk '{print $1}')" = "$R7_PRE_SHA"
+          python3 tools/ci/patch_v108_physical_input_r7_compilefix.py "$F/kernel/main.nx" | tee evidence/r7-sha.txt
           test "$(sha256sum "$F/kernel/main.nx" | awk '{print $1}')" = "$R7_MAIN_SHA"
           cp "$F/kernel/main.nx" evidence/kernel-r7.nx
           diff -u evidence/kernel-r6.nx evidence/kernel-r7.nx > evidence/R6-TO-R7.patch || true
           grep -Fq 'ring+(tail*16)+cycle' "$F/kernel/main.nx"
           grep -Fq 'serial_marker_v108_physical_cursor_visible_ok' "$F/kernel/main.nx"
+          grep -Fq 'fn v108_cursor_present(process:u64,oldpos:u64,newpos:u64)' "$F/kernel/main.nx"
+          ! grep -Fq 'fn v108_cursor_present(process:u64,oldx:u64,oldy:u64,newx:u64,newy:u64)' "$F/kernel/main.nx"
           ! grep -A100 '^fn desktop_input_runtime' "$F/kernel/main.nx" | grep -q 'appearance_render(process)'
           ! grep -A100 '^fn desktop_input_runtime' "$F/kernel/main.nx" | grep -q 'wm_render_all'
           echo "FRAMES_DIR=$F" >> "$GITHUB_ENV"
