@@ -1,0 +1,67 @@
+name: Frames v108 QEMU Input Frontend Sanity
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-physical-input-bringup ]
+    paths: [ '.github/workflows/frames-v108-qemu-input-frontend-sanity.yml' ]
+
+permissions:
+  contents: read
+
+jobs:
+  frontend-sanity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [usb, ps2]
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: v108-physical-input-bringup }
+      - name: Install QEMU
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 python3
+      - name: Confirm QMP frontend selection and event acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="sanity-${{ matrix.lane }}"; mkdir -p "$OUT"
+          QMP="$RUNNER_TEMP/qmp.sock"
+          EXTRA=()
+          if [ '${{ matrix.lane }}' = usb ]; then EXTRA=(-device qemu-xhci,id=xhci -device usb-mouse,bus=xhci.0,id=usbmouse); fi
+          qemu-system-x86_64 -machine q35 -m 128M -display none -qmp unix:"$QMP",server=on,wait=off -S "${EXTRA[@]}" &
+          PID=$!; trap 'kill $PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 100); do [ -S "$QMP" ] && break; sleep .05; done; test -S "$QMP"
+          python3 - "$QMP" "$OUT/result.json" '${{ matrix.lane }}' <<'PY'
+          import json,socket,sys
+          sock,out,lane=sys.argv[1:]
+          s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect(sock); f=s.makefile('rwb',buffering=0); json.loads(f.readline())
+          def call(name,args=None):
+              obj={'execute':name}
+              if args is not None: obj['arguments']=args
+              f.write((json.dumps(obj)+'\n').encode())
+              while True:
+                  r=json.loads(f.readline())
+                  if 'return' in r:return r['return']
+                  if 'error' in r:raise RuntimeError(r['error'])
+          call('qmp_capabilities'); mice=call('query-mice')
+          if lane=='usb': idx=next((m['index'] for m in mice if ('hid' in m['name'].lower() or 'usb' in m['name'].lower()) and 'ps/2' not in m['name'].lower()),None)
+          else: idx=next((m['index'] for m in mice if 'ps/2' in m['name'].lower() or 'ps2' in m['name'].lower()),None)
+          if idx is None: raise RuntimeError(f'frontend missing: {mice}')
+          call('human-monitor-command',{'command-line':f'mouse_set {idx}'})
+          call('input-send-event',{'events':[{'type':'rel','data':{'axis':'x','value':7}},{'type':'rel','data':{'axis':'y','value':4}}]})
+          result={'status':'PASS','lane':lane,'selected_index':idx,'mice':mice,'qmp_event_accepted':True}
+          open(out,'w').write(json.dumps(result,indent=2)+'\n'); print(json.dumps(result,indent=2)); f.close(); s.close()
+          PY
+          kill $PID 2>/dev/null || true; wait $PID 2>/dev/null || true; trap - EXIT
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-QEMU-Input-Frontend-${{ matrix.lane }}
+          path: sanity-${{ matrix.lane }}/**
+          if-no-files-found: error
+          retention-days: 30
