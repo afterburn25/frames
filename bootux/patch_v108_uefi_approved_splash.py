@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import hashlib, sys
+import hashlib, subprocess, sys
 
 if len(sys.argv) != 2:
     raise SystemExit('usage: patch_v108_uefi_approved_splash.py PATH_TO_frames_boot.c')
@@ -116,3 +116,26 @@ p.write_text(s)
 print('patched exact v108 loader with approved Boot Splash Phase 1 renderer')
 print('base_sha256='+actual)
 print('patched_sha256='+hashlib.sha256(p.read_bytes()).hexdigest())
+
+# Product-integration repairs are deliberately applied only here, after the
+# workflow has already proven the exact certified v116 kernel hash. These are
+# the same fail-closed repairs that produced the successful v72 real-desktop
+# activation proof; they do not alter the certified v109-v116 architecture
+# transform scripts themselves.
+repo = Path(__file__).resolve().parents[1]
+product = p.parents[2]
+kernel = product / 'kernel' / 'main.nx'
+if not kernel.is_file():
+    raise SystemExit(f'current product kernel not found: {kernel}')
+helpers = repo / 'architecture' / 'integration'
+commands = [
+    [sys.executable, str(helpers/'decouple_v72_network_from_filesystem.py'), str(kernel)],
+    [sys.executable, str(helpers/'instrument_v72_gui_app_host.py'), str(kernel)],
+    [sys.executable, str(helpers/'instrument_v72_file_manager.py'), str(kernel)],
+    [sys.executable, str(helpers/'inspect_v72_post_phase7_gate.py'), str(kernel), str(product/'INTEGRATED-GUI-POST-PHASE7.txt')],
+]
+for cmd in commands:
+    subprocess.run(cmd, check=True)
+post = hashlib.sha256(kernel.read_bytes()).hexdigest()
+print('integrated_gui_product_repairs=PASS')
+print('repaired_kernel_sha256='+post)
