@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Workflow registration trigger for r19 certification.
 import argparse,hashlib,json,pathlib,socket,subprocess,time
 
 def sha256(p):
