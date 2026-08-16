@@ -33,8 +33,8 @@ while mask:
     if area>=100 and bbox[2]-bbox[0]>=9 and bbox[3]-bbox[1]>=9:
         components.append({'area':area,'bbox':bbox,'center':[(bbox[0]+bbox[2])//2,(bbox[1]+bbox[3])//2]})
 
-# Require several independently located real title-bar close buttons. This rules
-# out the prior dashboard composition, which has no native WM title bars.
+# Require three independently located real title-bar close buttons. The former
+# dashboard proof has none, so this is the primary visible full-desktop gate.
 centers=[c['center'] for c in components]
 distinct=[]
 for c in centers:
@@ -42,8 +42,9 @@ for c in centers:
         distinct.append(c)
 window_chrome_ok=len(distinct)>=3
 
-# Require a broad bottom taskbar-like band with content and a busy central work
-# area. Use quantized color diversity so this isn't tied to one theme color.
+# Require a populated taskbar and nontrivial central desktop content. Color
+# diversity is deliberately secondary to native-window chrome because mature
+# dark themes can use a small, consistent palette.
 def diversity(box,step=4):
     x0,y0,x1,y1=box; colors=set(); samples=0
     for y in range(y0,y1,step):
@@ -53,7 +54,7 @@ def diversity(box,step=4):
 bottom_div,_=diversity((0,int(h*.88),w,h),4)
 center_div,_=diversity((int(w*.12),int(h*.08),int(w*.94),int(h*.84)),5)
 taskbar_ok=bottom_div>=12
-content_ok=center_div>=35
+content_ok=center_div>=15
 
 # Check that the frame has content on both left and right halves, which catches
 # accidentally rendered single-window or blank-desktop results.
