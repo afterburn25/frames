@@ -1,0 +1,97 @@
+name: Frames v108 Pointer Provenance Audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-physical-input-bringup ]
+    paths:
+      - '.github/workflows/frames-v108-pointer-provenance-audit.yml'
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_RUNTIME_KIT_SHA256: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
+  EXPECTED_SOURCE_SHA256: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
+  EXPECTED_POINTER_KIT_SHA256: 1c7f1b514d9aa2f847f724e8b633286d069d745bf7c281a3967c46bbfea1a18c
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-physical-input-bringup
+
+      - name: Reconstruct exact certified v108 and pointer diagnostic source
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/provenance"; mkdir -p "$OUT" "$RUNNER_TEMP/cert" "$RUNNER_TEMP/pointer"
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip"
+          PKIT="$GITHUB_WORKSPACE/Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip"
+          test -s "$KIT"; test -s "$PKIT"
+          test "$(sha256sum "$KIT" | awk '{print $1}')" = "$EXPECTED_RUNTIME_KIT_SHA256"
+          test "$(sha256sum "$PKIT" | awk '{print $1}')" = "$EXPECTED_POINTER_KIT_SHA256"
+          unzip -q "$KIT" -d "$RUNNER_TEMP/cert-kit"
+          SRCZIP="$RUNNER_TEMP/cert-kit/Frames-0.9.98-Source-v108.zip"
+          test "$(sha256sum "$SRCZIP" | awk '{print $1}')" = "$EXPECTED_SOURCE_SHA256"
+          unzip -q "$SRCZIP" -d "$RUNNER_TEMP/cert"
+          unzip -q "$PKIT" -d "$RUNNER_TEMP/pointer"
+          CERT="$RUNNER_TEMP/cert/Frames-0.9.98"
+          PTR="$RUNNER_TEMP/pointer/Frames-0.9.98-Pointer-CI-Source"
+          test -d "$CERT"; test -d "$PTR"
+          echo "CERT=$CERT" >> "$GITHUB_ENV"; echo "PTR=$PTR" >> "$GITHUB_ENV"
+          sha256sum "$CERT/kernel/main.nx" "$PTR/kernel/main.nx" > "$OUT/KERNEL-IDENTITY.txt"
+          printf 'cert_version=%s\ncert_revision=%s\npointer_version=%s\npointer_revision=%s\n' \
+            "$(tr -d '\r\n' < "$CERT/VERSION")" "$(tr -d '\r\n' < "$CERT/GUI-REPAIR-REVISION")" \
+            "$(tr -d '\r\n' < "$PTR/VERSION")" "$(tr -d '\r\n' < "$PTR/GUI-REPAIR-REVISION")" > "$OUT/IDENTITY.txt"
+
+      - name: Compute exact tree and kernel differences
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/provenance"
+          python3 - "$CERT" "$PTR" "$OUT" <<'PY'
+          from pathlib import Path
+          import hashlib,json,sys,difflib
+          cert,ptr,out=map(Path,sys.argv[1:])
+          def files(root):
+              return {p.relative_to(root).as_posix():p for p in root.rglob('*') if p.is_file()}
+          A=files(cert); B=files(ptr); paths=sorted(set(A)|set(B))
+          changed=[]; added=[]; removed=[]; identical=[]
+          for rel in paths:
+              if rel not in A: added.append(rel); continue
+              if rel not in B: removed.append(rel); continue
+              ha=hashlib.sha256(A[rel].read_bytes()).hexdigest(); hb=hashlib.sha256(B[rel].read_bytes()).hexdigest()
+              (identical if ha==hb else changed).append(rel)
+          result={
+              'status':'PASS',
+              'certified_source_sha256':'5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d',
+              'pointer_kit_sha256':'1c7f1b514d9aa2f847f724e8b633286d069d745bf7c281a3967c46bbfea1a18c',
+              'changed_files':changed,'added_files':added,'removed_files':removed,
+              'changed_count':len(changed),'added_count':len(added),'removed_count':len(removed),'identical_count':len(identical)
+          }
+          (out/'PROVENANCE.json').write_text(json.dumps(result,indent=2)+'\n')
+          (out/'CHANGED-FILES.txt').write_text('\n'.join(changed)+'\n')
+          ca=(cert/'kernel/main.nx').read_text().splitlines(); pb=(ptr/'kernel/main.nx').read_text().splitlines()
+          diff='\n'.join(difflib.unified_diff(ca,pb,fromfile='certified-v108/kernel/main.nx',tofile='pointer-ci/kernel/main.nx',n=4))+'\n'
+          (out/'KERNEL-MAIN.diff').write_text(diff)
+          print(json.dumps({k:v for k,v in result.items() if not k.endswith('_files')},indent=2))
+          PY
+
+      - name: Extract input-specific diff context
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/provenance"
+          grep -nEi 'xhci|usb_hid|hid_report|ps2|aux|pointer|mouse|touch|input_' "$OUT/KERNEL-MAIN.diff" > "$OUT/INPUT-DIFF-INDEX.txt" || true
+          wc -l "$OUT/KERNEL-MAIN.diff" "$OUT/INPUT-DIFF-INDEX.txt" > "$OUT/DIFF-SIZES.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-Pointer-Provenance-Audit
+          path: provenance/**
+          if-no-files-found: error
+          retention-days: 30
