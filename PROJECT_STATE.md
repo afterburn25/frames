@@ -119,6 +119,14 @@ Test order:
 5. observe whether the cursor moves and whether PS/2/AUX telemetry changes;
 6. photograph the diagnostic screen if either path fails.
 
+## Physical artifact delivery policy
+
+- From this point forward, every Frames physical-test artifact delivered to the user must be a **Rufus-compatible UEFI ISO**.
+- Raw `.img` files may still be used internally by CI, QEMU, provenance checks, or as intermediate build artifacts, but they are not the normal user-facing physical-test deliverable.
+- The Rufus ISO must preserve the exact certified EFI/kernel payload, have an exact SHA-256 identity, and be boot-tested in QEMU/OVMF before being handed to the user.
+- Prefer a hybrid/removable-media-compatible ISO layout with `/EFI/BOOT/BOOTX64.EFI` and the required `/FRAMES` payload exposed so Rufus can write it reliably.
+- If Rufus offers ISO mode or DD mode, the certified instructions for that exact artifact must state which mode was validated; do not make the user guess.
+
 ## Touchpad transport limitation
 
 Exact-v108 transport audit proved:
