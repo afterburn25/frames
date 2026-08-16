@@ -36,3 +36,6 @@ s=s.replace(oldcall,newcall,1)
 p.write_text(s)
 out=hashlib.sha256(p.read_bytes()).hexdigest()
 print(out)
+expected_out='d458aa61d92ff33bcf7e529354deec7cd345d5d96188c95b08842853fa3e3e2b'
+if out!=expected_out:
+    raise SystemExit(f'unexpected r7 compilefix output hash: {out}')
