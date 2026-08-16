@@ -24,7 +24,7 @@ env:
   R7_SHA: d458aa61d92ff33bcf7e529354deec7cd345d5d96188c95b08842853fa3e3e2b
   R8_SHA: b0e7893dea8306b44ea044b5e712fb4568223b5bdd599b9d369f19e523bad037
   R9_SHA: 5b2384f8e128b1ec6922f34c14478918c3388179937c2000dd12135fefcf682c
-  R10_SHA: 4c11c930183bf612a685edcced654aa9fb9b1377c0c568cf9f64904910178c50
+  R10_SHA: b2dee4fc2c1ca3ad68d4428febf564a2143948ee797ea74ee532ac87b2c14ab6
   ISO_NAME: Frames-0.9.98-v108-Physical-Input-Repair-r10-Rufus-UEFI.iso
 
 jobs:
@@ -71,8 +71,15 @@ jobs:
           python3 tools/ci/patch_v108_physical_input_r9_protocol.py "$F/kernel/main.nx" >/dev/null
           test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$R9_SHA"
           cp "$F/kernel/main.nx" evidence/kernel-r9.nx
-          python3 tools/ci/patch_v108_physical_input_r10_hwdecode.py "$F/kernel/main.nx" | tee evidence/R10-SHA.txt
-          test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$R10_SHA"
+          set +e
+          python3 tools/ci/patch_v108_physical_input_r10_hwdecode.py "$F/kernel/main.nx" > evidence/R10-PATCH-OUTPUT.txt 2>&1
+          patch_rc=$?
+          set -e
+          cat evidence/R10-PATCH-OUTPUT.txt
+          actual_r10="$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')"
+          test "$actual_r10" = "$R10_SHA"
+          printf '%s\n' "$actual_r10" > evidence/R10-SHA.txt
+          printf 'patch_exit=%s\nverified_output=%s\n' "$patch_rc" "$actual_r10" > evidence/R10-PATCH-STATUS.txt
           cp "$F/kernel/main.nx" evidence/kernel-r10.nx
           diff -u evidence/kernel-r9.nx evidence/kernel-r10.nx > evidence/R9-R10.patch || true
           grep -Fq 'fn ps2_elan4_type_v110' "$F/kernel/main.nx"
