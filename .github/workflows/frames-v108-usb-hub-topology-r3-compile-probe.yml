@@ -1,0 +1,84 @@
+name: Frames v108 USB Hub Topology r3 Compile Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-usb-hub-topology-r1 ]
+    paths:
+      - '.github/workflows/frames-v108-usb-hub-topology-r3-compile-probe.yml'
+      - 'tools/ci/patch_v108_usb_hub_topology_r3_abi.py'
+
+permissions:
+  contents: read
+
+env:
+  KIT_SHA: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
+  SRC_SHA: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
+  BASE_SHA: ffc5721eca68844357dbdca63b0edf266e7e210f9d162eecde8cae0067f210a8
+  R2_SHA: 8cf33253489331e200643fa004992fece4eaf86b6feccaa3e00c06883927f675
+  R5_SHA: d0421388cd288a7073ca750915b1b51ceeee62acfe524a6785f855e42f9b1e7f
+  R6_SHA: de8cd41f707268bc0d7bb2ff5ef925ba0e8981650703afdb065b1a62a1d6cca1
+  R7P_SHA: b94070bfe399162a8bb5bef1694c92100716d500d9e85737896901ef3f5aa8e7
+  R7_SHA: d458aa61d92ff33bcf7e529354deec7cd345d5d96188c95b08842853fa3e3e2b
+  R8_SHA: b0e7893dea8306b44ea044b5e712fb4568223b5bdd599b9d369f19e523bad037
+  R9_SHA: 5b2384f8e128b1ec6922f34c14478918c3388179937c2000dd12135fefcf682c
+  R10_SHA: b2dee4fc2c1ca3ad68d4428febf564a2143948ee797ea74ee532ac87b2c14ab6
+  R11_SHA: 4e6b4fd0f4c44020099e2c097615d3b6f03e8e123763fd803c90eb1d40f3b016
+  R12_BAD_SHA: 70e01c31e669679ec8de986cddfb361a3686681ce109740c16a7e50bb1a90be3
+  R12_SHA: 92782808bd0cda553f6f84116dc8761cefc561c2c025c464cbfe7830b72df81b
+  HUB_R2_SHA: 8ebec9c4ed641be22eccf3294a9f478093189d4ad36c454605b1b273dd662cd6
+
+jobs:
+  compile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: v108-usb-hub-topology-r1 }
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 unzip
+      - name: Reconstruct r12b and apply hub r2 plus ABI repair
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/hub3" evidence; mkdir -p "$RUNNER_TEMP/hub3/kit" "$RUNNER_TEMP/hub3/src" evidence
+          K=Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip; test "$(sha256sum "$K"|awk '{print $1}')" = "$KIT_SHA"; unzip -q "$K" -d "$RUNNER_TEMP/hub3/kit"
+          Z="$RUNNER_TEMP/hub3/kit/Frames-0.9.98-Source-v108.zip"; test "$(sha256sum "$Z"|awk '{print $1}')" = "$SRC_SHA"; unzip -q "$Z" -d "$RUNNER_TEMP/hub3/src"
+          F="$RUNNER_TEMP/hub3/src/Frames-0.9.98"; test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$BASE_SHA"
+          python3 tools/ci/patch_v108_live_input_common.py "$F/kernel/main.nx" >/dev/null
+          python3 tools/ci/patch_v108_usb_mouse_live.py "$F/kernel/main.nx" >/dev/null
+          python3 tools/ci/patch_v108_ps2_touchpad_live.py "$F/kernel/main.nx" >/dev/null
+          python3 tools/ci/patch_v108_input_telemetry_overlay.py "$F/kernel/main.nx" >/dev/null
+          python3 tools/ci/patch_v108_input_usbboot_gate_decouple.py "$F/kernel/main.nx" >/dev/null; test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$R2_SHA"
+          python3 tools/ci/patch_v108_physical_deep_telemetry.py "$F/kernel/main.nx" >/dev/null; test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$R5_SHA"
+          python3 tools/ci/patch_v108_stable_input_diag_runtime.py "$F/kernel/main.nx" >/dev/null; test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$R6_SHA"
+          python3 tools/ci/patch_v108_physical_input_r7.py "$F/kernel/main.nx" >/dev/null; test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$R7P_SHA"
+          python3 tools/ci/patch_v108_physical_input_r7_compilefix.py "$F/kernel/main.nx" >/dev/null; test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$R7_SHA"
+          python3 tools/ci/patch_v108_physical_input_r8_cursor_offsets.py "$F/kernel/main.nx" >/dev/null; test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$R8_SHA"
+          python3 tools/ci/patch_v108_physical_input_r9_protocol.py "$F/kernel/main.nx" >/dev/null; test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$R9_SHA"
+          python3 tools/ci/patch_v108_physical_input_r10_hwdecode.py "$F/kernel/main.nx" >/dev/null; test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$R10_SHA"
+          python3 tools/ci/patch_v108_physical_input_r11_touch_usb.py "$F/kernel/main.nx" >/dev/null; test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$R11_SHA"
+          set +e; python3 tools/ci/patch_v108_physical_input_r12_latency_keyboard.py "$F/kernel/main.nx" >/dev/null; set -e
+          test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$R12_BAD_SHA"
+          python3 tools/ci/patch_v108_physical_input_r12b_pollfix.py "$F/kernel/main.nx" >/dev/null; test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$R12_SHA"
+          python3 tools/ci/patch_v108_usb_hub_topology_r2.py "$F/kernel/main.nx" >/dev/null; test "$(sha256sum "$F/kernel/main.nx"|awk '{print $1}')" = "$HUB_R2_SHA"
+          python3 tools/ci/patch_v108_usb_hub_topology_r3_abi.py "$F/kernel/main.nx" | tee evidence/HUB-R3-SHA.txt
+          cp "$F/kernel/main.nx" evidence/kernel-hub-r3.nx
+          echo "F=$F" >> "$GITHUB_ENV"
+      - name: Compile repaired hub kernel
+        run: |
+          set -euo pipefail
+          find "$F" -type f -name '*.sh' -exec chmod +x {} +
+          find "$F/toolchain" -type f -name nexus -exec chmod +x {} +
+          cd "$F"
+          ./tools/build.sh
+          sha256sum build/FramesKernel.fkrn build/BOOTX64.EFI | tee "$GITHUB_WORKSPACE/evidence/BINARY-SHA256.txt"
+          printf 'status=PASS\n' > "$GITHUB_WORKSPACE/evidence/COMPILE.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Frames-v108-USB-Hub-r3-Compile-Probe
+          path: evidence/**
+          if-no-files-found: warn
+          retention-days: 7
