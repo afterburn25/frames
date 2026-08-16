@@ -1,0 +1,50 @@
+name: Frames v108 Certified Source Export
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-physical-input-bringup ]
+    paths:
+      - '.github/workflows/frames-v108-certified-source-export.yml'
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_RUNTIME_KIT_SHA256: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
+  EXPECTED_SOURCE_SHA256: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
+  EXPECTED_KERNEL_SHA256: ffc5721eca68844357dbdca63b0edf266e7e210f9d162eecde8cae0067f210a8
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-physical-input-bringup
+      - name: Extract exact certified source
+        shell: bash
+        run: |
+          set -euo pipefail
+          KIT='Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip'
+          test "$(sha256sum "$KIT" | awk '{print $1}')" = "$EXPECTED_RUNTIME_KIT_SHA256"
+          rm -rf "$RUNNER_TEMP/v108-kit" "$RUNNER_TEMP/v108-src" v108-export
+          mkdir -p "$RUNNER_TEMP/v108-kit" "$RUNNER_TEMP/v108-src" v108-export
+          unzip -q "$KIT" -d "$RUNNER_TEMP/v108-kit"
+          SRCZIP="$RUNNER_TEMP/v108-kit/Frames-0.9.98-Source-v108.zip"
+          test "$(sha256sum "$SRCZIP" | awk '{print $1}')" = "$EXPECTED_SOURCE_SHA256"
+          unzip -q "$SRCZIP" -d "$RUNNER_TEMP/v108-src"
+          S="$RUNNER_TEMP/v108-src/Frames-0.9.98"
+          test "$(sha256sum "$S/kernel/main.nx" | awk '{print $1}')" = "$EXPECTED_KERNEL_SHA256"
+          cp "$S/kernel/main.nx" v108-export/kernel-main-v108-certified.nx
+          cp "$S/boot/uefi/frames_boot.c" v108-export/frames-boot-v108-certified.c
+          cp "$S/VERSION" v108-export/VERSION
+          cp "$S/GUI-REPAIR-REVISION" v108-export/GUI-REPAIR-REVISION
+          sha256sum v108-export/* > v108-export/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-Certified-Source-Export
+          path: v108-export/**
+          if-no-files-found: error
+          retention-days: 30
