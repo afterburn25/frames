@@ -1,0 +1,62 @@
+name: Frames v108 Touchpad Transport Audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-physical-input-bringup ]
+    paths: [ '.github/workflows/frames-v108-touchpad-transport-audit.yml' ]
+
+permissions:
+  contents: read
+
+env:
+  KIT_SHA: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
+  SRC_SHA: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
+
+jobs:
+  transport-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: v108-physical-input-bringup }
+      - name: Reconstruct exact certified v108
+        shell: bash
+        run: |
+          set -euo pipefail
+          K=Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip; test "$(sha256sum "$K"|awk '{print $1}')" = "$KIT_SHA"
+          mkdir -p "$RUNNER_TEMP/k" "$RUNNER_TEMP/s" transport-audit; unzip -q "$K" -d "$RUNNER_TEMP/k"
+          Z="$RUNNER_TEMP/k/Frames-0.9.98-Source-v108.zip"; test "$(sha256sum "$Z"|awk '{print $1}')" = "$SRC_SHA"; unzip -q "$Z" -d "$RUNNER_TEMP/s"
+          echo "ROOT=$RUNNER_TEMP/s/Frames-0.9.98" >> "$GITHUB_ENV"
+      - name: Inventory touchpad transports and absolute input support
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$ROOT" transport-audit/TOUCHPAD-TRANSPORT.json transport-audit/TOUCHPAD-HITS.txt <<'PY'
+          from pathlib import Path
+          import json,sys,re
+          root=Path(sys.argv[1]); terms=['i2c','i2c-hid','i2chid','hid-over-i2c','touchpad','trackpad','digitizer','absolute','tablet','elan','synaptics','precision touchpad','acpi','_crs','gpio','serialio','spi','ps2','aux','mouse','usb hid']
+          files=[p for p in root.rglob('*') if p.is_file() and p.stat().st_size<2_000_000 and p.suffix.lower() in {'.nx','.c','.h','.py','.md','.txt','.json','.cfg','.sh'}]
+          hits={t:[] for t in terms}
+          for p in files:
+            try: txt=p.read_text(errors='ignore')
+            except: continue
+            low=txt.lower()
+            for t in terms:
+              if t in low:
+                for i,line in enumerate(txt.splitlines(),1):
+                  if t in line.lower():
+                    hits[t].append({'file':p.relative_to(root).as_posix(),'line':i,'text':line[:240]})
+                    if len(hits[t])>=80: break
+          counts={k:len(v) for k,v in hits.items()}
+          result={'status':'PASS','counts':counts,'has_i2c_hid':counts['i2c-hid']>0 or counts['i2chid']>0 or counts['hid-over-i2c']>0,'has_absolute_input':counts['absolute']>0 or counts['digitizer']>0 or counts['tablet']>0,'has_ps2_aux':counts['ps2']>0 and counts['aux']>0,'has_usb_hid':counts['usb hid']>0}
+          Path(sys.argv[2]).write_text(json.dumps(result,indent=2)+'\n')
+          out=[]
+          for t in terms:
+            out.append(f'===== {t} ({counts[t]}) =====')
+            for h in hits[t][:40]: out.append(f"{h['file']}:{h['line']}: {h['text']}")
+          Path(sys.argv[3]).write_text('\n'.join(out)+'\n')
+          print(json.dumps(result,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with: { name: Frames-v108-Touchpad-Transport-Audit, path: 'transport-audit/**', if-no-files-found: error, retention-days: 30 }
