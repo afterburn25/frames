@@ -1,0 +1,135 @@
+name: Frames Integrated GUI Current Path Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ integrated-gui-physical-iso ]
+    paths:
+      - '.github/workflows/frames-integrated-gui-current-path-probe.yml'
+      - 'architecture/integration/**'
+      - 'architecture/v109/**'
+      - 'architecture/v110/**'
+      - 'architecture/v111/**'
+      - 'architecture/v112/**'
+      - 'architecture/v113/**'
+      - 'architecture/v114/**'
+      - 'architecture/v115/**'
+      - 'architecture/v116/**'
+      - 'bootux/**'
+
+permissions:
+  contents: read
+
+env:
+  V108_KIT_SHA256: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
+  V108_SOURCE_SHA256: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
+  V101_KIT_SHA256: 84f0a5c6b47d10e11237ab1d6d4c34507a4d525b98bbe58ffc6aa20e3a8dbca5
+  V101_SOURCE_SHA256: ce58e0eceb770e5b9bc3842ce096deccd9640d986ac0acfec5065305efef2b65
+  APPROVED_SPLASH_SHA256: 70e9ca0c9e31b56b720f3cf0bd22c5eacc35b51797782ad0f03172c2038b9fbd
+  APPROVED_LOGO_SHA256: ea3542453493238c0f50a6c703150d482edc0d5b875a6dfe678c15a42ab7ae0e
+
+jobs:
+  probe-current-path:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: integrated-gui-physical-iso
+
+      - name: Install probe tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-pil unzip
+
+      - name: Reconstruct exact v108 r9 source and port v109 through v116
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/gui-path-probe"; mkdir -p "$E" "$RUNNER_TEMP/v108-kit" "$RUNNER_TEMP/v108-src"
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip"
+          test -s "$KIT"; test "$(sha256sum "$KIT" | awk '{print $1}')" = "$V108_KIT_SHA256"
+          unzip -q "$KIT" -d "$RUNNER_TEMP/v108-kit"
+          Z="$RUNNER_TEMP/v108-kit/Frames-0.9.98-Source-v108.zip"
+          test -s "$Z"; test "$(sha256sum "$Z" | awk '{print $1}')" = "$V108_SOURCE_SHA256"
+          unzip -q "$Z" -d "$RUNNER_TEMP/v108-src"
+          S="$RUNNER_TEMP/v108-src/Frames-0.9.98"
+          test -f "$S/kernel/main.nx"; test -f "$S/boot/uefi/frames_boot.c"
+          for p in \
+            architecture/v109/make_unified_device_architecture_v109.py \
+            architecture/v110/make_driver_runtime_v110.py \
+            architecture/v111/make_async_io_service_runtime_v111.py \
+            architecture/v112/make_device_service_integration_v112.py \
+            architecture/v113/make_driver_execution_hal_v113.py \
+            architecture/v114/make_kernel_concurrency_driver_scheduling_v114.py \
+            architecture/v115/make_driver_migration_unified_input_v115.py \
+            architecture/v116/make_usb_core_xhci_migration_v116.py; do
+              python3 "$p" "$S/kernel/main.nx"
+          done
+          echo "S=$S" >> "$GITHUB_ENV"
+          sha256sum "$S/kernel/main.nx" "$S/boot/uefi/frames_boot.c" > "$E/CURRENT-V116-IDENTITY.txt"
+          cp "$S/boot/uefi/frames_boot.c" "$E/current-v116-frames_boot.c"
+
+      - name: Inspect current desktop path and requested integrated GUI marker
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/gui-path-probe"
+          grep -nE 'FRAMES_(GUI|DESKTOP|INTEGRATED)|gui_app_host|desktop_phase|desktop_runtime|score==9|boot_policy_flags' "$S/kernel/main.nx" > "$E/CURRENT-GUI-KERNEL-SYMBOLS.txt" || true
+          grep -nE 'boot_policy_flags|HELLO\.FAP|FramesBootInfo|mod_count|hello_fapp_verified' "$S/boot/uefi/frames_boot.c" > "$E/CURRENT-GUI-LOADER-SYMBOLS.txt" || true
+          if grep -q 'FRAMES_INTEGRATED_GUI_OK' "$S/kernel/main.nx"; then echo 'requested_marker_present=true'; else echo 'requested_marker_present=false'; fi | tee "$E/REQUESTED-MARKER.txt"
+          if grep -q 'FRAMES_GUI_DESKTOP_INTEGRATED_OK' "$S/kernel/main.nx"; then echo 'legacy_integrated_marker_present=true'; else echo 'legacy_integrated_marker_present=false'; fi | tee "$E/LEGACY-INTEGRATED-MARKER.txt"
+          cp "$S/boot/uefi/frames_boot.c" "$RUNNER_TEMP/desktop-policy-probe.c"
+          set +e
+          python3 architecture/integration/enable_v72_desktop_policy.py "$RUNNER_TEMP/desktop-policy-probe.c" > "$E/DESKTOP-POLICY-PROBE.log" 2>&1
+          rc=$?
+          set -e
+          echo "desktop_policy_patch_rc=$rc" | tee "$E/DESKTOP-POLICY-PROBE-RC.txt"
+          if [ "$rc" -eq 0 ]; then
+            sha256sum "$RUNNER_TEMP/desktop-policy-probe.c" > "$E/DESKTOP-POLICY-PATCHED-LOADER-SHA256.txt"
+            grep -nE 'boot_policy_flags|HELLO\.FAP|Desktop policy' "$RUNNER_TEMP/desktop-policy-probe.c" > "$E/DESKTOP-POLICY-PATCHED-SYMBOLS.txt" || true
+          fi
+
+      - name: Recreate approved splash exactly and compare current branding
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/gui-path-probe"; mkdir -p "$RUNNER_TEMP/v101-kit" "$RUNNER_TEMP/v101-src"
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.91-Integrated-Connected-Services-Certification-Kit-v101.zip"
+          test -s "$KIT"; test "$(sha256sum "$KIT" | awk '{print $1}')" = "$V101_KIT_SHA256"
+          unzip -q "$KIT" -d "$RUNNER_TEMP/v101-kit"
+          Z="$(find "$RUNNER_TEMP/v101-kit" -type f -iname '*0.9.91*Source*.zip' -print | sort | head -n1)"
+          test -s "$Z"; test "$(sha256sum "$Z" | awk '{print $1}')" = "$V101_SOURCE_SHA256"
+          unzip -q "$Z" -d "$RUNNER_TEMP/v101-src"
+          V101="$RUNNER_TEMP/v101-src/Frames-0.9.91"
+          test "$(sha256sum "$V101/assets/branding/FramesLogo.png" | awk '{print $1}')" = "$APPROVED_LOGO_SHA256"
+          python3 bootux/make_splash_asset.py "$V101/assets/branding/FramesLogo.png" "$RUNNER_TEMP/APPROVED-SPLASH.FSP" | tee "$E/APPROVED-SPLASH-ASSET.json"
+          test "$(sha256sum "$RUNNER_TEMP/APPROVED-SPLASH.FSP" | awk '{print $1}')" = "$APPROVED_SPLASH_SHA256"
+          sha256sum "$RUNNER_TEMP/APPROVED-SPLASH.FSP" > "$E/APPROVED-SPLASH-SHA256.txt"
+          if [ -f "$S/assets/branding/FramesLogo.png" ]; then sha256sum "$S/assets/branding/FramesLogo.png" > "$E/CURRENT-LOGO-SHA256.txt"; fi
+          cmp -s "$V101/boot/uefi/frames_boot.c" "$S/boot/uefi/frames_boot.c" && echo 'loader_identical_to_v101=true' || echo 'loader_identical_to_v101=false' | tee "$E/LOADER-COMPARE.txt"
+          diff -u "$V101/boot/uefi/frames_boot.c" "$S/boot/uefi/frames_boot.c" > "$E/V101-TO-V108-LOADER.diff" || true
+
+      - name: Final probe summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/gui-path-probe"
+          {
+            echo 'FRAMES INTEGRATED GUI CURRENT PATH PROBE'
+            cat "$E/CURRENT-V116-IDENTITY.txt"
+            cat "$E/REQUESTED-MARKER.txt"
+            cat "$E/LEGACY-INTEGRATED-MARKER.txt"
+            cat "$E/DESKTOP-POLICY-PROBE-RC.txt"
+            cat "$E/APPROVED-SPLASH-SHA256.txt"
+            cat "$E/LOADER-COMPARE.txt"
+          } | tee "$E/FINAL-SUMMARY.txt"
+
+      - name: Upload path probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-Integrated-GUI-Current-Path-Probe
+          path: gui-path-probe/
+          if-no-files-found: error
+          retention-days: 30
