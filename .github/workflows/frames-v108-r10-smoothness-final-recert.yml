@@ -1,0 +1,152 @@
+name: Frames v108 r10 Smoothness Final Recert
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-physical-input-bringup ]
+    paths:
+      - '.github/workflows/frames-v108-r10-smoothness-final-recert.yml'
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  SOURCE_RUN: '31960209876'
+  R10_SHA: b2dee4fc2c1ca3ad68d4428febf564a2143948ee797ea74ee532ac87b2c14ab6
+  ISO_NAME: Frames-0.9.98-v108-Physical-Input-Repair-r10-Rufus-UEFI.iso
+
+jobs:
+  source-evidence:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r10-Candidate
+          path: candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r10-usb-Evidence
+          path: src-evidence/usb
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r10-ps2-Evidence
+          path: src-evidence/ps2
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r10-Decoder-Model-Evidence
+          path: src-evidence/decoder
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r10-ReadOnly-Safety
+          path: src-evidence/safety
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN }}
+      - name: Verify exact source-run evidence
+        run: |
+          set -euo pipefail
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"; test -s "$ISO"
+          test "$(tr -d '\r\n' < candidate/evidence/R10-SHA.txt)" = "$R10_SHA"
+          EXPECT="$(awk '{print $1}' candidate/evidence/ISO-SHA256.txt)"
+          test "$(sha256sum "$ISO"|awk '{print $1}')" = "$EXPECT"
+          grep -R -q '"status": "PASS"' src-evidence/usb
+          grep -R -q '"status": "PASS"' src-evidence/ps2
+          grep -R -q '^status=PASS$' src-evidence/decoder
+          grep -R -q '^status=PASS$' src-evidence/safety
+          mkdir verified
+          printf 'status=PASS\nsource_run=%s\nr10_source=%s\niso_sha256=%s\nusb=PASS\nps2=PASS\ndecoder_model=PASS\nreadonly_safety=PASS\n' "$SOURCE_RUN" "$R10_SHA" "$EXPECT" > verified/SOURCE-EVIDENCE.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r10-Verified-Source-Evidence
+          path: verified/**
+          if-no-files-found: error
+          retention-days: 30
+
+  smoothness:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-physical-input-bringup
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r10-Candidate
+          path: candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN }}
+      - name: Install QEMU smoothness tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf python3 python3-pil
+          O="$(find /usr/share/OVMF -type f \( -name OVMF_CODE_4M.fd -o -name OVMF_CODE.fd \)|head -n1)"
+          test -s "$O"; echo "OVMF=$O" >> "$GITHUB_ENV"
+      - name: Quantitative 42-step PS2 cursor smoothness gate
+        run: |
+          set -euo pipefail
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"; test -s "$ISO"
+          EXPECT="$(awk '{print $1}' candidate/evidence/ISO-SHA256.txt)"
+          mkdir -p smoothness
+          python3 tools/ci/qemu_ps2_cursor_smoothness_r10.py --ovmf "$OVMF" --iso "$ISO" --out smoothness --expected-iso-sha "$EXPECT"
+          grep -q '"status": "PASS"' smoothness/SMOOTHNESS.json
+          sha256sum smoothness/* > smoothness/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Frames-v108-r10-PS2-Smoothness-Recert-Evidence
+          path: smoothness/**
+          if-no-files-found: warn
+          retention-days: 30
+
+  final:
+    needs: [source-evidence, smoothness]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r10-Candidate
+          path: candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r10-Verified-Source-Evidence
+          path: proof/source
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r10-PS2-Smoothness-Recert-Evidence
+          path: proof/smoothness
+      - name: Seal immutable r10 physical-test candidate
+        run: |
+          set -euo pipefail
+          grep -q '^status=PASS$' proof/source/SOURCE-EVIDENCE.txt
+          grep -q '"status": "PASS"' proof/smoothness/SMOOTHNESS.json
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"; test -s "$ISO"
+          EXPECT="$(awk '{print $1}' candidate/evidence/ISO-SHA256.txt)"
+          test "$(sha256sum "$ISO"|awk '{print $1}')" = "$EXPECT"
+          mkdir final; cp "$ISO" final/
+          printf 'Frames v108 Physical Input Repair r10\nstatus=PASS\nsource_run=%s\nrecert_run=%s\nvm_usb_live_input=PASS\nvm_ps2_live_input=PASS\nvm_ps2_quantitative_smoothness=PASS\ndecoder_model=PASS\nreadonly_safety=PASS\nphysical_touchpad=PENDING\nphysical_usb=PENDING\ndestructive_writes=BLOCKED\n' "$SOURCE_RUN" "$GITHUB_RUN_ID" > final/CERTIFICATION.txt
+          sha256sum final/$ISO_NAME | tee final/ISO-SHA256.txt
+          stat -c '%s' final/$ISO_NAME | tee final/ISO-SIZE.txt
+          sha256sum final/* > final/FINAL-SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r10-Rufus-Final-Recertified
+          path: final/**
+          if-no-files-found: error
+          retention-days: 30
