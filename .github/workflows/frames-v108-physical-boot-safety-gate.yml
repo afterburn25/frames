@@ -1,0 +1,199 @@
+name: Frames v108 Physical Boot Safety Gate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-physical-input-bringup ]
+    paths:
+      - '.github/workflows/frames-v108-physical-boot-safety-gate.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SOURCE_RUN_ID: 31927431251
+  EXPECTED_IMAGE_SHA: 6918d228725f0cb3185e17f974119b4abf8c8413af1173369fc8d0594f30bab7
+
+jobs:
+  media-structure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-Physical-Input-Test-r2-Candidate
+          path: candidate
+          github-token: ${{ github.token }}
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN_ID }}
+      - name: Verify UEFI/GPT/FAT removable-media structure
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y gdisk mtools dosfstools
+          mkdir -p media-evidence
+          IMG="$(find candidate -name 'Frames-0.9.98-v108-Physical-Input-Test-r2.img' -print -quit)"
+          test -s "$IMG"
+          test "$(sha256sum "$IMG"|awk '{print $1}')" = "$EXPECTED_IMAGE_SHA"
+          test "$(stat -c '%s' "$IMG")" = 67108864
+          sgdisk -v "$IMG" | tee media-evidence/GPT-VERIFY.txt
+          FIRST="$(sgdisk -i 1 "$IMG" | awk -F: '/First sector/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); split($2,a," "); print a[1]; exit}')"
+          test -n "$FIRST"
+          OFFSET=$((FIRST*512))
+          mdir -i "$IMG@@$OFFSET" ::/ | tee media-evidence/FAT-ROOT.txt
+          mdir -i "$IMG@@$OFFSET" ::/EFI/BOOT | tee media-evidence/EFI-BOOT.txt
+          mdir -i "$IMG@@$OFFSET" ::/FRAMES | tee media-evidence/FRAMES-DIR.txt
+          mcopy -i "$IMG@@$OFFSET" ::/EFI/BOOT/BOOTX64.EFI media-evidence/BOOTX64.EFI
+          mcopy -i "$IMG@@$OFFSET" ::/FRAMES/FramesKernel.fkrn media-evidence/FramesKernel.fkrn
+          test -s media-evidence/BOOTX64.EFI
+          test -s media-evidence/FramesKernel.fkrn
+          sha256sum "$IMG" media-evidence/BOOTX64.EFI media-evidence/FramesKernel.fkrn > media-evidence/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-Physical-Boot-Media-Evidence
+          path: media-evidence/**
+          if-no-files-found: error
+          retention-days: 30
+
+  overlay-write-surface:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-Physical-Input-Test-r2-Candidate
+          path: candidate
+          github-token: ${{ github.token }}
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN_ID }}
+      - name: Prove input overlay does not modify destructive-write paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p write-evidence
+          PATCH="candidate/evidence/PHYSICAL-INPUT-R2.patch"
+          test -s "$PATCH"
+          python3 - "$PATCH" write-evidence/WRITE-SURFACE.json <<'PY'
+          import json,re,sys,pathlib
+          p=pathlib.Path(sys.argv[1]); out=pathlib.Path(sys.argv[2])
+          added=[]
+          for line in p.read_text(errors='replace').splitlines():
+              if line.startswith('+') and not line.startswith('+++'):
+                  added.append(line[1:])
+          patterns=[r'write_armed',r'write_target',r'nvme_write',r'scsi_write',r'storage_write',r'filesystem_write',r'fat_write',r'WRITE\(10\)',r'destructive',r'physical_write']
+          hits=[]
+          for i,line in enumerate(added,1):
+              for pat in patterns:
+                  if re.search(pat,line,re.I): hits.append({'added_line_index':i,'pattern':pat,'text':line[:300]})
+          obj={'status':'PASS' if not hits else 'FAIL','profile':'v108-input-overlay-write-surface','added_lines':len(added),'write_path_hits':hits,'physical_destructive_writes_certified':False}
+          out.write_text(json.dumps(obj,indent=2)+'\n'); print(json.dumps(obj,indent=2))
+          if hits: raise SystemExit(1)
+          PY
+          sha256sum "$PATCH" write-evidence/WRITE-SURFACE.json > write-evidence/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-Physical-Boot-Write-Surface-Evidence
+          path: write-evidence/**
+          if-no-files-found: error
+          retention-days: 30
+
+  readonly-boot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-Physical-Input-Test-r2-Candidate
+          path: candidate
+          github-token: ${{ github.token }}
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN_ID }}
+      - name: Install QEMU/OVMF
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf python3
+          code="$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE.fd' \) | head -n1)"
+          test -n "$code"
+          echo "OVMF_CODE=$code" >> "$GITHUB_ENV"
+      - name: Boot exact candidate with all guest-visible block devices read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p readonly-evidence
+          IMG="$(find candidate -name 'Frames-0.9.98-v108-Physical-Input-Test-r2.img' -print -quit)"
+          test "$(sha256sum "$IMG"|awk '{print $1}')" = "$EXPECTED_IMAGE_SHA"
+          truncate -s 32M "$RUNNER_TEMP/internal-sentinel.img"
+          python3 - "$OVMF_CODE" "$IMG" "$RUNNER_TEMP/internal-sentinel.img" readonly-evidence <<'PY'
+          import json,pathlib,subprocess,sys,time
+          ovmf,image,sentinel,out=sys.argv[1:]
+          out=pathlib.Path(out); serial=out/'serial.log'; err=out/'qemu.stderr'
+          cmd=['qemu-system-x86_64','-machine','q35','-m','768M','-smp','2','-cpu','max','-accel','tcg,thread=single','-display','none','-no-reboot','-no-shutdown','-nic','none','-serial',f'file:{serial}','-drive',f'if=pflash,format=raw,readonly=on,file={ovmf}','-device','qemu-xhci,id=xhci','-drive',f'if=none,id=bootusb,format=raw,readonly=on,file={image}','-device','usb-storage,drive=bootusb,bus=xhci.0,bootindex=1','-drive',f'if=none,id=internal,format=raw,readonly=on,file={sentinel}','-device','nvme,serial=FRAMESREADONLY,drive=internal']
+          (out/'qemu-command.json').write_text(json.dumps(cmd,indent=2)+'\n')
+          ef=err.open('wb'); p=subprocess.Popen(cmd,stdout=subprocess.DEVNULL,stderr=ef)
+          try:
+              deadline=time.time()+100; ready=False
+              while time.time()<deadline:
+                  txt=serial.read_text(errors='ignore') if serial.exists() else ''
+                  if 'FRAMES_V108_INPUT_TEST_RUNTIME_READY' in txt and 'FRAMES_V108_INPUT_TELEMETRY_OK' in txt:
+                      ready=True; break
+                  if p.poll() is not None: raise RuntimeError(f'qemu stopped rc={p.returncode}')
+                  time.sleep(.2)
+              if not ready: raise RuntimeError('read-only boot did not reach input runtime')
+              p.terminate()
+              try:p.wait(timeout=5)
+              except: p.kill(); p.wait()
+              stderr=err.read_text(errors='ignore') if err.exists() else ''
+              bad=[]
+              for ln in stderr.splitlines():
+                  low=ln.lower()
+                  if ('read-only' in low or 'readonly' in low or 'permission denied' in low) and ('write' in low or 'flush' in low): bad.append(ln)
+              result={'status':'PASS' if ready and not bad else 'FAIL','candidate_sha256':'6918d228725f0cb3185e17f974119b4abf8c8413af1173369fc8d0594f30bab7','boot_usb_readonly':True,'internal_nvme_sentinel_readonly':True,'input_runtime_ready':ready,'qemu_readonly_write_errors':bad,'physical_destructive_writes_certified':False}
+              (out/'READONLY-BOOT.json').write_text(json.dumps(result,indent=2)+'\n'); print(json.dumps(result,indent=2))
+              if result['status']!='PASS': raise SystemExit(1)
+          finally:
+              if p.poll() is None:
+                  p.kill(); p.wait()
+          PY
+          sha256sum readonly-evidence/* > readonly-evidence/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Frames-v108-Physical-Boot-Readonly-Evidence
+          path: readonly-evidence/**
+          if-no-files-found: error
+          retention-days: 30
+
+  final:
+    needs: [media-structure, overlay-write-surface, readonly-boot]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Seal physical boot safety gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p final
+          cat > final/PHYSICAL-BOOT-SAFETY.json <<'EOF'
+          {
+            "status": "PASS",
+            "profile": "frames-0.9.98-v108-physical-boot-safety",
+            "candidate_sha256": "6918d228725f0cb3185e17f974119b4abf8c8413af1173369fc8d0594f30bab7",
+            "uefi_gpt_fat_media_valid": true,
+            "boot_usb_readonly_runtime_pass": true,
+            "internal_nvme_sentinel_readonly_runtime_pass": true,
+            "input_overlay_write_surface_unchanged": true,
+            "physical_boot_test_allowed": true,
+            "physical_destructive_writes_certified": false,
+            "promotion_allowed": false
+          }
+          EOF
+          sha256sum final/* > final/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-Physical-Boot-Safety-Final
+          path: final/**
+          if-no-files-found: error
+          retention-days: 30
