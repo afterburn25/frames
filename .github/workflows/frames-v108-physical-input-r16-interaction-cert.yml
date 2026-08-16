@@ -23,7 +23,7 @@ env:
   R15_SHA: fa0f42f558f0004f7663f79b49c3049c57c896203cf18646b1ec6f999824f941
   R16_PATCH_SHA: 50c9e84a156dbdcb2c82fc459cb69f6a82f20c2e3dd5bfba1c12bf04fd03f19c
   R16_PRE_SHA: 8fd8fcf0be5160bed4524e1dc6e45cac659ab7a5fc9c2f1fbb9c14de32e00ffd
-  R16_SHA: a756177ca28ddb370e0995bd899bb6be1f9550421b55631cffa3cb94aac8ac05
+  R16_SHA: 6d2a3b1ce3acbe35635dfd18d650e1d6c2fec2c1eaffceb264904cdaf8e8feb2
   ISO_NAME: Frames-0.9.98-v108-Physical-Input-Repair-r16-Interaction-Rufus-UEFI.iso
 
 jobs:
