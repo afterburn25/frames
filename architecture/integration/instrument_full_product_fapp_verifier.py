@@ -73,11 +73,17 @@ new_body = pat.sub(repl, body)
 if count == 0:
     raise SystemExit('no conditional return 0 verifier fail sites found')
 
-# Success marker; explicit and semantics-preserving.
-new_body, success_count = re.subn(r'(?<![A-Za-z0-9_])return\s+1\s*;', 'print16(L"[FAPP-DIAG] verify-ok\\r\\n"); return 1;', new_body, count=1)
+# Success marker; use a callable replacement so Python regex replacement-string
+# escape processing cannot turn the intended C "\\r\\n" into literal CR/LF.
+success_pat = re.compile(r'(?<![A-Za-z0-9_])return\s+1\s*;')
+new_body, success_count = success_pat.subn(
+    lambda _m: 'print16(L"[FAPP-DIAG] verify-ok\\r\\n"); return 1;',
+    new_body,
+    count=1,
+)
 if success_count != 1:
     raise SystemExit('expected one explicit verifier success return')
 
 s = s[:brace+1] + '\n    print16(L"[FAPP-DIAG] verifier-enter\\r\\n");' + new_body + s[end:]
 p.write_text(s)
-print(f'instrumented fapp_extract_verify fail_sites={count} semantics=preserved')
+print(f'instrumented fapp_extract_verify fail_sites={count} semantics=preserved escapes=preserved')
