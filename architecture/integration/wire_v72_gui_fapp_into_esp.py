@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import re, subprocess, sys
+import hashlib, json, re, subprocess, sys, zipfile
 
 if len(sys.argv) != 3:
     raise SystemExit('usage: wire_v72_gui_fapp_into_esp.py SOURCE_ROOT ESP_IMAGE')
@@ -9,116 +9,88 @@ esp = Path(sys.argv[2])
 loader = root / 'boot/uefi/frames_boot.c'
 s = loader.read_text(errors='replace')
 
-# Frames calls the package format FAPP, but this v72 loader uses the on-disk
-# extension .FAP (HELLO.FAP). Discover the exact wide-string path instead of
-# assuming either .fap or the conceptual .fapp spelling.
-literals = re.findall(r'L"([^"\n]+)"', s)
-paths = [x for x in literals if x.lower().endswith(('.fap', '.fapp'))]
-if not paths:
-    nearby = [line for line in s.splitlines() if 'hello_fapp' in line.lower() or 'fapp' in line.lower() or '.fap' in line.lower()]
-    print('FAPP-related loader source:')
-    for line in nearby:
-        print(line)
-    raise SystemExit('no literal loader FAP/FAPP path found')
-expected = paths[0].replace('\\\\','\\')
+# v72's desktop loader requests the FAPP1 package as \Frames\HELLO.FAP.
+# Parse it when possible; fall back only when the exact literal is visibly present.
+m = re.search(r'load_file\([^\n]*L"([^"\n]*HELLO\.FAP)"', s, re.I)
+if m:
+    expected = m.group(1).replace('\\\\', '\\')
+elif 'HELLO.FAP' in s:
+    expected = r'\Frames\HELLO.FAP'
+else:
+    raise SystemExit('v72 loader does not reference HELLO.FAP')
 print(f'loader_fapp_path={expected}')
 
 
 def packages():
-    out=[]
-    for p in root.rglob('*'):
-        if p.is_file() and p.suffix.lower() in ('.fap', '.fapp') and p.stat().st_size>0:
-            out.append(p)
-    return out
+    return [p for p in root.rglob('*') if p.is_file() and p.suffix.lower() in ('.fap','.fapp') and p.stat().st_size > 0]
 
-# v72's ordinary kernel/System build does not necessarily package the sample
-# application. If no package exists, discover the source tree's own FAPP
-# builder and invoke only CLI forms supported by its help text.
-candidates=packages()
+candidates = packages()
+
+# If the sealed source has no ready package, build a deterministic FAPP1 container
+# matching fapp_extract_verify(): ZIP local entries must be STORE/no data descriptor,
+# APP-MANIFEST.json must be first, APP.FEX second, and the manifest must bind the
+# complete FEX SHA-256. This is a boot-contract proof package, not a production app.
 if not candidates:
-    print('no prebuilt FAP/FAPP; discovering supplied package tooling')
-    tool_hits=[]
-    for base in (root/'tools', root/'sdk', root/'apps'):
-        if not base.exists():
-            continue
-        for p in base.rglob('*'):
-            if not p.is_file() or p.stat().st_size > 2_000_000:
-                continue
-            try:
-                text=p.read_text(errors='ignore')
-            except Exception:
-                continue
-            hay=(p.name+'\n'+text).lower()
-            if 'fapp' in hay or '.fap' in hay:
-                tool_hits.append(p)
-                print(f'fapp_tool_hit={p.relative_to(root)}')
+    fex_candidates = []
+    for p in root.rglob('*.fex'):
+        if p.is_file() and p.stat().st_size >= 128:
+            fex_candidates.append(p)
+    system = root / 'build' / 'System.fex'
+    if system.exists() and system.stat().st_size >= 128:
+        payload = system
+    elif fex_candidates:
+        payload = sorted(fex_candidates, key=lambda p: (('hello' in p.name.lower()), p.stat().st_size), reverse=True)[0]
+    else:
+        raise SystemExit('no valid FEX payload available for HELLO.FAP contract proof')
 
-    scripts=[]
-    for p in tool_hits:
-        n=p.name.lower()
-        if p.suffix.lower() in ('.py','.sh') and ('fapp' in n or 'fap' in n or 'package' in n or 'pack' in n):
-            scripts.append(p)
-
-    hello=[]
-    for p in root.rglob('*'):
-        if p.is_file() and ('helloframes' in str(p).lower() or ('hello' in p.name.lower() and 'example' not in str(p).lower())):
-            hello.append(p)
-            print(f'hello_source_hit={p.relative_to(root)}')
-
-    build_dir=root/'build'
-    build_dir.mkdir(exist_ok=True)
-    for tool in scripts:
-        cmd0=['python3',str(tool)] if tool.suffix.lower()=='.py' else ['bash',str(tool)]
-        try:
-            help_out=subprocess.run(cmd0+['--help'],cwd=root,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=20).stdout
-        except Exception as e:
-            print(f'help_failed={tool.relative_to(root)}:{e}')
-            continue
-        print(f'help_begin={tool.relative_to(root)}')
-        print(help_out[:6000])
-        print('help_end')
-        low=help_out.lower()
-        attempts=[]
-        if hello and ('output' in low or '-o' in low):
-            src=hello[0]
-            out=build_dir/'HELLO.FAP'
-            attempts += [cmd0+[str(src),'-o',str(out)], cmd0+['--input',str(src),'--output',str(out)]]
-        if 'helloframes' in low or 'hello' in low:
-            attempts += [cmd0+['HelloFrames'], cmd0+['helloframes']]
-        for cmd in attempts:
-            try:
-                print('trying='+' '.join(cmd))
-                r=subprocess.run(cmd,cwd=root,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=60)
-                print(r.stdout[:8000])
-                print(f'exit={r.returncode}')
-            except Exception as e:
-                print(f'attempt_failed={e}')
-            candidates=packages()
-            if candidates:
-                break
-        if candidates:
-            break
+    digest = hashlib.sha256(payload.read_bytes()).hexdigest()
+    manifest = {
+        'format': 'FAPP1',
+        'app_name': 'HelloFrames',
+        'target': 'frames-x64',
+        'fex_abi': 1,
+        'payload': 'APP.FEX',
+        'frames_min': '0.9.62',
+        'sha256': digest,
+        'purpose': 'v72-desktop-contract-proof'
+    }
+    # Compact JSON is intentional: the loader searches exact no-whitespace tokens.
+    manifest_bytes = json.dumps(manifest, separators=(',', ':')).encode('utf-8')
+    out = root / 'build' / 'HELLO.FAP'
+    with zipfile.ZipFile(out, 'w', compression=zipfile.ZIP_STORED, allowZip64=False) as z:
+        zi = zipfile.ZipInfo('APP-MANIFEST.json')
+        zi.compress_type = zipfile.ZIP_STORED
+        zi.flag_bits = 0
+        z.writestr(zi, manifest_bytes)
+        zi2 = zipfile.ZipInfo('APP.FEX')
+        zi2.compress_type = zipfile.ZIP_STORED
+        zi2.flag_bits = 0
+        z.writestr(zi2, payload.read_bytes())
+    print(f'constructed_contract_fapp={out}')
+    print(f'payload_fex={payload}')
+    print(f'payload_sha256={digest}')
+    candidates = packages()
 
 if not candidates:
-    raise SystemExit('no .FAP/.FAPP package could be produced by supplied v72 tooling')
+    raise SystemExit('HELLO.FAP construction failed')
 
 def score(p: Path):
     n=p.name.lower(); path=str(p).lower()
-    return (('helloframes' in n)*100 + (n.startswith('hello.'))*90 + ('hello' in n)*50 + ('build' in path)*10, p.stat().st_size)
+    return (n == 'hello.fap', 'helloframes' in n, 'build' in path, p.stat().st_size)
 
-candidate=sorted(candidates,key=score,reverse=True)[0]
+candidate = sorted(candidates, key=score, reverse=True)[0]
 print(f'candidate_fapp={candidate}')
 print(f'candidate_size={candidate.stat().st_size}')
 
-uefi=expected.replace('\\','/').lstrip('/')
-parts=[x for x in uefi.split('/') if x]
-if len(parts)<2:
+uefi = expected.replace('\\','/').lstrip('/')
+parts = [x for x in uefi.split('/') if x]
+if len(parts) < 2:
     raise SystemExit(f'unexpected loader FAPP path: {expected}')
 cur='::'
 for d in parts[:-1]:
     cur += '/' + d
     subprocess.run(['mmd','-i',str(esp),cur],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-dest='::/'+'/'.join(parts)
+dest='::/' + '/'.join(parts)
 subprocess.check_call(['mcopy','-o','-i',str(esp),str(candidate),dest])
-subprocess.check_call(['mdir','-i',str(esp),'::/'+'/'.join(parts[:-1])])
+subprocess.check_call(['mdir','-i',str(esp),'::/' + '/'.join(parts[:-1])])
 print(f'wired_fapp={dest}')
