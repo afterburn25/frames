@@ -27,154 +27,215 @@ Last updated: 2026-08-16
 Active branch: `v108-physical-input-bringup`.
 All current physical-input work reconstructs this exact certified v108 source; v109-v116 architecture transforms are intentionally excluded from this bring-up train.
 
-## Latest authoritative physical result — r8 on user's laptop
+## Physical history — r8
 Exact tested r8 ISO:
 - `Frames-0.9.98-v108-Physical-Input-Repair-r8-Rufus-UEFI.iso`
 - SHA-256 `042b73cbd926b75b33102b1b1a8d5f26efcc00840409f74d38bcadfa88d12f44`
 - size `18,728,960 bytes`
 - Rufus mode: ISO Image mode
 
-### Built-in touchpad / PS2-AUX
-Physical r8 telemetry after movement approximately:
-- `PS2 E PK = 1, 30`
-- `P2 O A K = 3066, 3066, 0`
-- `P2 R PH PK = 3066, 0, 30`
-- `P2 SY R1 R2 = 529, 2279, 192`
-- `P2 B0 B1 B2 = 222, 68, 0`
-- `SRC X Y = 2, 1895, 72`
+Physical r8 touchpad result:
+- thousands of i8042/AUX bytes reached Frames;
+- some standard-three-byte candidates were accepted;
+- visible cursor moved, proving the cursor-render path;
+- movement jumped randomly and was not controllable;
+- representative telemetry: `PS2 E PK=1,30`, `P2 O A K=3066,3066,0`, `SRC X Y=2,1895,72` with very high reject/sync counters.
 
-Observed behavior: visible cursor moves, but skips/jumps to random positions and cannot be controlled reliably by direction.
+Physical r8 USB result:
+- no cursor movement;
+- representative telemetry `USB S T C E=5,8,0,1`;
+- repaired second xHCI Address Device command completed successfully (`E=1`), moving the first physical blocker to the following full-device-descriptor stage.
 
-Authoritative conclusion:
-- i8042/AUX transport is physically working;
-- thousands of AUX bytes reach Frames;
-- some packets decode and drive the real visible cursor;
-- `SRC=2` proves PS2 is the active pointer source;
-- cursor rendering itself works;
-- the blocker is packet protocol/framing/motion quality, not transport or visibility;
-- 3066 raw AUX bytes with only 30 accepted packets plus very high sync/reject counts explains the uncontrolled jumps.
-
-### External USB mouse
-Physical r8 telemetry:
-- `USB H R P = 0, 0, 16`
-- `USB S T C E = 5, 8, 0, 1`
-
-Observed behavior: external USB mouse does not move the cursor.
-
-Exact-source interpretation:
-- descriptor-8 was obtained;
-- the repaired second xHCI Address Device command completed successfully (`E=1`);
-- class remains 0 because full device descriptor/HID discovery does not complete;
-- the current first physical USB blocker is the following 18-byte full device-descriptor control transfer, not Address Device.
-
-Known later topology gap still exists:
-- workflow `.github/workflows/frames-v108-usb-hub-topology-probe.yml`
+Known later USB topology gap still exists:
+- `.github/workflows/frames-v108-usb-hub-topology-probe.yml`
 - run `31929194248`
 - direct xHCI mouse supported in VM;
 - mouse behind hub: `NO_HID_BEHIND_TOPOLOGY`.
 
-## r9 kernel repair
+## r9 kernel / VM certification
 Patch:
 - `tools/ci/patch_v108_physical_input_r9_protocol.py`
-- patch commit `a144066f3acd2affc3eafa33c37532ca16e5dbbf`
-- finalized hash-lock commit `a1765d2a9cfc2d716fb04e581115179f9860d229`
-- r8 input source SHA `b0e7893dea8306b44ea044b5e712fb4568223b5bdd599b9d369f19e523bad037`
 - exact r9 output source SHA `5b2384f8e128b1ec6922f34c14478918c3388179937c2000dd12135fefcf682c`
 
-### r9 touchpad changes
-- stop streaming before protocol probe;
-- perform Synaptics-style four-SETRES + status probe;
-- request Synaptics relative-mode normalization when signature is detected;
-- preserve standard PS/2 as fallback;
-- replace blind three-byte phase reset with a sliding three-byte window;
-- validate header bit 3, overflow and sign consistency;
-- reject single-packet motion magnitude above 80;
-- slide one byte on invalid candidates instead of discarding the stream;
-- require two consecutive valid packets before emitting motion.
+r9 added:
+- Synaptics-style protocol probe / attempted relative normalization;
+- safer sliding standard-PS2 three-byte parser;
+- two-consecutive-valid-packet lock before motion emission;
+- implausible single-packet delta rejection;
+- USB full 18-byte descriptor retries;
+- `USB S T X E` telemetry where `X` is xHCI transfer completion and `E` is command completion.
 
-### r9 USB changes
-- retain repaired EP0 dequeue/current transfer-ring pointer before second Address Device;
-- retry full 18-byte device-descriptor GET up to three times;
-- record descriptor attempt count, returned length/type and config count;
-- physical telemetry changes to `USB S T X E`;
-- `X` = xHCI transfer completion code (`xhci_state+504`), directly diagnosing the full-descriptor control transfer;
-- `E` = xHCI command completion code (`xhci_state+488`).
-
-## r9c VM certification — PASS, including quantitative cursor smoothness
-Workflow:
-- `.github/workflows/frames-v108-physical-input-r9c-smoothness.yml`
-- commit `2e8996269e2d36293d98ea4e1da6461c05f55d52`
+r9c VM recertification:
+- workflow `.github/workflows/frames-v108-physical-input-r9c-smoothness.yml`
 - run `31958797777`: PASS
-
-r9c intentionally reuses the exact r9 candidate built in source run `31958310396` rather than rebuilding a different ISO.
-Exact candidate identity:
-- candidate artifact ID `9266559750`
-- candidate artifact ZIP SHA-256 `d78b35b959a366705567a44fe58d31090d6dec83537cd5341f5089f80404b9da`
-- ISO `Frames-0.9.98-v108-Physical-Input-Repair-r9-Rufus-UEFI.iso`
+- exact ISO `Frames-0.9.98-v108-Physical-Input-Repair-r9-Rufus-UEFI.iso`
 - ISO SHA-256 `afad163240b6db6d95a694235456ee8a1fdfb322805c6ce6b0d4c23df08b8a85`
-- ISO size `18,733,056 bytes`
-- exact r9 source SHA `5b2384f8e128b1ec6922f34c14478918c3388179937c2000dd12135fefcf682c`
-
-r9c required lanes:
-- USB stable-frame live input: PASS
-- PS2 stable-frame live input: PASS
-- quantitative PS2 cursor smoothness: PASS
-- verified read-only safety: PASS
-- final seal: PASS
-
-Stable input evidence on exact ISO:
-- PS2 cursor `396,290 -> 400,292`, requested positive X/Y; PASS
-- USB cursor `396,290 -> 400,292`, requested positive X/Y; PASS
-- both lanes changed only 112 framebuffer pixels outside telemetry overlay;
-- no legacy ghost cursor.
-
-### Quantitative PS2 cursor smoothness gate
-Host verifier: `tools/ci/qemu_ps2_cursor_smoothness.py`
-Smoothness evidence artifact:
-- ID `9266688388`
-- ZIP SHA-256 `03df77c54284b9eb51bd5cea9d68aa452639e2fba567896a38271506868d0c2e`
-
-Measured result: PASS across 42 controlled rendered-cursor steps.
-- pre-input cursor: `396,290`
-- measurement origin after two-packet lock warm-up: `398,290`
-- final cursor after full round trip: `398,290`
-- round-trip error: `0,0`
-- maximum changed pixels outside telemetry overlay per motion step: `115`
-- maximum single-step jump: `5 px`
-- maximum cross-axis drift: `0 px`
-- pre-input idle framebuffer change: `0 px`
-- three post-test idle samples all remained exactly `398,290`
-
-Exact step behavior:
-- 8 one-pixel right requests -> eight `1 px` right movements
-- 8 one-pixel left requests -> eight `1 px` left movements
-- 8 three-pixel down requests -> eight `3 px` down movements
-- 8 three-pixel up requests -> eight `3 px` up movements
-- ramp right requested `1,2,3,4,5` -> actual `1,2,3,4,5`
-- ramp left requested `5,4,3,2,1` -> actual `5,4,3,2,1`
-
-This VM gate is now a mandatory prerequisite for future touchpad-fix claims. A build may not be called touchpad-fixed merely because the cursor moves.
-
-## Exact r9c final artifact
-Final artifact:
-- name `Frames-v108-r9c-Rufus-Final`
-- ID `9266690953`
-- artifact ZIP SHA-256 `7c04ad1add8084a3906074e68079036c4aa80f7d98a17eb4c61764f00562bd53`
-
-Exact contained ISO:
-- `Frames-0.9.98-v108-Physical-Input-Repair-r9-Rufus-UEFI.iso`
-- SHA-256 `afad163240b6db6d95a694235456ee8a1fdfb322805c6ce6b0d4c23df08b8a85`
 - size `18,733,056 bytes`
 - Rufus mode: ISO Image mode
-
-Certification status inside final artifact:
-- exact r9 candidate reused: PASS
-- VM USB stable input: PASS
-- VM PS2 stable input: PASS
-- VM PS2 cursor smoothness: PASS
+- USB stable input VM: PASS
+- standard PS2 stable input VM: PASS
+- quantitative 42-step standard PS2 cursor smoothness VM: PASS
 - read-only safety: PASS
-- physical touchpad smoothness: PENDING USER HARDWARE
-- physical USB full descriptor: PENDING USER HARDWARE
+
+The standard-PS2 smoothness gate is mandatory for future touchpad handoffs. It proves the reference parser/render path behaves smoothly under controlled QEMU input; it does NOT prove the user's physical touchpad protocol is decoded correctly.
+
+## Latest authoritative physical result — r9 on user's laptop: FAIL
+Exact physically tested r9 ISO:
+- `Frames-0.9.98-v108-Physical-Input-Repair-r9-Rufus-UEFI.iso`
+- SHA-256 `afad163240b6db6d95a694235456ee8a1fdfb322805c6ce6b0d4c23df08b8a85`
+
+Observed behavior:
+- built-in touchpad: cursor does not move at all, but telemetry changes continuously while the pad is moved;
+- external USB mouse: no visible behavior.
+
+Representative r9 physical telemetry from photo:
+- `USB H R P = 0, 0, 16`
+- `USB S T X E = 5, 8, 1, 1`
+- `PS2 E PK = 1, 0`
+- `P2 O A K ≈ 2208, 2208, 0`
+- `P2 R PH PK ≈ 2208, 0, 0`
+- `P2 SY R1 R2 ≈ 0, 4054, 241`
+- `P2 B0 B1 B2 = 16, 0, 0`
+- `SRC X Y = 0, 396, 290`
+
+Authoritative r9 touchpad conclusion:
+- physical i8042/AUX transport remains proven;
+- roughly 2208 AUX bytes reached Frames during the test;
+- r9 accepted zero motion packets and therefore emitted no pointer source (`SRC=0`);
+- cursor remained at the initial position;
+- the stricter standard-three-byte parser prevented random jumps but is incompatible with / unable to lock onto the user's actual touchpad stream;
+- this is a physical protocol/framing problem, not lack of touchpad electrical/transport activity.
+
+Authoritative r9 USB conclusion:
+- both displayed xHCI completion fields are `1`, i.e. success-class completion values in this exact diagnostic implementation;
+- Frames still remains at stage 5/class 0 and produces no HID reports;
+- current investigation therefore targets descriptor DMA/content/residual/settle handling after the successful address command rather than assuming the xHCI command itself failed.
+
+## Active physical-input repair — r10 hardware decode / descriptor diagnostics
+Primary patch:
+- `tools/ci/patch_v108_physical_input_r10_hwdecode.py`
+- created on `v108-physical-input-bringup`
+- exact input r9 source SHA `5b2384f8e128b1ec6922f34c14478918c3388179937c2000dd12135fefcf682c`
+- exact CI-produced r10 source SHA `b2dee4fc2c1ca3ad68d4428febf564a2143948ee797ea74ee532ac87b2c14ab6`
+
+### r10 touchpad changes
+r10 does not assume the laptop is definitely Elantech. It adds a guarded six-byte auto-detection path while preserving the known-good standard PS2 path.
+
+- rolling six-byte AUX window;
+- repeated-signature requirement before switching away from unknown/standard mode;
+- Elantech-v4-like status/head/motion frame recognizer based on six-byte signatures;
+- absolute X/Y extraction for recognized head packets;
+- absolute-to-bounded-relative conversion for the diagnostic cursor;
+- maximum converted step bounded at 40 px;
+- implausible absolute jumps above 512 units rejected;
+- standard three-byte PS2 remains fallback/reference behavior;
+- kernel-side decoder self-test (`ps2_elan4_selftest_v110`) is executed by input backend preparation;
+- expanded on-screen telemetry includes protocol mode and the full recent six-byte window:
+  - `P2 R PH PK`: PH protocol mode (`0` unknown, `1` standard PS2, `4` Elantech-v4-like lock in r10);
+  - `P2 A0 A1 A2` and `P2 B0 B1 B2`: recent six-byte frame/window;
+  - `SRC X Y`: accepted input source and cursor coordinates.
+
+This is a hypothesis-testing decoder. Do NOT claim the user's touchpad is Elantech until physical telemetry shows the r10 recognizer locking consistently and real cursor behavior is controllable.
+
+### r10 USB changes
+- retain r7/r9 EP0/address repair and descriptor retry logic;
+- add a bounded post-address settle delay before full descriptor transfer;
+- record xHCI transfer residual length at `xhci_state+576`;
+- expanded row `USB D L T C R`:
+  - D = transfer residual;
+  - L = descriptor length byte returned;
+  - T = descriptor type byte returned;
+  - C = configuration count;
+  - R = descriptor attempt count;
+- retain `USB S T X E` completion telemetry.
+
+Goal: if real hardware still stops at stage 5, the next photo can distinguish no DMA payload, short/residual transfer, malformed descriptor data, or later validation failure.
+
+## r10 VM build and source-run evidence
+Primary workflow:
+- `.github/workflows/frames-v108-physical-input-r10-rufus.yml`
+- authoritative source run `31960209876`
+- head commit `ada1040e7f1526c936ed0833d889759592383a04`
+
+Substantive results on the exact r10 candidate:
+- exact certified-v108 reconstruction through r10: PASS
+- destructive-write surface audit: PASS
+- build/package Rufus UEFI ISO: PASS
+- decoder-model/source seal: PASS
+- USB stable live-input visual gate: PASS
+- PS2 stable live-input visual gate: PASS
+- read-only NVMe sentinel gate: PASS
+
+The smoothness job in source run `31960209876` did NOT execute its test: its workspace order downloaded the candidate and then checkout deleted the `candidate/` directory. That job is an infrastructure failure only and is not accepted as smoothness evidence.
+
+Exact source-run candidate:
+- candidate artifact ID `9267039522`
+- candidate artifact ZIP SHA-256 `5cf2980143140c689ea7b8d38aae39190db46c17a6aedaac1211219b8f0a722b`
+- exact ISO SHA-256 `ef9d3cd24724acf4cf3bfb75708393c1b8de3a2f5fefeba7e0281acda125cde7`
+- exact ISO size `18,745,344 bytes`
+
+Independent local check of source-run PS2 evidence:
+- `status=PASS`
+- initial cursor `396,290`
+- final cursor `400,292`
+- actual movement `+4,+2`
+- changed pixels outside telemetry `112`
+- idle changed pixels `0`
+- actual framebuffer inspected; desktop remains intact and cursor is singular/localized.
+
+## r10 quantitative smoothness final recert — PASS
+Workflow:
+- `.github/workflows/frames-v108-r10-smoothness-final-recert.yml`
+- creation commit `7578a3a44109e6b8a7908f4adbd5485b296df580`
+- run `31960415886`: PASS
+
+This workflow does NOT rebuild a different kernel/ISO. It downloads and hash-verifies the immutable source-run candidate artifact `9267039522`, verifies the existing source-run USB/PS2/decoder/read-only PASS evidence, reruns the 42-step PS2 smoothness test with the corrected checkout/download order, and seals the same exact ISO only if everything passes.
+
+Verified source evidence artifact:
+- ID `9267076216`
+- ZIP SHA-256 `5de5bdec6d15c91e166a1adf17014ec2a5f8fcb46cdbbf1bf5d5193e9ef3fa24`
+
+Smoothness recert artifact:
+- ID `9267089226`
+- ZIP SHA-256 `bbfbd5e8c1a3d3ef2584aa8a511ace744eaedf0be8212780e53dc4944ec52838`
+- exact ISO SHA inside smoothness evidence `ef9d3cd24724acf4cf3bfb75708393c1b8de3a2f5fefeba7e0281acda125cde7`
+- gate `ps2_cursor_smoothness_v1`: PASS
+- pre-input idle change: `0 px`
+- 42 requested steps all matched direction/magnitude;
+- 1-pixel micro steps remained exactly 1 px;
+- 3-pixel vertical steps remained exactly 3 px;
+- ramp `1,2,3,4,5` matched exactly in both directions;
+- maximum single-step jump `5 px`;
+- maximum cross-axis drift `0 px`;
+- final return error `0,0`;
+- post-test idle cursor remained stationary;
+- maximum changed pixels outside telemetry per step `115`.
+
+Independent local verification:
+- final artifact manifest: PASS after normalizing artifact-directory prefix;
+- smoothness evidence manifest: PASS after normalizing artifact-directory prefix;
+- exact contained ISO SHA/size independently recomputed and matched recorded identity.
+
+## Exact r10 physical-test artifact — NEXT AUTHORIZED BOOT
+Final recertified artifact:
+- name `Frames-v108-r10-Rufus-Final-Recertified`
+- artifact ID `9267091554`
+- artifact ZIP SHA-256 `19b535952b83a87e5bac67981e5e709a7fd4fc45c85ee6ca4444410a9e11218e`
+
+Exact contained ISO:
+- `Frames-0.9.98-v108-Physical-Input-Repair-r10-Rufus-UEFI.iso`
+- SHA-256 `ef9d3cd24724acf4cf3bfb75708393c1b8de3a2f5fefeba7e0281acda125cde7`
+- size `18,745,344 bytes`
+- Rufus mode: ISO Image mode
+
+Final certification record:
+- VM USB live input: PASS
+- VM PS2 live input: PASS
+- VM quantitative standard-PS2 cursor smoothness: PASS
+- r10 decoder model/selftest: PASS
+- read-only safety: PASS
+- physical touchpad: PENDING
+- physical USB: PENDING
 - physical destructive writes: BLOCKED
 
 ## Claim policy — touchpad
@@ -182,22 +243,24 @@ Do NOT call the touchpad physically fixed until BOTH are true:
 1. the exact candidate passes the GitHub quantitative smoothness gate; and
 2. the user's real laptop demonstrates controllable right/left/up/down movement without random jumps or idle drift.
 
-VM smoothness PASS proves the standard PS/2 parser/render path is mathematically smooth under controlled input. It does not prove the laptop's real touchpad protocol stream is normalized correctly.
+r10 satisfies condition 1 only. Condition 2 is still pending physical hardware.
 
-## Next physical test — r9c exact ISO
+## Next physical test — r10 exact ISO
 Use only ISO SHA:
-`afad163240b6db6d95a694235456ee8a1fdfb322805c6ce6b0d4c23df08b8a85`
+`ef9d3cd24724acf4cf3bfb75708393c1b8de3a2f5fefeba7e0281acda125cde7`
 
 Rufus: ISO Image mode.
 
 Test order:
 1. boot and wait for `INPUT V108 LIVE` panel;
-2. move touchpad slowly right, left, down and up;
-3. judge whether the visible cursor follows direction smoothly without random jumps;
-4. stop touching the pad for several seconds and confirm cursor does not wander;
-5. move external USB mouse;
-6. if USB still fails, photograph the `USB S T X E` row — `X` is now the transfer completion code for the full descriptor transfer and `E` remains the command completion code;
-7. if touchpad is still erratic, photograph `PS2 E PK`, `P2 O A K`, `P2 R PH PK`, `P2 SY R1 R2`, `P2 B0 B1 B2`, and `SRC X Y` after deliberate movement.
+2. do not move anything initially; photograph panel if practical;
+3. move touchpad slowly right, left, down and up;
+4. observe whether the visible cursor follows direction smoothly and whether `PH` changes to a stable protocol mode;
+5. stop touching the pad for several seconds and confirm cursor does not wander;
+6. photograph the expanded `P2 A0 A1 A2`, `P2 B0 B1 B2`, `P2 R PH PK`, and `SRC X Y` rows after touchpad movement;
+7. move external USB mouse;
+8. if USB still fails, photograph both `USB S T X E` and `USB D L T C R` rows;
+9. do not interpret VM PASS as physical PASS; physical hardware result remains authoritative.
 
 Physical destructive writes remain blocked.
 
