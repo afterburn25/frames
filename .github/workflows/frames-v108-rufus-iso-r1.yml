@@ -1,0 +1,269 @@
+name: Frames v108 Rufus-Compatible Physical Input ISO r1
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-physical-input-bringup ]
+    paths:
+      - '.github/workflows/frames-v108-rufus-iso-r1.yml'
+
+permissions:
+  contents: read
+
+env:
+  KIT_SHA: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
+  SRC_SHA: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
+  BASE_MAIN_SHA: ffc5721eca68844357dbdca63b0edf266e7e210f9d162eecde8cae0067f210a8
+  COMBINED_MAIN_SHA: 270c76a79ab56fe275acf87ec0e5cabdf4b1bca5bff15bb0e6ef89a7bafad7e8
+  EXPECTED_IMG_SHA: 6918d228725f0cb3185e17f974119b4abf8c8413af1173369fc8d0594f30bab7
+  ISO_NAME: Frames-0.9.98-v108-Physical-Input-Test-r2-Rufus-UEFI.iso
+
+jobs:
+  build-iso:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-physical-input-bringup
+
+      - name: Install build and ISO tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 unzip zip mtools dosfstools gdisk xorriso
+
+      - name: Reconstruct exact v108 r2 input candidate
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/v108-kit" "$RUNNER_TEMP/v108-src" out
+          mkdir -p "$RUNNER_TEMP/v108-kit" "$RUNNER_TEMP/v108-src" out
+          K=Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip
+          test "$(sha256sum "$K" | awk '{print $1}')" = "$KIT_SHA"
+          unzip -q "$K" -d "$RUNNER_TEMP/v108-kit"
+          Z="$RUNNER_TEMP/v108-kit/Frames-0.9.98-Source-v108.zip"
+          test "$(sha256sum "$Z" | awk '{print $1}')" = "$SRC_SHA"
+          unzip -q "$Z" -d "$RUNNER_TEMP/v108-src"
+          F="$RUNNER_TEMP/v108-src/Frames-0.9.98"
+          test "$(sha256sum "$F/kernel/main.nx" | awk '{print $1}')" = "$BASE_MAIN_SHA"
+          python3 tools/ci/patch_v108_live_input_common.py "$F/kernel/main.nx"
+          python3 tools/ci/patch_v108_usb_mouse_live.py "$F/kernel/main.nx"
+          python3 tools/ci/patch_v108_ps2_touchpad_live.py "$F/kernel/main.nx"
+          test "$(sha256sum "$F/kernel/main.nx" | awk '{print $1}')" = "$COMBINED_MAIN_SHA"
+          python3 tools/ci/patch_v108_input_telemetry_overlay.py "$F/kernel/main.nx"
+          python3 tools/ci/patch_v108_input_usbboot_gate_decouple.py "$F/kernel/main.nx"
+          echo "FRAMES_DIR=$F" >> "$GITHUB_ENV"
+
+      - name: Build exact deterministic raw candidate
+        run: |
+          set -euo pipefail
+          find "$FRAMES_DIR" -type f -name '*.sh' -exec chmod +x {} +
+          find "$FRAMES_DIR/toolchain" -type f -name nexus -exec chmod +x {} +
+          cd "$FRAMES_DIR"
+          ./tools/build.sh
+          python3 tools/make_esp.py
+          python3 tools/sdk_selftest.py
+          python3 tools/make_desktop_preview_image.py
+          python3 tools/verify_desktop_preview_image.py --image build/Frames-0.9.98-Desktop-Preview.img --require-pass
+          python3 tools/verify_release.py
+          IMG=build/Frames-0.9.98-Desktop-Preview.img
+          actual="$(sha256sum "$IMG" | awk '{print $1}')"
+          test "$actual" = "$EXPECTED_IMG_SHA"
+          test "$(stat -c '%s' "$IMG")" = 67108864
+          cp "$IMG" "$GITHUB_WORKSPACE/out/certified-r2.img"
+          printf '%s  certified-r2.img\n' "$actual" > "$GITHUB_WORKSPACE/out/RAW-IMAGE-SHA256.txt"
+
+      - name: Extract exact EFI System Partition
+        run: |
+          set -euo pipefail
+          IMG=out/certified-r2.img
+          sgdisk -p "$IMG" | tee out/GPT-LAYOUT.txt
+          FIRST="$(sgdisk -i 1 "$IMG" | awk -F: '/First sector/ {gsub(/ /,"",$2); split($2,a,"("); print a[1]}')"
+          LAST="$(sgdisk -i 1 "$IMG" | awk -F: '/Last sector/ {gsub(/ /,"",$2); split($2,a,"("); print a[1]}')"
+          test -n "$FIRST" -a -n "$LAST"
+          COUNT=$((LAST-FIRST+1))
+          dd if="$IMG" of=out/efiboot.img bs=512 skip="$FIRST" count="$COUNT" status=none
+          fsck.fat -vn out/efiboot.img | tee out/ESP-FSCK.txt
+          mdir -i out/efiboot.img ::/EFI/BOOT | tee out/ESP-EFI-BOOT.txt
+          mdir -i out/efiboot.img ::/FRAMES | tee out/ESP-FRAMES.txt
+          mtype -i out/efiboot.img ::/FRAMES/FramesKernel.fkrn >/dev/null
+          mtype -i out/efiboot.img ::/EFI/BOOT/BOOTX64.EFI >/dev/null
+          sha256sum out/efiboot.img > out/ESP-SHA256.txt
+
+      - name: Build standard Rufus-compatible UEFI ISO
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/rufus-iso-root"
+          rm -rf "$ROOT" && mkdir -p "$ROOT"
+          cp out/efiboot.img "$ROOT/efiboot.img"
+          mcopy -s -i out/efiboot.img '::/EFI' "$ROOT/"
+          mcopy -s -i out/efiboot.img '::/FRAMES' "$ROOT/"
+          cat > "$ROOT/README.TXT" <<'EOF'
+          Frames 0.9.98 v108 r2 Physical Input Diagnostic
+          Rufus-compatible UEFI ISO.
+          Physical destructive writes are NOT certified.
+          Use only for the authorized read-only hardware input test.
+          EOF
+          test -f "$ROOT/EFI/BOOT/BOOTX64.EFI"
+          test -f "$ROOT/FRAMES/FramesKernel.fkrn"
+          xorriso -as mkisofs \
+            -R -J -V 'FRAMES_V108_R2' \
+            -eltorito-alt-boot \
+            -e efiboot.img \
+            -no-emul-boot \
+            -o "out/$ISO_NAME" \
+            "$ROOT"
+          test -s "out/$ISO_NAME"
+          xorriso -indev "out/$ISO_NAME" -report_el_torito plain > out/ELTORITO-REPORT.txt 2>&1
+          grep -qi 'EFI' out/ELTORITO-REPORT.txt
+          xorriso -indev "out/$ISO_NAME" -find /EFI/BOOT/BOOTX64.EFI -print > out/ISO-EFI-PROOF.txt 2>&1
+          xorriso -indev "out/$ISO_NAME" -find /FRAMES/FramesKernel.fkrn -print > out/ISO-KERNEL-PROOF.txt 2>&1
+          grep -q '/EFI/BOOT/BOOTX64.EFI' out/ISO-EFI-PROOF.txt
+          grep -q '/FRAMES/FramesKernel.fkrn' out/ISO-KERNEL-PROOF.txt
+          sha256sum "out/$ISO_NAME" | tee out/ISO-SHA256.txt
+          stat -c '%s' "out/$ISO_NAME" | tee out/ISO-SIZE.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-Rufus-ISO-r1-Candidate
+          path: out/**
+          if-no-files-found: error
+          retention-days: 30
+
+  iso-live-input:
+    needs: build-iso
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [usb, ps2]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-Rufus-ISO-r1-Candidate
+          path: candidate
+
+      - name: Install QEMU/OVMF
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf python3
+          code="$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE.fd' \) | head -n1)"
+          test -n "$code"
+          echo "OVMF_CODE=$code" >> "$GITHUB_ENV"
+
+      - name: Boot exact ISO and prove live ${{ matrix.lane }} input
+        run: |
+          set -euo pipefail
+          OUT="iso-${{ matrix.lane }}"; mkdir -p "$OUT"
+          ISO="candidate/$ISO_NAME"; test -s "$ISO"
+          python3 - "$OVMF_CODE" "$ISO" "$OUT" '${{ matrix.lane }}' <<'PY'
+          import json,pathlib,socket,subprocess,sys,time
+          ovmf,iso,out,lane=sys.argv[1:]
+          out=pathlib.Path(out); qmp=out/'qmp.sock'; serial=out/'serial.log'; stderr=out/'qemu.stderr'
+          cmd=['qemu-system-x86_64','-machine','q35','-m','768M','-smp','2','-cpu','max','-accel','tcg,thread=single','-display','none','-no-reboot','-no-shutdown','-nic','none','-serial',f'file:{serial}','-qmp',f'unix:{qmp},server=on,wait=off','-drive',f'if=pflash,format=raw,readonly=on,file={ovmf}','-cdrom',iso,'-boot','d']
+          if lane=='usb': cmd += ['-device','qemu-xhci,id=xhci','-device','usb-mouse,bus=xhci.0,id=usbmouse']
+          (out/'qemu-command.json').write_text(json.dumps(cmd,indent=2)+'\n')
+          ef=stderr.open('wb'); p=subprocess.Popen(cmd,stdout=subprocess.DEVNULL,stderr=ef)
+          try:
+              deadline=time.time()+25
+              while time.time()<deadline and not qmp.exists():
+                  if p.poll() is not None: raise RuntimeError(f'qemu exited {p.returncode}')
+                  time.sleep(.05)
+              if not qmp.exists(): raise RuntimeError('qmp timeout')
+              s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect(str(qmp)); f=s.makefile('rwb',buffering=0); json.loads(f.readline())
+              def call(name,args=None):
+                  o={'execute':name}
+                  if args is not None:o['arguments']=args
+                  f.write((json.dumps(o)+'\n').encode())
+                  while True:
+                      r=json.loads(f.readline())
+                      if 'return' in r:return r['return']
+                      if 'error' in r:raise RuntimeError(r['error'])
+              call('qmp_capabilities')
+              mice=call('query-mice'); (out/'query-mice.json').write_text(json.dumps(mice,indent=2)+'\n')
+              if lane=='usb': idx=next((m['index'] for m in mice if ('hid' in m['name'].lower() or 'usb' in m['name'].lower()) and 'ps/2' not in m['name'].lower()),None)
+              else: idx=next((m['index'] for m in mice if 'ps/2' in m['name'].lower() or 'ps2' in m['name'].lower()),None)
+              if idx is None: raise RuntimeError(f'{lane} frontend missing: {mice}')
+              call('human-monitor-command',{'command-line':f'mouse_set {idx}'})
+              deadline=time.time()+90
+              while time.time()<deadline:
+                  txt=serial.read_text(errors='ignore') if serial.exists() else ''
+                  if 'FRAMES_V108_INPUT_TEST_RUNTIME_READY' in txt and 'FRAMES_V108_INPUT_TELEMETRY_OK' in txt: break
+                  if p.poll() is not None: raise RuntimeError('qemu stopped before runtime ready')
+                  time.sleep(.2)
+              else: raise RuntimeError('runtime readiness timeout')
+              before=out/'BEFORE.ppm'; call('screendump',{'filename':str(before)})
+              required=['FRAMES_V108_USB_LIVE_REPORT_OK','FRAMES_V108_USB_GUI_CURSOR_OK'] if lane=='usb' else ['FRAMES_V108_PS2_ENABLE_OK','FRAMES_V108_PS2_PACKET_OK','FRAMES_V108_PS2_GUI_CURSOR_OK']
+              ok=False
+              for _ in range(80):
+                  call('input-send-event',{'events':[{'type':'rel','data':{'axis':'x','value':8}},{'type':'rel','data':{'axis':'y','value':4}}]})
+                  time.sleep(.1)
+                  txt=serial.read_text(errors='ignore') if serial.exists() else ''
+                  if all(x in txt for x in required): ok=True; break
+              after=out/'AFTER.ppm'; call('screendump',{'filename':str(after)})
+              a=before.read_bytes(); b=after.read_bytes(); changed=sum(x!=y for x,y in zip(a,b))
+              result={'status':'PASS' if ok and changed>20 else 'FAIL','lane':lane,'booted_from_exact_iso':True,'runtime_markers_ok':ok,'changed_bytes':changed,'frontend_index':idx}
+              (out/'RESULT.json').write_text(json.dumps(result,indent=2)+'\n')
+              print(json.dumps(result,indent=2))
+              if result['status']!='PASS': raise SystemExit(1)
+              call('quit')
+          finally:
+              try:p.wait(timeout=5)
+              except: p.kill(); p.wait()
+          PY
+          find "$OUT" -type s -delete || true
+          sha256sum "$OUT"/* > "$OUT/SHA256SUMS.txt"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Frames-v108-Rufus-ISO-r1-${{ matrix.lane }}-Evidence
+          path: iso-${{ matrix.lane }}/**
+          if-no-files-found: error
+          retention-days: 30
+
+  final:
+    needs: [build-iso, iso-live-input]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-Rufus-ISO-r1-Candidate
+          path: candidate
+      - name: Seal Rufus-compatible physical test ISO
+        run: |
+          set -euo pipefail
+          mkdir -p final
+          ISO="candidate/$ISO_NAME"
+          test -s "$ISO"
+          cp "$ISO" final/
+          cp candidate/ISO-SHA256.txt final/
+          cp candidate/ISO-SIZE.txt final/
+          cp candidate/ELTORITO-REPORT.txt final/
+          cat > final/FINAL-RUFUS-ISO-CERTIFICATION.json <<EOF
+          {
+            "status": "PASS",
+            "profile": "frames-0.9.98-v108-r2-rufus-uefi-iso-r1",
+            "base_raw_image_sha256": "$EXPECTED_IMG_SHA",
+            "rufus_compatible_uefi_iso": true,
+            "uefi_el_torito": true,
+            "iso_level_efi_boot_tree": true,
+            "iso_level_frames_tree": true,
+            "qemu_iso_usb_live_input": true,
+            "qemu_iso_ps2_live_input": true,
+            "physical_boot_test_allowed": true,
+            "physical_hardware_verified": false,
+            "physical_destructive_writes_certified": false,
+            "promotion_allowed": false,
+            "recommended_rufus_mode": "ISO Image mode"
+          }
+          EOF
+          sha256sum final/* > final/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-Rufus-UEFI-ISO-r1-Final
+          path: final/**
+          if-no-files-found: error
+          retention-days: 30
