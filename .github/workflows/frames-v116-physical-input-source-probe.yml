@@ -56,6 +56,7 @@ jobs:
         run: |
           set -euo pipefail
           OUT="$GITHUB_WORKSPACE/input-probe"
+          python3 bootux/patch_v108_uefi_approved_splash.py "$S/boot/uefi/frames_boot.c" | tee "$OUT/SPLASH-PATCH.log"
           python3 bootux/patch_integrated_gui_physical_test_policy.py "$S/boot/uefi/frames_boot.c" "$S/kernel/main.nx" | tee "$OUT/GUI-TEST-POLICY.log"
           python3 bootux/patch_full_interactive_desktop_gui.py "$S/kernel/main.nx" | tee "$OUT/FULL-GUI-PATCH.log"
           python3 bootux/patch_full_gui_render_return_fix.py "$S/kernel/main.nx" | tee "$OUT/FULL-GUI-RENDER-FIX.log"
@@ -68,23 +69,22 @@ jobs:
           OUT="$GITHUB_WORKSPACE/input-probe"
           python3 - "$S/kernel/main.nx" "$OUT/INPUT-SOURCE-PROBE.txt" "$OUT/INPUT-PROBE.json" <<'PY'
           from pathlib import Path
-          import json,re,sys,hashlib
+          import json,sys,hashlib
           src=Path(sys.argv[1]); out=Path(sys.argv[2]); jout=Path(sys.argv[3])
-          text=src.read_text()
-          lines=text.splitlines()
+          text=src.read_text(); lines=text.splitlines()
           terms=[
             'xhci_configure_boot_hid','xhci_read_first_hid_report','input_decode_boot_hid',
             'ps2_poll_fallback','pointer_diag_apply_relative','generic_pointer','pointer_core',
             'gui_input','desktop_draw_cursor','xhci','usb_hid','hid_report','pointer',
-            'touch','i2c','absolute','digitizer','tablet'
+            'touch','i2c','absolute','digitizer','tablet','ps2','aux','mouse'
           ]
           sections=[]; counts={}
           for term in terms:
             hits=[i for i,l in enumerate(lines) if term.lower() in l.lower()]
             counts[term]=len(hits)
             sections.append(f'===== {term} hits={len(hits)} =====')
-            for i in hits[:20]:
-              a=max(0,i-4); b=min(len(lines),i+7)
+            for i in hits[:30]:
+              a=max(0,i-5); b=min(len(lines),i+9)
               sections.append(f'--- lines {a+1}-{b} ---')
               sections.extend(f'{n+1:06d}: {lines[n]}' for n in range(a,b))
           old1='if usb_hid_found != 0 { usb_hid_configured = xhci_configure_boot_hid(xhci_state,phys_state); if usb_hid_configured != 0 { usb_hid_report_ready = xhci_read_first_hid_report(xhci_state,phys_state); } }'
@@ -98,10 +98,8 @@ jobs:
             'r46_oneoff_decode_site':text.count(new2)
           }
           result={'source_sha256':hashlib.sha256(src.read_bytes()).hexdigest(),'term_counts':counts,'r46_handoff_sites':r46}
-          sections.append('===== R46 HANDOFF SITE SUMMARY =====')
-          sections.append(json.dumps(r46,indent=2))
-          out.write_text('\n'.join(sections)+'\n')
-          jout.write_text(json.dumps(result,indent=2)+'\n')
+          sections.append('===== R46 HANDOFF SITE SUMMARY ====='); sections.append(json.dumps(r46,indent=2))
+          out.write_text('\n'.join(sections)+'\n'); jout.write_text(json.dumps(result,indent=2)+'\n')
           print(json.dumps(result,indent=2))
           PY
 
