@@ -1,0 +1,146 @@
+name: Frames v108 USB Live Input Certification r2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-physical-input-bringup ]
+    paths:
+      - '.github/workflows/frames-v108-usb-live-input-cert-r2.yml'
+      - 'tools/ci/patch_v108_live_input_common.py'
+      - 'tools/ci/patch_v108_usb_mouse_live.py'
+
+permissions:
+  contents: read
+
+env:
+  KIT_SHA: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
+  SRC_SHA: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
+  BASE_MAIN_SHA: ffc5721eca68844357dbdca63b0edf266e7e210f9d162eecde8cae0067f210a8
+
+jobs:
+  usb-live:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-physical-input-bringup
+
+      - name: Install build and QEMU dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf clang lld python3 unzip zip mtools dosfstools
+          code="$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE.fd' \) | head -n1)"
+          test -n "$code"
+          echo "OVMF_CODE=$code" >> "$GITHUB_ENV"
+
+      - name: Reconstruct exact certified v108 and apply USB overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/k" "$RUNNER_TEMP/s" usb-live-evidence
+          K=Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip
+          test "$(sha256sum "$K" | awk '{print $1}')" = "$KIT_SHA"
+          unzip -q "$K" -d "$RUNNER_TEMP/k"
+          Z="$RUNNER_TEMP/k/Frames-0.9.98-Source-v108.zip"
+          test "$(sha256sum "$Z" | awk '{print $1}')" = "$SRC_SHA"
+          unzip -q "$Z" -d "$RUNNER_TEMP/s"
+          F="$RUNNER_TEMP/s/Frames-0.9.98"
+          test "$(sha256sum "$F/kernel/main.nx" | awk '{print $1}')" = "$BASE_MAIN_SHA"
+          cp "$F/kernel/main.nx" usb-live-evidence/kernel-before.nx
+          python3 tools/ci/patch_v108_live_input_common.py "$F/kernel/main.nx" | tee usb-live-evidence/common-patch-sha.txt
+          python3 tools/ci/patch_v108_usb_mouse_live.py "$F/kernel/main.nx" | tee usb-live-evidence/usb-patch-sha.txt
+          cp "$F/kernel/main.nx" usb-live-evidence/kernel-after.nx
+          diff -u usb-live-evidence/kernel-before.nx usb-live-evidence/kernel-after.nx > usb-live-evidence/USB-LIVE.patch || true
+          grep -q 'fn xhci_reset_connected_port_from' "$F/kernel/main.nx"
+          grep -q 'serial_marker_v108_usb_live_report_ok' "$F/kernel/main.nx"
+          grep -q 'serial_marker_v108_usb_gui_cursor_ok' "$F/kernel/main.nx"
+          echo "FRAMES_DIR=$F" >> "$GITHUB_ENV"
+
+      - name: Build exact USB candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          find "$FRAMES_DIR" -type f -name '*.sh' -exec chmod +x {} +
+          find "$FRAMES_DIR/toolchain" -type f -name nexus -exec chmod +x {} +
+          cd "$FRAMES_DIR"
+          ./tools/build.sh
+          python3 tools/make_esp.py
+          python3 tools/sdk_selftest.py
+          python3 tools/make_desktop_preview_image.py
+          python3 tools/verify_desktop_preview_image.py --image build/Frames-0.9.98-Desktop-Preview.img --require-pass
+          python3 tools/verify_release.py
+          sha256sum build/Frames-0.9.98-Desktop-Preview.img > "$GITHUB_WORKSPACE/usb-live-evidence/IMAGE-SHA256.txt"
+
+      - name: Prove USB storage-before-mouse live report reaches GUI cursor
+        shell: bash
+        run: |
+          set -euo pipefail
+          truncate -s 8M "$RUNNER_TEMP/dummy-usb.img"
+          python3 - "$OVMF_CODE" "$FRAMES_DIR/build/Frames-0.9.98-Desktop-Preview.img" "$RUNNER_TEMP/dummy-usb.img" "$GITHUB_WORKSPACE/usb-live-evidence" <<'PY'
+          import json,pathlib,socket,subprocess,sys,time
+          ovmf,image,dummy,out=sys.argv[1:]
+          out=pathlib.Path(out); qmp=out/'qmp.sock'; serial=out/'serial.log'; stderr=out/'qemu.stderr'
+          cmd=['qemu-system-x86_64','-machine','q35','-m','768M','-smp','2','-cpu','max','-accel','tcg,thread=single','-display','none','-no-reboot','-no-shutdown','-nic','none','-serial',f'file:{serial}','-qmp',f'unix:{qmp},server=on,wait=off','-drive',f'if=pflash,format=raw,readonly=on,file={ovmf}','-drive',f'if=none,id=framesdisk,format=raw,file={image}','-device','nvme,serial=FRAMEV108,drive=framesdisk','-device','qemu-xhci,id=xhci','-drive',f'if=none,id=dummy,format=raw,file={dummy}','-device','usb-storage,drive=dummy,bus=xhci.0','-device','usb-mouse,bus=xhci.0,id=usbmouse']
+          (out/'qemu-command.json').write_text(json.dumps(cmd,indent=2)+'\n')
+          ef=stderr.open('wb'); p=subprocess.Popen(cmd,stdout=subprocess.DEVNULL,stderr=ef)
+          try:
+              deadline=time.time()+25
+              while time.time()<deadline and not qmp.exists():
+                  if p.poll() is not None: raise RuntimeError(f'qemu exited {p.returncode}')
+                  time.sleep(.05)
+              if not qmp.exists(): raise RuntimeError('qmp timeout')
+              s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect(str(qmp)); f=s.makefile('rwb',buffering=0); json.loads(f.readline())
+              def call(name,args=None):
+                  o={'execute':name}
+                  if args is not None: o['arguments']=args
+                  f.write((json.dumps(o)+'\n').encode())
+                  while True:
+                      r=json.loads(f.readline())
+                      if 'return' in r: return r['return']
+                      if 'error' in r: raise RuntimeError(r['error'])
+              call('qmp_capabilities')
+              mice=call('query-mice'); (out/'query-mice.json').write_text(json.dumps(mice,indent=2)+'\n')
+              usb_index=next((m.get('index') for m in mice if 'usb' in m.get('name','').lower()),None)
+              if usb_index is not None: call('human-monitor-command',{'command-line':f'mouse_set {usb_index}'})
+              deadline=time.time()+75
+              while time.time()<deadline:
+                  txt=serial.read_text(errors='ignore') if serial.exists() else ''
+                  if 'FRAMES_DESKTOP_PHASE12_OK' in txt or 'FRAMES_APPEARANCE_SYSTEM_OK' in txt: break
+                  if p.poll() is not None: raise RuntimeError('qemu stopped before desktop')
+                  time.sleep(.25)
+              before=out/'before.ppm'; call('screendump',{'filename':str(before)})
+              got=False
+              for _ in range(50):
+                  call('input-send-event',{'events':[{'type':'rel','data':{'axis':'x','value':6}},{'type':'rel','data':{'axis':'y','value':3}}]})
+                  time.sleep(.12)
+                  txt=serial.read_text(errors='ignore') if serial.exists() else ''
+                  if 'FRAMES_V108_USB_LIVE_REPORT_OK' in txt and 'FRAMES_V108_USB_GUI_CURSOR_OK' in txt:
+                      got=True; break
+              after=out/'after.ppm'; call('screendump',{'filename':str(after)})
+              a=before.read_bytes(); b=after.read_bytes(); changed=sum(x!=y for x,y in zip(a,b))
+              result={'status':'PASS' if got and changed>20 else 'FAIL','markers_ok':got,'changed_bytes':changed,'usb_mouse_index':usb_index}
+              (out/'USB-LIVE-RESULT.json').write_text(json.dumps(result,indent=2)+'\n'); print(json.dumps(result,indent=2))
+              if result['status']!='PASS': raise SystemExit(1)
+              call('quit')
+          finally:
+              try: p.wait(timeout=5)
+              except: p.kill(); p.wait()
+          PY
+
+      - name: Seal USB evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum usb-live-evidence/* > usb-live-evidence/SHA256SUMS.txt || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Frames-v108-USB-Live-Input-Evidence-r2
+          path: usb-live-evidence/**
+          if-no-files-found: error
+          retention-days: 30
