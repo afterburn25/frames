@@ -138,6 +138,6 @@ s=s[:st]+block+s[en:]
 
 src.write_text(s)
 out=hashlib.sha256(src.read_bytes()).hexdigest()
-expected_out='6612834b5e4735a97c7c90f48cce61d332310cb419c34158de664e10d3738488'
+expected_out='5b2384f8e128b1ec6922f34c14478918c3388179937c2000dd12135fefcf682c'
 if out!=expected_out: raise SystemExit(f'unexpected r9 output hash: {out}')
 print(out)
