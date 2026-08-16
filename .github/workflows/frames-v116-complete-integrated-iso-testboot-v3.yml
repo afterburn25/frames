@@ -132,6 +132,8 @@ jobs:
           sha256sum "$OUT" | tee "$E/ISO-SHA256.txt"
           xorriso -indev "$OUT" -report_el_torito plain > "$E/EL-TORITO-REPORT.txt" 2>&1
           xorriso -indev "$OUT" -find / -maxdepth 3 -type f -exec lsdl > "$E/ISO-CONTENTS.txt" 2>&1
+          grep -q 'UEFI' "$E/EL-TORITO-REPORT.txt"
+          grep -q '/EFI/efiboot.img' "$E/EL-TORITO-REPORT.txt"
 
       - name: Locate OVMF firmware
         run: |
@@ -155,12 +157,22 @@ jobs:
           RC=$?
           set -e
           printf 'qemu_rc=%s\n' "$RC" > "$E/QEMU-ISO-BOOT.txt"
+          if [ "$RC" -ne 0 ] && [ "$RC" -ne 124 ]; then
+            exit "$RC"
+          fi
           test -s "$SERIAL"
-          grep -q 'FRAMES_USB_MIGRATION_GATE_V9_OK' "$SERIAL"
-          grep -q 'FRAMES_INPUT_MIGRATION_GATE_V8_OK' "$SERIAL"
-          grep -q 'FRAMES_CONCURRENCY_GATE_V7_OK' "$SERIAL"
-          grep -q 'FRAMES_HAL_RUNTIME_GATE_V6_OK' "$SERIAL"
-          grep -q 'FRAMES_SCHEDULER_SUSTAINED' "$SERIAL"
+          ! grep -q 'failed to load Boot0001' "$SERIAL"
+          grep -q 'BdsDxe: starting Boot0001' "$SERIAL"
+          grep -q 'FRAMES_KERNEL_START' "$SERIAL"
+          grep -q 'FRAMES_DESKTOP_POLICY_OK' "$SERIAL"
+          grep -q 'FRAMES_HAL_RUNTIME_V6_OK' "$SERIAL"
+          grep -q 'FRAMES_CONCURRENCY_RUNTIME_V7_OK' "$SERIAL"
+          grep -q 'FRAMES_UNIFIED_INPUT_RUNTIME_V8_OK' "$SERIAL"
+          grep -q 'FRAMES_INPUT_MIGRATION_SNAPSHOT_V8_OK' "$SERIAL"
+          grep -q 'FRAMES_USB_MIGRATION_RUNTIME_V9_OK' "$SERIAL"
+          grep -q 'FRAMES_PRE1_SNAPSHOT_READY' "$SERIAL"
+          grep -E 'BdsDxe: starting Boot0001|FRAMES_(KERNEL_START|DESKTOP_POLICY_OK|HAL_RUNTIME_V6_OK|CONCURRENCY_RUNTIME_V7_OK|UNIFIED_INPUT_RUNTIME_V8_OK|INPUT_MIGRATION_SNAPSHOT_V8_OK|USB_MIGRATION_RUNTIME_V9_OK|PRE1_SNAPSHOT_READY)' "$SERIAL" > "$E/ISO-RUNTIME-MARKERS.txt"
+          test -s "$E/ISO-RUNTIME-MARKERS.txt"
 
       - name: Final ISO test gate
         run: |
@@ -171,13 +183,19 @@ jobs:
           test -s "$E/EFI-FAT-FRAMES-AFTER.txt"
           test -s "$E/EL-TORITO-REPORT.txt"
           test -s "$E/ISO-BOOT-SERIAL.log"
+          test -s "$E/ISO-RUNTIME-MARKERS.txt"
           grep -qi 'DESKTOP' "$E/EFI-FAT-FRAMES-AFTER.txt"
-          grep -q 'FRAMES_USB_MIGRATION_GATE_V9_OK' "$E/ISO-BOOT-SERIAL.log"
-          grep -q 'FRAMES_INPUT_MIGRATION_GATE_V8_OK' "$E/ISO-BOOT-SERIAL.log"
-          grep -q 'FRAMES_CONCURRENCY_GATE_V7_OK' "$E/ISO-BOOT-SERIAL.log"
-          grep -q 'FRAMES_HAL_RUNTIME_GATE_V6_OK' "$E/ISO-BOOT-SERIAL.log"
-          grep -q 'FRAMES_SCHEDULER_SUSTAINED' "$E/ISO-BOOT-SERIAL.log"
-          printf '{"status":"PASS","base":"Frames 0.9.106 v116 certified","packaging_only":true,"format":"UEFI El Torito ISO with extracted FAT ESP","gui_payload":true}\n' > "$E/FINAL-ISO-TESTBOOT.json"
+          grep -q 'UEFI' "$E/EL-TORITO-REPORT.txt"
+          grep -q '/EFI/efiboot.img' "$E/EL-TORITO-REPORT.txt"
+          ! grep -q 'failed to load Boot0001' "$E/ISO-BOOT-SERIAL.log"
+          grep -q 'FRAMES_KERNEL_START' "$E/ISO-BOOT-SERIAL.log"
+          grep -q 'FRAMES_HAL_RUNTIME_V6_OK' "$E/ISO-BOOT-SERIAL.log"
+          grep -q 'FRAMES_CONCURRENCY_RUNTIME_V7_OK' "$E/ISO-BOOT-SERIAL.log"
+          grep -q 'FRAMES_UNIFIED_INPUT_RUNTIME_V8_OK' "$E/ISO-BOOT-SERIAL.log"
+          grep -q 'FRAMES_INPUT_MIGRATION_SNAPSHOT_V8_OK' "$E/ISO-BOOT-SERIAL.log"
+          grep -q 'FRAMES_USB_MIGRATION_RUNTIME_V9_OK' "$E/ISO-BOOT-SERIAL.log"
+          grep -q 'FRAMES_PRE1_SNAPSHOT_READY' "$E/ISO-BOOT-SERIAL.log"
+          printf '{"status":"PASS","base":"Frames 0.9.106 v116 certified","packaging_only":true,"format":"UEFI El Torito ISO with extracted FAT ESP","gui_payload":true,"runtime_boot_proof":true,"runtime_marker_profile":"physical-iso-v109-v116"}\n' > "$E/FINAL-ISO-TESTBOOT.json"
           cd "$E"
           find . -maxdepth 1 -type f ! -name EVIDENCE-FILES-SHA256.txt -print0 | sort -z | xargs -0 sha256sum > EVIDENCE-FILES-SHA256.txt
 
