@@ -1,0 +1,114 @@
+name: Frames v116 Physical Input Source Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ physical-input-bringup ]
+    paths:
+      - '.github/workflows/frames-v116-physical-input-source-probe.yml'
+
+permissions:
+  contents: read
+
+env:
+  V108_KIT_SHA256: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
+  V108_SOURCE_SHA256: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
+  V116_MAIN_SHA256: a8c569ca5c6b9facd85176a0fe97c8b369f9e4bbf50153f41a1b7777636a3ed5
+
+jobs:
+  probe-input-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: physical-input-bringup
+
+      - name: Reconstruct exact v116 architecture candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/input-probe"; mkdir -p "$OUT" "$RUNNER_TEMP/v108-kit" "$RUNNER_TEMP/v108-src"
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip"
+          test -s "$KIT"; test "$(sha256sum "$KIT" | awk '{print $1}')" = "$V108_KIT_SHA256"
+          unzip -q "$KIT" -d "$RUNNER_TEMP/v108-kit"
+          Z="$RUNNER_TEMP/v108-kit/Frames-0.9.98-Source-v108.zip"
+          test -s "$Z"; test "$(sha256sum "$Z" | awk '{print $1}')" = "$V108_SOURCE_SHA256"
+          unzip -q "$Z" -d "$RUNNER_TEMP/v108-src"
+          S="$RUNNER_TEMP/v108-src/Frames-0.9.98"
+          for p in \
+            architecture/v109/make_unified_device_architecture_v109.py \
+            architecture/v110/make_driver_runtime_v110.py \
+            architecture/v111/make_async_io_service_runtime_v111.py \
+            architecture/v112/make_device_service_integration_v112.py \
+            architecture/v113/make_driver_execution_hal_v113.py \
+            architecture/v114/make_kernel_concurrency_driver_scheduling_v114.py \
+            architecture/v115/make_driver_migration_unified_input_v115.py \
+            architecture/v116/make_usb_core_xhci_migration_v116.py; do
+              python3 "$p" "$S/kernel/main.nx"
+          done
+          test "$(sha256sum "$S/kernel/main.nx" | awk '{print $1}')" = "$V116_MAIN_SHA256"
+          echo "S=$S" >> "$GITHUB_ENV"
+          sha256sum "$S/kernel/main.nx" > "$OUT/V116-MAIN-SHA256.txt"
+
+      - name: Reconstruct exact full-GUI integration layer
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/input-probe"
+          python3 bootux/patch_integrated_gui_physical_test_policy.py "$S/boot/uefi/frames_boot.c" "$S/kernel/main.nx" | tee "$OUT/GUI-TEST-POLICY.log"
+          python3 bootux/patch_full_interactive_desktop_gui.py "$S/kernel/main.nx" | tee "$OUT/FULL-GUI-PATCH.log"
+          python3 bootux/patch_full_gui_render_return_fix.py "$S/kernel/main.nx" | tee "$OUT/FULL-GUI-RENDER-FIX.log"
+          sha256sum "$S/kernel/main.nx" > "$OUT/FULL-GUI-MAIN-SHA256.txt"
+
+      - name: Inspect live input chain and prior r46 handoff sites
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/input-probe"
+          python3 - "$S/kernel/main.nx" "$OUT/INPUT-SOURCE-PROBE.txt" "$OUT/INPUT-PROBE.json" <<'PY'
+          from pathlib import Path
+          import json,re,sys,hashlib
+          src=Path(sys.argv[1]); out=Path(sys.argv[2]); jout=Path(sys.argv[3])
+          text=src.read_text()
+          lines=text.splitlines()
+          terms=[
+            'xhci_configure_boot_hid','xhci_read_first_hid_report','input_decode_boot_hid',
+            'ps2_poll_fallback','pointer_diag_apply_relative','generic_pointer','pointer_core',
+            'gui_input','desktop_draw_cursor','xhci','usb_hid','hid_report','pointer',
+            'touch','i2c','absolute','digitizer','tablet'
+          ]
+          sections=[]; counts={}
+          for term in terms:
+            hits=[i for i,l in enumerate(lines) if term.lower() in l.lower()]
+            counts[term]=len(hits)
+            sections.append(f'===== {term} hits={len(hits)} =====')
+            for i in hits[:20]:
+              a=max(0,i-4); b=min(len(lines),i+7)
+              sections.append(f'--- lines {a+1}-{b} ---')
+              sections.extend(f'{n+1:06d}: {lines[n]}' for n in range(a,b))
+          old1='if usb_hid_found != 0 { usb_hid_configured = xhci_configure_boot_hid(xhci_state,phys_state); if usb_hid_configured != 0 { usb_hid_report_ready = xhci_read_first_hid_report(xhci_state,phys_state); } }'
+          new1='if usb_hid_found != 0 { usb_hid_configured = xhci_configure_boot_hid(xhci_state,phys_state); if usb_hid_configured != 0 { usb_hid_report_ready = 1; } }'
+          old2='if input_queue_ready != 0 { if usb_hid_report_ready != 0 { input_decode_ready = input_decode_boot_hid(xhci_state,input_state); } else { ps2_poll_fallback(input_state); } }'
+          new2='if input_queue_ready != 0 { if usb_hid_report_ready != 0 { input_decode_ready = 1; } else { ps2_poll_fallback(input_state); } }'
+          r46={
+            'old_first_report_site':text.count(old1),
+            'r46_first_report_site':text.count(new1),
+            'old_oneoff_decode_site':text.count(old2),
+            'r46_oneoff_decode_site':text.count(new2)
+          }
+          result={'source_sha256':hashlib.sha256(src.read_bytes()).hexdigest(),'term_counts':counts,'r46_handoff_sites':r46}
+          sections.append('===== R46 HANDOFF SITE SUMMARY =====')
+          sections.append(json.dumps(r46,indent=2))
+          out.write_text('\n'.join(sections)+'\n')
+          jout.write_text(json.dumps(result,indent=2)+'\n')
+          print(json.dumps(result,indent=2))
+          PY
+
+      - name: Upload input source probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v116-Full-GUI-Physical-Input-Source-Probe
+          path: input-probe/**
+          if-no-files-found: error
+          retention-days: 30
