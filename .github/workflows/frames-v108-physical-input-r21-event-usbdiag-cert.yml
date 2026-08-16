@@ -1,0 +1,224 @@
+name: Frames v108 Physical Input r21 Event Integrity + Frozen USB Diagnostics
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-usb-hub-topology-r1 ]
+    paths:
+      - '.github/workflows/frames-v108-physical-input-r21-event-usbdiag-cert.yml'
+      - 'tools/ci/patch_v108_physical_input_r21_event_usbdiag.py'
+      - 'tools/ci/qemu_r21_event_integrity_gate.py'
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SOURCE_RUN: '31978239901'
+  KIT_SHA: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
+  SRC_SHA: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
+  R20_SHA: 7dcb3529c0db43f51e824b15c441607d24c6a1cd7906639e695b8320a31bef3e
+  R21_SHA: 719437076c0a8f07a5f8ac5e13de0fb1d287323423828feb31888af9105c2de3
+  ISO_NAME: Frames-0.9.98-v108-Physical-Input-Repair-r21-Event-Integrity-USB-Frozen-Diag-Rufus-UEFI.iso
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: v108-usb-hub-topology-r1 }
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 unzip mtools dosfstools gdisk xorriso
+      - name: Fetch exact r20 candidate source
+        uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r20-Candidate
+          path: r20-candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: ${{ env.SOURCE_RUN }}
+      - name: Reconstruct exact source and apply r21
+        run: |
+          set -euo pipefail
+          test "$(sha256sum r20-candidate/evidence/kernel-r20.nx | awk '{print $1}')" = "$R20_SHA"
+          rm -rf "$RUNNER_TEMP/r21cert" evidence out payload
+          mkdir -p "$RUNNER_TEMP/r21cert/kit" "$RUNNER_TEMP/r21cert/src" evidence out payload
+          K=Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip
+          test "$(sha256sum "$K" | awk '{print $1}')" = "$KIT_SHA"
+          unzip -q "$K" -d "$RUNNER_TEMP/r21cert/kit"
+          Z="$RUNNER_TEMP/r21cert/kit/Frames-0.9.98-Source-v108.zip"
+          test "$(sha256sum "$Z" | awk '{print $1}')" = "$SRC_SHA"
+          unzip -q "$Z" -d "$RUNNER_TEMP/r21cert/src"
+          F="$RUNNER_TEMP/r21cert/src/Frames-0.9.98"
+          cp r20-candidate/evidence/kernel-r20.nx "$F/kernel/main.nx"
+          cp "$F/kernel/main.nx" evidence/kernel-r20.nx
+          python3 tools/ci/patch_v108_physical_input_r21_event_usbdiag.py "$F/kernel/main.nx" | tee evidence/R21-SHA.txt
+          test "$(sha256sum "$F/kernel/main.nx" | awk '{print $1}')" = "$R21_SHA"
+          cp "$F/kernel/main.nx" evidence/kernel-r21.nx
+          diff -u evidence/kernel-r20.nx evidence/kernel-r21.nx > evidence/R20-R21.patch || true
+          echo "F=$F" >> "$GITHUB_ENV"
+      - name: Audit physical write surface
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          d=Path('evidence/R20-R21.patch').read_text(errors='replace').lower()
+          bad=['nvme_write','storage_write','write10','write(10)','scsi_write','fat_write','block_write','destructive_write','physical_write_enable']
+          hits=[x for x in bad if x in d]
+          Path('evidence/WRITE-SURFACE.txt').write_text('status='+('PASS' if not hits else 'FAIL')+'\nhits='+','.join(hits)+'\n')
+          if hits: raise SystemExit(hits)
+          PY
+      - name: Build and package r21 Rufus ISO
+        run: |
+          set -euo pipefail
+          find "$F" -type f -name '*.sh' -exec chmod +x {} +
+          find "$F/toolchain" -type f -name nexus -exec chmod +x {} +
+          cd "$F"
+          ./tools/build.sh
+          python3 tools/make_esp.py
+          python3 tools/sdk_selftest.py
+          python3 tools/make_desktop_preview_image.py
+          python3 tools/verify_desktop_preview_image.py --image build/Frames-0.9.98-Desktop-Preview.img --require-pass
+          python3 tools/verify_release.py
+          cp build/Frames-0.9.98-Desktop-Preview.img "$GITHUB_WORKSPACE/out/raw.img"
+          cd "$GITHUB_WORKSPACE"
+          FIRST="$(sgdisk -i 1 out/raw.img | awk -F: '/First sector/{gsub(/ /,"",$2);split($2,a,"(");print a[1]}')"
+          LAST="$(sgdisk -i 1 out/raw.img | awk -F: '/Last sector/{gsub(/ /,"",$2);split($2,a,"(");print a[1]}')"
+          dd if=out/raw.img of=out/esp.img bs=512 skip="$FIRST" count=$((LAST-FIRST+1)) status=none
+          mcopy -s -i out/esp.img '::/EFI' payload/
+          mcopy -s -i out/esp.img '::/FRAMES' payload/
+          dd if=/dev/zero of=out/efiboot.img bs=1M count=16 status=none
+          mkfs.fat -F 16 -n FRAMESBOOT out/efiboot.img >/dev/null
+          mmd -i out/efiboot.img ::/EFI ::/EFI/BOOT ::/FRAMES
+          mcopy -i out/efiboot.img payload/EFI/BOOT/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
+          for f in payload/FRAMES/*; do mcopy -i out/efiboot.img "$f" ::/FRAMES/; done
+          ROOT="$RUNNER_TEMP/r21-root"; mkdir -p "$ROOT"
+          cp out/efiboot.img "$ROOT/"; cp -a payload/EFI payload/FRAMES "$ROOT/"
+          printf 'Frames v108 r21 physical input repair\nLocal context/drag backing restore + right packet filter + frozen Intel xHCI/EHCI diagnostics\nRufus ISO Image mode\nRead-only diagnostic only\n' > "$ROOT/README.TXT"
+          xorriso -as mkisofs -iso-level 3 -R -J -V FRAMES_V108_R21 -eltorito-alt-boot -e efiboot.img -no-emul-boot -o "out/$ISO_NAME" "$ROOT" >/dev/null 2>&1
+          sha256sum "out/$ISO_NAME" | tee evidence/ISO-SHA256.txt
+          stat -c '%s' "out/$ISO_NAME" | tee evidence/ISO-SIZE.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r21-Candidate
+          path: |
+            out/*.iso
+            evidence/**
+          if-no-files-found: error
+          retention-days: 30
+
+  gates:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [event-r21, usb-direct, usb-hub, usb-hub-multi, usb-multicontroller, usb-keyboard, ps2, smoothness, text-edit, focus-persistence, model, safety]
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: v108-usb-hub-topology-r1 }
+      - uses: actions/download-artifact@v4
+        with: { name: Frames-v108-r21-Candidate, path: candidate }
+      - name: Install runtime tools
+        if: matrix.lane != 'model'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf python3 python3-pil
+          O="$(find /usr/share/OVMF -type f \( -name OVMF_CODE_4M.fd -o -name OVMF_CODE.fd \) | head -n1)"
+          test -s "$O"; echo "OVMF=$O" >> "$GITHUB_ENV"
+      - name: Run ${{ matrix.lane }} gate
+        run: |
+          set -euo pipefail
+          mkdir -p gate
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"; test -s "$ISO"
+          EXPECT="$(awk '{print $1}' candidate/evidence/ISO-SHA256.txt)"; test "$(sha256sum "$ISO" | awk '{print $1}')" = "$EXPECT"
+          case '${{ matrix.lane }}' in
+            event-r21)
+              python3 tools/ci/qemu_r21_event_integrity_gate.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$EXPECT"; grep -q '"status": "PASS"' gate/R21-INTERACTION.json ;;
+            usb-direct)
+              python3 tools/ci/qemu_usb_hub_topology_gate_r3.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$EXPECT" --topology direct; grep -q '"status": "PASS"' gate/TOPOLOGY.json ;;
+            usb-hub)
+              python3 tools/ci/qemu_usb_hub_topology_gate_r3.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$EXPECT" --topology hub; grep -q '"status": "PASS"' gate/TOPOLOGY.json ;;
+            usb-hub-multi)
+              python3 tools/ci/qemu_usb_hub_multichild_gate_r17.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$EXPECT"; grep -q '"status": "PASS"' gate/MULTICHILD-R17.json ;;
+            usb-multicontroller)
+              python3 tools/ci/qemu_usb_multicontroller_gate_r16.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$EXPECT"; grep -q '"status": "PASS"' gate/USB-MULTICONTROLLER.json ;;
+            usb-keyboard)
+              python3 tools/ci/qemu_usb_keyboard_gate_r17.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$EXPECT"; grep -q '"status": "PASS"' gate/USB-KEYBOARD.json ;;
+            ps2)
+              python3 tools/ci/qemu_ps2_delivery_gate_r17.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$EXPECT"; grep -q '"status": "PASS"' gate/PS2-DELIVERY.json ;;
+            smoothness)
+              python3 tools/ci/qemu_ps2_cursor_smoothness_r18.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$EXPECT"; grep -q '"status": "PASS"' gate/SMOOTHNESS.json ;;
+            text-edit)
+              python3 tools/ci/qemu_text_edit_gate_r15.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$EXPECT"; grep -q '"status": "PASS"' gate/TEXT-EDIT.json ;;
+            focus-persistence)
+              python3 tools/ci/qemu_focus_persistence_gate_r17.py --ovmf "$OVMF" --iso "$ISO" --out gate --expected-iso-sha "$EXPECT"; grep -q '"status": "PASS"' gate/FOCUS-PERSISTENCE.json ;;
+            model)
+              K=candidate/evidence/kernel-r21.nx
+              test "$(sha256sum "$K" | awk '{print $1}')" = "$R21_SHA"
+              grep -Fq 'fn v108_surface_capture_v121' "$K"
+              grep -Fq 'fn v108_context_restore_present_v121' "$K"
+              grep -Fq 'fn v108_drag_commit_present_v121' "$K"
+              grep -Fq 'fn ps2_elan4_buttons_v111(input_state:u64,a:u64,typ:u64)' "$K"
+              grep -Fq 'volatile_write64(input_state+3808' "$K"
+              grep -Fq 'volatile_write64(xhci_state+1472' "$K"
+              grep -Fq '(410*65536)+544' "$K"
+              ! grep -Fq 'desktop_redraw=1' "$K" ;;
+            safety)
+              truncate -s 32M gate/sentinel.img; before="$(sha256sum gate/sentinel.img | awk '{print $1}')"
+              set +e
+              timeout 90 qemu-system-x86_64 -machine q35 -m 768M -smp 2 -cpu max -accel tcg,thread=single -display none -no-reboot -no-shutdown -nic none -serial file:gate/serial.log -drive if=pflash,format=raw,readonly=on,file="$OVMF" -cdrom "$ISO" -boot d -drive file=gate/sentinel.img,if=none,format=raw,readonly=on,id=s -device nvme,drive=s,serial=R21_SENTINEL >/dev/null 2>gate/stderr; rc=$?
+              set -e
+              after="$(sha256sum gate/sentinel.img | awk '{print $1}')"; test "$before" = "$after"; grep -q 'FRAMES_V108_INPUT_TEST_RUNTIME_READY' gate/serial.log
+              printf 'qemu_rc=%s\nbefore=%s\nafter=%s\n' "$rc" "$before" "$after" > gate/SAFETY.txt ;;
+          esac
+          echo PASS > gate/RESULT.status
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Frames-v108-r21-${{ matrix.lane }}-Evidence
+          path: gate/**
+          if-no-files-found: warn
+          retention-days: 30
+
+  final:
+    needs: [build, gates]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: Frames-v108-r21-Candidate, path: candidate }
+      - uses: actions/download-artifact@v4
+        with: { pattern: 'Frames-v108-r21-*-Evidence', path: gates, merge-multiple: false }
+      - name: Seal exact r21 physical candidate
+        run: |
+          set -euo pipefail
+          for lane in event-r21 usb-direct usb-hub usb-hub-multi usb-multicontroller usb-keyboard ps2 smoothness text-edit focus-persistence model safety; do test "$(cat gates/Frames-v108-r21-$lane-Evidence/RESULT.status)" = PASS; done
+          test "$(sha256sum candidate/evidence/kernel-r21.nx | awk '{print $1}')" = "$R21_SHA"
+          ISO="$(find candidate -name "$ISO_NAME" -type f -print -quit)"; test -s "$ISO"
+          EXPECT="$(awk '{print $1}' candidate/evidence/ISO-SHA256.txt)"; test "$(sha256sum "$ISO" | awk '{print $1}')" = "$EXPECT"
+          mkdir final; cp "$ISO" final/; sha256sum "$ISO" | tee final/ISO-SHA256.txt; stat -c '%s' "$ISO" | tee final/ISO-SIZE.txt
+          cat > final/CERTIFICATION.txt <<EOF
+          Frames v108 Physical Input Repair r21 — Event Integrity + Frozen USB Diagnostics
+          status=PASS_VM_PENDING_PHYSICAL
+          r20_physical_repaint=FAIL
+          r20_physical_context_phantom=FAIL
+          r20_physical_usb_mouse=FAIL
+          r20_physical_usb_keyboard=FAIL
+          vm_event_no_full_repaint=PASS
+          vm_context_local_present_restore=PASS
+          vm_drag_local_commit=PASS
+          vm_usb_regressions=PASS
+          vm_ps2_and_text=PASS
+          internal_media_readonly=PASS
+          physical_r21=PENDING
+          destructive_writes=BLOCKED
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r21-Rufus-Final
+          path: final/**
+          if-no-files-found: error
+          retention-days: 30
