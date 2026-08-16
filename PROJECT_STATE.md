@@ -14,87 +14,125 @@ Last updated: 2026-08-16
 - Evidence model: fail-closed, exact-source/hash based, QEMU/OVMF-first, then real-hardware confirmation for hardware claims.
 - Frames 1.0 is NOT promoted.
 
-## Freshly certified working foundation — Frames 0.9.98 v108 r9
+## Freshly certified foundation — Frames 0.9.98 v108 r9
 
-On 2026-08-16 the authoritative Frames 0.9.98 v108 r9 workflow was re-run from the unchanged sealed source and passed end-to-end.
+On 2026-08-16 the unchanged authoritative Frames 0.9.98 v108 r9 workflow was re-run and passed end-to-end.
 
-Authoritative workflow:
+Authoritative workflow / identity:
 - `.github/workflows/main.yml`
 - `Frames 0.9.98 Integrated Secure Online Services Certification v108 r9`
 - GitHub run `31831716862`, attempt 2: PASS
-- source commit used by the authoritative workflow: `7333a6670a38c9180e7d72c2a3df444409c36164`
+- workflow source commit `7333a6670a38c9180e7d72c2a3df444409c36164`
+- Frames `0.9.98`, source revision `v108-train`
+- runtime kit SHA-256 `61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a`
+- nested source SHA-256 `5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d`
+- exact certified `kernel/main.nx` SHA-256 `ffc5721eca68844357dbdca63b0edf266e7e210f9d162eecde8cae0067f210a8`
+- fresh evidence artifact ID `9257820749`
+- fresh evidence ZIP SHA-256 `b7589b75190186b3886e76e8e571bbee1d58884e8a5516338ba59c994427ce74`
+- final certification, manifest verification, runtime evidence, connected/secure-online desktop, Developer Preview/HelixFS/FAPP, SDK and final enforcement: PASS
 
-Exact sealed identity:
-- Frames version: `0.9.98`
-- source revision: `v108-train`
-- runtime kit: `Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip`
-- runtime kit SHA-256: `61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a`
-- nested source: `Frames-0.9.98-Source-v108.zip`
-- source SHA-256: `5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d`
-- workflow revision: `v108-integrated-secure-online-services-r9`
-- train: `0.9.92-0.9.98`
+## Active hardware branch
 
-Fresh rerun evidence:
-- artifact ID: `9257820749`
-- artifact name: `frames-0.9.98-integrated-secure-online-services-evidence-v108`
-- artifact ZIP SHA-256: `b7589b75190186b3886e76e8e571bbee1d58884e8a5516338ba59c994427ce74`
-- `FINAL-SECURE-ONLINE-SERVICES-CERTIFICATION.json`: PASS
-- `FINAL-MANIFEST-VERIFY.json`: PASS with zero mismatches
-- `RUNTIME-EVIDENCE.json`: PASS
-- integrated QEMU connected + secure-online desktop gate: PASS
-- Developer Preview / HelixFS / FAPP regression gate: PASS
-- SDK tooling regression gate: PASS
-- aggregate evidence and final enforcement: PASS
+`v108-physical-input-bringup`
 
-Important limits preserved by the v108 certification:
-- physical boot approved: false
-- physical media writes unlocked: false
-- live external TLS certified: false
-- certificate signature verification certified: false
-- physical network hardware certified: false
-- Frames 1.0 promoted: false
+All physical-input work is reconstructed directly from the exact certified v108 source. v109-v116 transforms are intentionally excluded from this bring-up train.
 
-## Later architecture work
+The old Pointer Diagnostics source kit is not accepted as a canonical base; provenance audit run `31926038311` proved it had unrelated source/toolchain drift. Only the required input fixes were re-applied to the sealed v108 source.
 
-Frames 0.9.106 / architecture v116 remains separately certified architecture work. It is NOT the foundation for the next physical input repair unless explicitly reintroduced later.
+## v108 live-input VM evidence
 
-The recent full-GUI v116 physical image is rejected as physical-interaction evidence because the user's real machine rendered the desktop but USB mouse and touch produced no visible movement.
+The v108 branch now contains a combined input repair derived directly from the certified source.
 
-Do not use that v116 GUI result to claim physical input functionality.
+Combined live-input certification:
+- workflow `.github/workflows/frames-v108-combined-live-input-cert.yml`
+- run `31926756188`: PASS
+- USB HID live report -> input path -> GUI cursor: VM PASS
+- PS/2 packet -> input path -> GUI cursor: VM PASS
 
-## Active milestone
+Physical removable-media candidate:
+- `Frames-0.9.98-v108-Physical-Input-Test-r2.img`
+- SHA-256 `6918d228725f0cb3185e17f974119b4abf8c8413af1173369fc8d0594f30bab7`
+- size `67,108,864 bytes`
+- source build/certification run `31927431251`: PASS
+- candidate artifact ID `9258264525`
+- candidate artifact ZIP SHA-256 `7cceea42332b665c0b3551e6d5f9c761f6950015fc2c244fae2c51f24a260710`
+- xHCI USB-storage boot + USB mouse live-input lane: PASS
+- xHCI USB-storage boot + PS/2 live-input lane: PASS
 
-**Physical Input Bring-Up from exact certified Frames 0.9.98 v108 r9**
+## Corrected visual input certification — PASS
 
-The user explicitly requested that input work restart only after automatically certifying through `0.9.98 v108`.
+The prior r3 visual workflow failed only because its telemetry-panel color threshold was too strict; live-input markers and framebuffer movement were already present. The verifier was corrected without changing the candidate image.
 
-Next input work must therefore reconstruct the exact sealed v108 source directly and must NOT apply v109-v116 transforms before the physical input problem is understood.
+Corrected certification:
+- workflow `.github/workflows/frames-v108-physical-input-visual-cert-r4.yml`
+- run `31927881454`: PASS
+- exact candidate SHA checked before each lane
+- USB lane: PASS, 1280x800, runtime markers present, 69 framebuffer pixels changed, desktop preserved
+- PS/2 lane: PASS, 1280x800, runtime markers present, 65 framebuffer pixels changed, desktop preserved
+- final artifact ID `9258388697`
+- final artifact ZIP SHA-256 `a7f5d267567099d903588ba051d3751f3180e453eb1ba403c1827fec0ae383ac`
+- `FINAL-VISUAL-CERTIFICATION.json`: PASS
 
-Work USB mouse and built-in touchpad in tandem:
+This is VM evidence only. It does not claim the user's physical mouse/touchpad works yet.
 
-1. identify the physical touchpad transport: PS/2-compatible, USB HID, I2C-HID/absolute, or other;
-2. USB/xHCI enumeration across multiple connected devices/ports;
-3. live HID report acquisition after boot;
-4. PS/2 AUX packet acquisition and phase synchronization where available;
-5. Generic Pointer/Core event generation;
-6. actual GUI cursor-coordinate change;
-7. pointer buttons;
-8. keyboard/focus only after pointer movement is proven;
-9. add I2C-HID/absolute touchpad support if the hardware proves that transport is required.
+## Physical Boot Safety Gate — PASS
 
-## Physical-input evidence standard
+A separate fail-closed gate now permits another **read-only diagnostic physical boot** of the exact candidate above.
 
-No marker based only on initialization/readiness/focus switching counts as live input proof.
+Workflow:
+- `.github/workflows/frames-v108-physical-boot-safety-gate.yml`
+- run `31927897926`: PASS
 
-Before another physical boot is requested, automated testing should prove as much of the following as possible:
-- actual emulated USB HID reports are received;
-- actual emulated PS/2 packets are received;
-- those reports/packets create Generic Pointer/Core events;
-- cursor coordinates actually change in the running GUI;
-- before/after framebuffer captures differ at the cursor location;
-- diagnostic telemetry can distinguish enumeration, report, decode, core-event and GUI-delivery failures on real hardware.
+Independent lanes:
+- UEFI/GPT/FAT removable-media structure: PASS
+- `/EFI/BOOT/BOOTX64.EFI` present and verified
+- `/FRAMES/FramesKernel.fkrn` present and verified
+- input-overlay write-surface audit: PASS, zero write-path hits
+- QEMU boot with the Frames USB forced read-only: PASS
+- QEMU boot with an internal NVMe sentinel also forced read-only: PASS
+- no read-only write errors observed
+- input diagnostic runtime reached while all guest-visible block devices were read-only
 
-Physical hardware remains the final authority for the laptop touchpad and USB mouse.
+Final safety artifact:
+- artifact ID `9258389041`
+- artifact ZIP SHA-256 `44909732424e1866344a4e70af1faf3be05b0ffb94df3ca34b20ec5c874e1b97`
+- `PHYSICAL-BOOT-SAFETY.json`: PASS
+- `physical_boot_test_allowed: true`
+- `physical_destructive_writes_certified: false`
+- `promotion_allowed: false`
+
+## Physical boot status
+
+**Read-only diagnostic physical boot: UNLOCKED for the exact v108 r2 image only.**
+
+This does NOT unlock installation, persistent writes, internal-disk modification, or release promotion.
+
+Physical hardware remains the final authority. The next physical test must use exact SHA-256:
+
+`6918d228725f0cb3185e17f974119b4abf8c8413af1173369fc8d0594f30bab7`
+
+Test order:
+1. boot the exact image in UEFI mode from sacrificial/removable USB;
+2. move the external USB mouse for 10-15 seconds without touching the built-in touchpad;
+3. observe whether the cursor moves and whether USB live-report / GUI-delivery telemetry changes;
+4. then move the built-in touchpad slowly right and down;
+5. observe whether the cursor moves and whether PS/2/AUX telemetry changes;
+6. photograph the diagnostic screen if either path fails.
+
+## Touchpad transport limitation
+
+Exact-v108 transport audit proved:
+- PS/2/AUX support exists and is the first built-in touchpad path being tested;
+- USB HID support exists;
+- I2C-HID / absolute digitizer / Precision Touchpad support is not implemented yet.
+
+Therefore a physical touchpad that exposes only I2C-HID may still fail even if the PS/2 VM lane passes. That result must trigger I2C-HID bring-up rather than being mislabeled as a working touchpad.
+
+## Later architecture / GUI work
+
+Frames 0.9.106 / architecture v116 remains separately certified architecture work, but it is not the current physical-input foundation.
+
+The earlier v116 GUI physical image is rejected as physical-interaction evidence because the real test machine rendered the desktop but produced no USB mouse or touch movement. Do not use that result to claim physical interactivity.
 
 ## Safety policy
 
@@ -105,8 +143,9 @@ Physical hardware remains the final authority for the laptop touchpad and USB mo
 
 ## Automatic progression
 
+- Run independent workflows/lanes in parallel whenever practical.
 - Failure -> diagnose -> repair -> rerun automatically.
-- Pass -> independently verify -> update this file -> continue to the next defined milestone automatically.
+- Pass -> independently verify -> update this file -> continue automatically.
 - Do not stop merely to report routine intermediate results.
 - Stop only where real physical hardware/user action is genuinely required or a safety boundary requires authorization.
 
