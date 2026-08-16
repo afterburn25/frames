@@ -91,7 +91,7 @@ def main():
             if moved[1] <= pos[1]: raise RuntimeError(f'cursor wrong direction while walking to textbox {pos}->{moved}')
             pos=moved
         result['textbox_hover_cursor']=list(pos); result['textbox_walk_steps']=step_index
-        hover=capture('HOVER')
+        capture('HOVER')
         if not result['ibeam']:
             for _ in range(60):
                 t=ser.read_text(errors='ignore') if ser.exists() else ''
@@ -101,8 +101,9 @@ def main():
 
         call('input-send-event',{'events':[{'type':'btn','data':{'down':True,'button':'left'}}]}); time.sleep(.08)
         call('input-send-event',{'events':[{'type':'btn','data':{'down':False,'button':'left'}}]}); time.sleep(.12)
-        # Exact editing proof: ABC -> Left -> Left -> Right -> Delete -> Backspace == A.
-        for key in ('a','b','c','left','left','right','delete','backspace'):
+        # Exact editing proof deliberately uses uppercase ABC because the in-kernel sequence
+        # marker validates final text == "A" after Left/Left/Right/Delete/Backspace.
+        for key in ('shift-a','shift-b','shift-c','left','left','right','delete','backspace'):
             hmp('sendkey '+key); time.sleep(.18)
         deadline=time.time()+6
         while time.time()<deadline:
