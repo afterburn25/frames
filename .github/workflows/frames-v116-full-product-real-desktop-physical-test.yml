@@ -81,6 +81,7 @@ jobs:
           python3 "$GITHUB_WORKSPACE/architecture/integration/enable_v72_desktop_policy.py" "$PRODUCT/boot/uefi/frames_boot.c" | tee "$E/PATCH-DESKTOP-POLICY.log"
           python3 "$GITHUB_WORKSPACE/architecture/integration/instrument_full_product_fapp_verifier.py" "$PRODUCT/boot/uefi/frames_boot.c" | tee "$E/PATCH-FAPP-VERIFIER.log"
           grep -n -A 120 'fapp_extract_verify' "$PRODUCT/boot/uefi/frames_boot.c" > "$E/FAPP-VERIFIER-AFTER.txt" || true
+          grep -q 'semantics=preserved' "$E/PATCH-FAPP-VERIFIER.log"
           python3 "$GITHUB_WORKSPACE/architecture/integration/decouple_v72_network_from_filesystem.py" "$PRODUCT/kernel/main.nx" | tee "$E/PATCH-NETWORK-GATE.log"
           python3 "$GITHUB_WORKSPACE/architecture/integration/instrument_v72_gui_app_host.py" "$PRODUCT/kernel/main.nx" | tee "$E/PATCH-GUI-APP-HOST.log"
           python3 "$GITHUB_WORKSPACE/architecture/integration/instrument_v72_file_manager.py" "$PRODUCT/kernel/main.nx" | tee "$E/PATCH-FILE-MANAGER.log"
