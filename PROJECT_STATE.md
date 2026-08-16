@@ -31,151 +31,111 @@ Active input branch: `v108-physical-input-bringup`.
 
 All current input work is reconstructed from the exact certified v108 source. v109-v116 transforms are intentionally excluded from this bring-up train.
 
-## Authoritative physical input result — FAIL
+## Authoritative physical input result — USB FAIL / PS2 TOUCHPAD INGRESS PROVEN
 
-The user's real laptop booted the previous v108 Rufus physical-input candidate successfully, but physical input failed.
+The user's real laptop booted the stable r6 Rufus diagnostic ISO and supplied three close-up telemetry photos: settled baseline, USB-mouse movement, and built-in-touchpad movement.
 
-Observed on real hardware:
-- external USB mouse: no cursor movement;
-- built-in touchpad: no cursor movement;
-- visible USB/PS2 input counters did not advance during normal movement;
-- moving the built-in touchpad repeatedly triggered framebuffer/screen refresh behavior;
-- therefore physical interactive input is NOT certified.
+### External USB mouse — FAIL before HID
 
-This physical result overrides prior QEMU input passes. Do not call USB mouse or touchpad physically working until a later real-machine test proves it.
+Baseline and USB-movement photos remained effectively unchanged:
+- `USB H R P = 0, 0, 16`
+- `USB S T C = 5, 8, 0, 0`
+- no USB live-report count increase;
+- no internal pointer-coordinate movement attributable to USB.
 
-The prior Rufus r4 candidate is superseded and must not be handed to the user again.
+Interpretation:
+- stage 5 means the first 8 bytes of the USB device descriptor were obtained;
+- 8 scan tries were exhausted;
+- device class remained unknown (`0`) because enumeration never reached the full-descriptor/HID-discovery stage;
+- therefore the immediate USB blocker is the xHCI transition after descriptor-8, before full device descriptor/HID discovery.
 
-## Discovered VM visual-proof flaw
+The previously discovered USB-hub traversal gap remains real, but the physical telemetry now points to this earlier stage-5 address/descriptor transition as the first physical blocker to repair.
 
-Post-failure evidence review found that earlier QEMU "after input" screenshots could catch the desktop in a mostly cleared/partial repaint state while the old verifier still passed because it only required changed framebuffer bytes/pixels.
+### Built-in touchpad / PS2-AUX — LIVE HARDWARE PATH PROVEN
 
-Therefore:
-- old changed-pixel-only visual evidence is insufficient;
-- input activity must not be allowed to masquerade as success by clearing/repainting the desktop;
-- the current diagnostic train adds a strong visual-stability gate and suppresses normal desktop repainting during hardware-input diagnosis.
+Before touchpad movement the panel showed essentially no live PS2 packet traffic and internal pointer coordinates around `X=396, Y=290`.
+
+After moving the built-in touchpad, the physical panel showed approximately:
+- `PS2 E PK = 1, 21`
+- `P2 O A K = 1410, 1410, 0`
+- `P2 R PH PK = 1410, 0, 21`
+- `P2 SY R1 R2 = 245, 1047, 71`
+- last candidate bytes `P2 B0 B1 B2 = 45, 16, 49`
+- `SRC = 2`
+- internal pointer coordinates changed to approximately `X=1194, Y=0`.
+
+This proves on the real laptop:
+- i8042/PS2 input bytes are arriving;
+- the bytes are AUX-classified;
+- Frames decodes at least some packets;
+- the pointer source becomes PS2 (`SRC=2`);
+- the internal GUI pointer coordinates change in response to real touchpad motion.
+
+Therefore the built-in touchpad is NOT an I2C-only dead end on this laptop. The immediate remaining touchpad work is visible cursor presentation plus motion-quality/packet-rejection tuning, not basic transport discovery.
+
+The large reject counters also show that packet synchronization/quality can still be improved after visible cursor movement is restored.
+
+### Framebuffer behavior
+
+The old full-screen repaint behavior is gone in r6. During touchpad activity, only the diagnostic box flickers/refreshes. That is expected because r6 intentionally redraws the telemetry panel while suppressing normal desktop/window-manager repaints.
+
+This validates the r6 stabilization change. The next repair can safely add cursor-only redraw without re-enabling full-desktop repainting.
 
 ## Confirmed USB topology gap
 
-Workflow `.github/workflows/frames-v108-usb-hub-topology-probe.yml` tested the exact v108 input candidate with direct and hub-attached QEMU USB mice.
-
-Corrected topology run `31929194248`:
+Workflow `.github/workflows/frames-v108-usb-hub-topology-probe.yml` corrected run `31929194248`:
 - direct xHCI USB mouse: `SUPPORTED`;
-- USB mouse behind a USB hub: `NO_HID_BEHIND_TOPOLOGY`;
-- runtime reached, but no HID live report and no GUI cursor delivery behind the hub.
+- USB mouse behind a USB hub: `NO_HID_BEHIND_TOPOLOGY`.
 
-Conclusion: the current v108 USB stack does not traverse USB hubs. This is a confirmed implementation gap. It may explain the user's physical USB failure if the real port/device is behind a hub, but that is not yet physically proven.
+Conclusion: v108 still lacks USB-hub traversal. This remains a required USB capability, but the current laptop first stalls earlier at physical stage 5.
 
-## Deep physical telemetry
+## Superseded stable r6 diagnostic
 
-`tools/ci/patch_v108_physical_deep_telemetry.py` adds live stage telemetry without changing destructive-write paths.
-
-USB stage telemetry:
-- stage 1: scan started;
-- stage 2: connected root port selected/reset;
-- stage 3: slot enabled;
-- stage 4: default address step passed;
-- stage 5: first descriptor read passed;
-- stage 6: full device descriptor passed;
-- stage 7: boot HID discovered;
-- stage 8: HID configured.
-
-It also exposes scan tries, selected root port, device class, report activity and source/cursor state.
-
-PS/2 telemetry exposes:
-- total i8042 bytes read;
-- AUX-classified versus non-AUX bytes;
-- decoder/raw counts and packet phase;
-- sync/header/sign reject counters;
-- last candidate packet bytes;
-- decoded packet/source/cursor state.
-
-This is diagnostic telemetry only; it does not itself prove hardware support.
-
-## Current physical-test candidate — stable r6
-
-The next allowed real-machine test uses the stable hardware-input diagnostic runtime. Normal desktop/window-manager repaints are suppressed during input testing; only the hardware telemetry panel is updated. This prevents the physical screen-refresh behavior from obscuring the input diagnosis.
-
-Source identity:
-- stable diagnostic kernel SHA-256 `de8cd41f707268bc0d7bb2ff5ef925ba0e8981650703afdb065b1a62a1d6cca1`
-- derived deterministically from deep-r5 kernel SHA-256 `d0421388cd288a7073ca750915b1b51ceeee62acfe524a6785f855e42f9b1e7f`
-- stable runtime patch: `tools/ci/patch_v108_stable_input_diag_runtime.py`
-
-Exact Rufus ISO:
+Stable r6 was the diagnostic ISO that produced the decisive physical telemetry above:
 - `Frames-0.9.98-v108-Stable-Physical-Input-Diagnostic-r6-Rufus-UEFI.iso`
 - SHA-256 `4aa3ddfbe70668f0d362fcb9c8ea04c77a96977b417eed090c7bfc8f4177fd22`
 - size `18,722,816 bytes`
-- Rufus mode: **ISO Image mode**
+- Rufus mode: ISO Image mode
+- immutable re-cert run `31929841882`: PASS
 
-Build / certification:
-- source/build workflow `.github/workflows/frames-v108-stable-physical-input-rufus-r6.yml`
-- source build run `31929714354`
-- candidate artifact `9258923697`
-- candidate artifact ZIP SHA-256 `1f70bae5d74be9ca25c0b8af7942e4ea3d34f9082dbfe38fa8fde016e00b8edc`
-- exact immutable re-cert workflow `.github/workflows/frames-v108-stable-physical-input-rufus-r6b-cert.yml`
-- re-cert run `31929841882`: PASS
-- final artifact `9258971873`
-- final artifact ZIP SHA-256 `8dcf43f1bd41339be693db3f557970cff501cbac5242e6ba0cad11e446b1e2d8`
-- `FINAL-STABLE-INPUT-DIAGNOSTIC.json`: PASS
+Do not ask the user to retest r6; it has already served its diagnostic purpose.
 
-Independent verification after GitHub run:
-- all final/USB/PS2/read-only evidence ZIP integrity: PASS;
-- all SHA-256 manifests: PASS;
-- USB `RUNTIME.json`: PASS, exact ISO verified, live input markers present;
-- PS/2 `RUNTIME.json`: PASS, exact ISO verified, live input markers present;
-- USB visual stability: PASS, 122 changed pixels, 99.988% frame unchanged, non-dark content retention 100%;
-- PS/2 visual stability: PASS, 263 changed pixels, 99.974% frame unchanged, non-dark content retention 100%;
-- both actual AFTER framebuffers retain the complete desktop and change only a tiny diagnostic area;
-- read-only safety: PASS with internal NVMe sentinel read-only;
-- physical destructive writes certified: false;
-- promotion allowed: false.
+## Active repair — r7 physical cursor + xHCI descriptor/address transition
 
-These are VM/OVMF results only. Physical hardware input remains unverified.
+Active patch:
+- `tools/ci/patch_v108_physical_input_r7.py`
+- exact source input: r6 kernel SHA-256 `de8cd41f707268bc0d7bb2ff5ef925ba0e8981650703afdb065b1a62a1d6cca1`
+- exact r7 kernel output SHA-256 `b94070bfe399162a8bb5bef1694c92100716d500d9e85737896901ef3f5aa8e7`
 
-## Next physical boot procedure
+Touchpad/cursor repair:
+- retain stable diagnostic mode;
+- save/restore only the small cursor backing rectangle;
+- update only old/new cursor rectangles plus telemetry;
+- do not call normal `appearance_render(process)` or `wm_render_all` in the physical-input loop;
+- emit `FRAMES_V108_PHYSICAL_CURSOR_VISIBLE_OK` after actual pointer-coordinate movement is rendered.
 
-Use only the exact stable r6 ISO SHA above.
+USB repair:
+- after the descriptor-8 control transfer, update EP0's input-context dequeue pointer to the current software control-ring enqueue position before the second Address Device command;
+- preserve the updated EP0 max-packet size;
+- expose the xHCI command-completion/error code on the physical telemetry panel as the fourth USB stage value.
 
-1. Write with Rufus using **ISO Image mode**.
-2. Boot in UEFI mode and wait for the diagnostic desktop/panel to settle.
-3. Before moving any pointing device, take a close-up photo of the top-right `INPUT V108 LIVE` telemetry panel.
-4. Do not touch the built-in touchpad. Move only the external USB mouse for 10-15 seconds in multiple directions. Take a second close-up photo of the telemetry panel.
-5. Stop the USB mouse. Move only the built-in touchpad for 10-15 seconds right/left/up/down. Take a third close-up photo of the telemetry panel.
-6. Do not infer success merely from a screen refresh; the counters/stages are the authority for this diagnostic.
+Rationale: mature xHCI stacks refresh EP0's dequeue/enqueue position before the later Address Device transition. The physical stage-5 result directly targets this transition.
 
-Interpretation targets:
-
-USB:
-- stage reaches 6 with device class 9 -> a USB hub was reached; hub traversal becomes the immediate repair;
-- stage stalls below 6 -> root-port/address/descriptor bring-up failure;
-- stage 7/8 or HID configured but report counter stays zero -> HID endpoint/report polling issue;
-- live report/source/cursor-state counters change -> transport reached Frames, even though normal cursor repaint is intentionally suppressed in this diagnostic build.
-
-Touchpad / PS2:
-- total i8042 bytes increase but AUX count does not -> byte classification/routing failure;
-- AUX/raw counts increase but packet count stays static and reject counters rise -> packet synchronization/decoder failure;
-- i8042/AUX counts do not change at all during touchpad movement -> the touchpad likely is not reaching Frames through the PS/2/AUX transport, and I2C-HID/Precision Touchpad bring-up becomes the next transport target;
-- decoded packet/source/cursor-state counters change -> PS/2 transport is functioning internally, even though normal cursor repaint is intentionally suppressed.
-
-## Touchpad transport limitation
-
-Exact-v108 audit proved:
-- PS/2/AUX support exists;
-- USB HID support exists;
-- I2C-HID / absolute digitizer / Precision Touchpad support is not implemented yet.
-
-Do not claim the built-in touchpad is supported until the physical telemetry identifies its transport and movement reaches the pointer path.
+Certification workflow:
+- `.github/workflows/frames-v108-physical-input-r7-rufus.yml`
+- active run `31930792343`
+- independent USB, PS2, and read-only safety lanes run in parallel after build;
+- final ISO is not released unless all required lanes pass.
 
 ## Physical artifact delivery policy
 
-- Every user-facing Frames physical-test artifact must be a **Rufus-compatible UEFI `.iso`**.
+- Every user-facing Frames physical-test artifact must be a Rufus-compatible UEFI `.iso`.
 - Raw `.img` may be used internally by CI/QEMU only.
 - Every delivered ISO must have an exact SHA-256 and be boot-tested in QEMU/OVMF first.
 - State the validated Rufus mode for every artifact; do not make the user guess.
 
 ## Safety policy
 
-- The stable r6 ISO is authorized only for a read-only diagnostic physical boot.
 - Physical destructive writes remain uncertified and blocked.
 - Installation, persistent internal-media modification and release promotion remain locked.
 - Frames 1.0 remains NOT promoted.
