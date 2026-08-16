@@ -61,6 +61,7 @@ jobs:
           python3 bootux/patch_full_interactive_desktop_gui.py "$S/kernel/main.nx" | tee "$OUT/FULL-GUI-PATCH.log"
           python3 bootux/patch_full_gui_render_return_fix.py "$S/kernel/main.nx" | tee "$OUT/FULL-GUI-RENDER-FIX.log"
           sha256sum "$S/kernel/main.nx" > "$OUT/FULL-GUI-MAIN-SHA256.txt"
+          cp "$S/kernel/main.nx" "$OUT/FULL-GUI-KERNEL-main.nx"
 
       - name: Inspect live input chain and prior r46 handoff sites
         shell: bash
