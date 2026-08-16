@@ -11,122 +11,124 @@ Last updated: 2026-08-16
 - Native systems language/toolchain: Nexus.
 - Boot chain: UEFI -> BOOTX64.EFI -> FramesKernel.fkrn.
 - Native application formats: FEX/FAPP.
-- Evidence model: fail-closed, exact-source/hash based, QEMU/OVMF-first, no promotion from a merely green workflow.
+- Evidence model: fail-closed, exact-source/hash based, QEMU/OVMF-first.
 - Frames 1.0 is NOT promoted.
 
 ## Current architecture baseline
 
-- Frames 0.9.106 / architecture v116 is the current certified architecture baseline for the active GUI/boot work.
-- v109-v116 architecture transforms are preserved and hash-checked before product-integration changes.
-- Historical Frames 0.9.98 v108 r9 remains the sealed source reconstruction baseline used by the current integration workflows.
+- Frames 0.9.106 / architecture v116 is the current certified architecture baseline for active GUI/boot work.
+- v109-v116 transforms are preserved/hash-checked before product-integration changes.
+- Frames 0.9.98 v108 r9 remains the sealed reconstruction source used by current integration workflows.
 
-## Important correction to prior GUI claims
+## GUI classification correction
 
-The earlier physical-test ISO that showed the Frames dashboard/home shell is NOT a full desktop GUI.
+The older dashboard/home-shell physical-test ISO is NOT a full desktop GUI. It is only an integrated desktop-shell / GUI-infrastructure proof and is superseded.
 
-It is classified only as an integrated desktop-shell / GUI-infrastructure proof and is superseded for GUI physical testing by the independently verified full-interactive desktop candidate below.
+## Completed milestone — Full Interactive Desktop GUI
 
-Do not call the older dashboard artifact a full GUI, full desktop, finished desktop, or equivalent.
+Branch: `full-interactive-desktop-gui`
 
-## Completed milestone — Full Interactive Desktop GUI VM/ISO gate
+Certified GUI commit: `8a730a580b98026189eac897d0dec9efde58c07e`
 
-Branch:
+Workflow: `.github/workflows/frames-v116-full-interactive-desktop-gui.yml`
 
-`full-interactive-desktop-gui`
-
-Certified candidate commit:
-
-`8a730a580b98026189eac897d0dec9efde58c07e`
-
-Workflow:
-
-`.github/workflows/frames-v116-full-interactive-desktop-gui.yml`
-
-Successful run:
-
-`31923853583`
+Successful run: `31923853583`
 
 Result: **PASS** after independent artifact inspection.
 
-The exact candidate visibly demonstrates a real multi-window desktop session rather than the prior dashboard shell.
+The actual QEMU framebuffer visibly proves a real multi-window desktop:
 
-Verified user-visible framebuffer properties:
+- three distinct native window-manager title bars/controls;
+- File Manager visibly open with content;
+- Settings visibly open with Appearance/Themes/Wallpaper/Fonts/Cursor/Lock Screen content;
+- separate Nexus/terminal-style window;
+- desktop icons/background;
+- bottom taskbar/dock;
+- visible mouse cursor;
+- splash -> kernel -> full desktop transition at 1280x800.
 
-1. Three distinct native window-manager title-bar close-control components are visibly present.
-2. File Manager is visibly open with file/folder content.
-3. Settings is visibly open with Appearance/Themes/Wallpaper/Fonts/Cursor/Lock Screen content.
-4. A separate Nexus/terminal-style application window is visibly open.
-5. Desktop icons and background are visible.
-6. Bottom taskbar/dock is visible.
-7. Mouse cursor is visible.
-8. The image contains rich content on both left and right desktop regions.
-9. Approved splash -> kernel -> full desktop transition is visually proven at 1280x800.
-10. Raw-ESP and exact-ISO framebuffer verifiers both PASS.
+Required runtime markers include `FRAMES_FULL_GUI_WINDOWS_OK`, `FRAMES_FULL_GUI_INPUT_OK`, `FRAMES_FULL_GUI_FILEMAN_OK`, `FRAMES_FULL_GUI_SETTINGS_OK`, `FRAMES_FULL_INTERACTIVE_DESKTOP_OK`, `FRAMES_INTEGRATED_GUI_OK`, and `FRAMES_GUI_PHYSICAL_TEST_READY`. `FRAMES_DESKTOP_CERT_FAIL` is absent.
 
-Raw/ISO visual verifier metrics:
+## Superseded full-GUI ISO
 
-- `distinct_window_controls = 3`
-- `bottom_quantized_color_diversity = 45`
-- `center_quantized_color_diversity = 17`
-- `left_nonflat_score = 0.8708`
-- `right_nonflat_score = 0.8422`
-- splash-to-GUI `changed_ratio = 1.0`
-- splash-to-GUI `quantized_unique_colors = 176`
+The first full-GUI ISO remains valid QEMU evidence but is superseded for physical testing:
 
-Required runtime evidence is present on both raw ESP and exact ISO boots:
+- filename: `Frames-0.9.106-v116-Full-Interactive-Desktop-GUI-UEFI.iso`
+- SHA-256: `abeead78504b6562ee6ecef47027c95803594dd21527cfc3120205a5ef9b7068`
+- size: `67,160,064 bytes`
+- run: `31923853583`
 
-- `FRAMES_KERNEL_START`
-- `FRAMES_USB_MIGRATION_RUNTIME_V9_OK`
-- `FRAMES_DESKTOP_PHASE12_OK`
-- `FRAMES_APPEARANCE_SYSTEM_OK`
-- `FRAMES_FULL_GUI_WINDOWS_OK`
-- `FRAMES_FULL_GUI_INPUT_OK`
-- `FRAMES_FULL_GUI_FILEMAN_OK`
-- `FRAMES_FULL_GUI_SETTINGS_OK`
-- `FRAMES_FULL_INTERACTIVE_DESKTOP_OK`
-- `FRAMES_INTEGRATED_GUI_OK`
-- `FRAMES_GUI_PHYSICAL_TEST_READY`
+Reason for supersession: it booted correctly through El Torito/OVMF but did not expose a duplicate ISO-level `/EFI/BOOT` tree for broad extraction-based USB authoring.
 
-`FRAMES_DESKTOP_CERT_FAIL` is absent from both certified boot paths.
+## Current physical-test candidate — USB-compatible full GUI
 
-## Exact physical-test ISO identity
+Branch: `physical-hardware-full-gui-validation`
 
-Filename:
+Physical-media compatibility workflow: `.github/workflows/frames-v116-full-gui-physical-media-compatibility.yml`
 
-`Frames-0.9.106-v116-Full-Interactive-Desktop-GUI-UEFI.iso`
+Successful media compatibility run: `31924483046`
+
+Candidate ISO:
+
+`Frames-0.9.106-v116-Full-Interactive-Desktop-GUI-USB-Compatible-UEFI.iso`
 
 SHA-256:
 
-`abeead78504b6562ee6ecef47027c95803594dd21527cfc3120205a5ef9b7068`
+`7d1c212ad71778a84579e91c2e12ebafe3801a8bcd8a0a0856e506d47ebe20c7`
 
 Exact size:
 
-`67,160,064 bytes`
+`67,401,728 bytes`
 
-GitHub ISO artifact:
+ISO artifact:
 
-- Artifact ID: `9257223855`
-- Artifact ZIP SHA-256: `3e0abb11d5dd609e870cd60e3932e3e608db0413b3705684a35a9f59a533c546`
+- artifact ID: `9257407968`
+- artifact ZIP SHA-256: `1097752e9b03e8619728d26e07365a3e3b5897db7a956818e698680e2f533cee`
 
-Evidence artifact:
+Media-compat evidence:
 
-- Artifact ID: `9257223971`
-- Artifact ZIP SHA-256: `78e2af46737817e98fab44044fae3b77fb820be9c5e7da2c91a43c2378fd6dd7`
-- all entries in `EVIDENCE-FILES-SHA256.txt` independently verify PASS.
+- artifact ID: `9257408367`
+- artifact ZIP SHA-256: `e13cff8e729613547afab7895e65d66563c2bd96ac2881f53edb90f348bd15b1`
+- independent ZIP integrity PASS
+- every `EVIDENCE-FILES-SHA256.txt` entry PASS
+- `FINAL-PHYSICAL-MEDIA-CERTIFICATION.json`: PASS
 
-Final certification file:
+The USB-compatible ISO preserves the exact certified EFI/GUI payload, exposes ISO-level `/EFI/BOOT/BOOTX64.EFI` and complete `/FRAMES` boot/GUI files, removes the prior missing-`/EFI/BOOT` compatibility warning, and boots in QEMU/OVMF to the same full three-window desktop.
 
-`FINAL-FULL-INTERACTIVE-DESKTOP-GUI-CERTIFICATION.json`
+## Extracted USB boot proof
 
-Final certification status: **PASS**.
+Workflow: `.github/workflows/frames-v116-full-gui-extracted-usb-proof.yml`
 
-Certification scope:
+Initial run `31924578354` failed before QEMU because `cp -a` attempted to preserve Unix ownership on FAT32. This was a harness-only failure and was repaired.
 
+Repair commit: `caba0a2af1f6b32805d2319a340a14bc9e58704d`
+
+Successful run: `31924646428`
+
+Result: **PASS**.
+
+The workflow:
+
+1. downloads exact ISO SHA-256 `7d1c212a...e20c7`;
+2. extracts only the ISO filesystem tree;
+3. creates a fresh 128 MiB GPT disk with FAT32 EFI System Partition;
+4. copies only exposed `/EFI` and `/FRAMES` files to that removable image;
+5. attaches it to QEMU through xHCI + USB mass storage;
+6. boots OVMF from that USB device;
+7. proves approved splash -> kernel -> same full multi-window desktop.
+
+Extracted-USB evidence artifact:
+
+- artifact ID: `9257455438`
+- artifact ZIP SHA-256: `bba4f4bb95bdcfde3a937363d19bd548e5e733257537e25c65a69d600a2c5ea5`
+- independent ZIP integrity PASS
+- every evidence manifest entry PASS
+- `FINAL-EXTRACTED-USB-CERTIFICATION.json`: PASS
 - `physical_test_allowed: true`
 - `physical_destructive_writes_certified: false`
 - `promotion_allowed: false`
 
-The ISO has an El Torito UEFI boot image and was booted from CD/DVD media in QEMU/OVMF. The ISO build still emits an xorriso compatibility warning that the ISO filesystem itself does not expose a duplicate `/EFI/BOOT` tree; this does not invalidate the proven OVMF DVD boot, but it should be addressed before claiming broad production USB-authoring compatibility.
+This proves both DVD/El Torito boot and extraction-style UEFI USB boot in QEMU.
 
 ## Approved splash identity
 
@@ -134,7 +136,7 @@ Approved splash asset SHA-256:
 
 `70e9ca0c9e31b56b720f3cf0bd22c5eacc35b51797782ad0f03172c2038b9fbd`
 
-The successful full-GUI candidate preserves this exact splash.
+The current physical candidate preserves this exact splash.
 
 ## Active milestone
 
@@ -142,41 +144,43 @@ The successful full-GUI candidate preserves this exact splash.
 
 Current objective:
 
-Boot the exact certified ISO SHA-256 `abeead78504b6562ee6ecef47027c95803594dd21527cfc3120205a5ef9b7068` on the user's physical UEFI test machine and verify that real hardware reaches the same splash -> kernel -> full multi-window desktop path.
+Boot exact ISO SHA-256 `7d1c212ad71778a84579e91c2e12ebafe3801a8bcd8a0a0856e506d47ebe20c7` on the user's physical UEFI test machine and verify real hardware reaches the approved splash -> kernel -> full multi-window desktop path.
 
-Physical validation should confirm at minimum:
+Physical validation must confirm at minimum:
 
-1. UEFI media is detected and launches Frames.
-2. Approved splash is displayed.
-3. Boot reaches the multi-window desktop rather than the old dashboard shell.
-4. File Manager, Settings, and Nexus/terminal-style window are visibly present.
-5. Mouse cursor is visible and real pointer movement can be tested.
-6. Keyboard focus/input can be tested.
-7. No destructive internal-disk write operation is authorized by this test image.
+1. UEFI detects and launches the removable media.
+2. Approved splash appears.
+3. Full multi-window desktop appears rather than the old dashboard shell.
+4. File Manager, Settings, and Nexus/terminal window are visible.
+5. Mouse cursor is visible and real pointer movement works.
+6. Pointer buttons can be exercised.
+7. Keyboard focus/input works.
+8. No unexpected freeze/panic/reboot/destructive-write prompt occurs.
 
-This milestone requires a real physical boot performed by the user; QEMU cannot substitute for that evidence.
+This is now the only remaining gate that requires the user's physical machine; QEMU cannot substitute for real-hardware evidence.
 
 ## Physical safety policy
 
-- Physical destructive writes remain uncertified/blocked for this GUI physical-test path.
-- The GUI test ISO must not weaken existing physical-write safety gates.
+- Physical destructive writes remain uncertified/blocked.
+- Internal NVMe/SATA/system media remain outside destructive-write certification scope.
 - `promotion_allowed` remains false.
 - Frames 1.0 remains NOT promoted.
 
 ## Automatic progression rule
 
-For Frames engineering, do not stop after reporting a build/test result.
+For Frames engineering:
 
-- If a gate fails: diagnose, repair, rerun, and continue automatically.
-- If a gate passes: verify evidence independently, update this file, then continue to the next already-defined milestone automatically.
-- Stop only when user input/authorization is genuinely required, a safety boundary requires it, or the next action requires physical hardware that ChatGPT cannot operate.
+- Failure -> inspect evidence -> make narrow repair -> rerun automatically.
+- Success -> independently verify -> update this file -> continue to next defined milestone automatically.
+- Do not stop merely to report a routine failure or intermediate pass.
+- Stop only when user input/authorization is genuinely required, a safety boundary requires it, or the next action requires physical hardware ChatGPT cannot operate.
 
 ## New-chat startup rule
 
-Before making Frames engineering changes in a new chat:
+Before Frames engineering changes in a new chat:
 
-1. Read `PROJECT_STATE.md` from the repository.
+1. Read `PROJECT_STATE.md`.
 2. Read `CONTINUITY_PROTOCOL.md`.
-3. Inspect the current active branch/run/evidence named here.
-4. Do not infer a new roadmap from older chat summaries if it conflicts with this state.
-5. Update this file whenever the active milestone, certified baseline, decisive failure, approved artifact, or next action changes.
+3. Inspect active branch/run/evidence named here.
+4. Do not let older chat summaries override repository/evidence.
+5. Update this file whenever active milestone, baseline, decisive failure, approved artifact, safety boundary, or next action changes.
