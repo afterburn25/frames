@@ -18,6 +18,14 @@ repls={
 for a,b in repls.items():
     if s.count(a)!=1: raise SystemExit('call anchor '+a)
     s=s.replace(a,b,1)
+old_sig='fn xhci_address_hub_child_v113(xhci_state:u64,phys_state:u64,parent_slot:u64,parent_root_port:u64,parent_speed:u64,child_port:u64,child_speed:u64) -> u64 {'
+new_sig='''fn xhci_address_hub_child_v113(xhci_state:u64,phys_state:u64,parent_info:u64,child_info:u64) -> u64 {\n    let parent_slot=parent_info%256; let parent_root_port=(parent_info/256)%256; let parent_speed=(parent_info/65536)%256;\n    let child_port=child_info%256; let child_speed=(child_info/256)%256;'''
+if s.count(old_sig)!=1: raise SystemExit('child address signature anchor')
+s=s.replace(old_sig,new_sig,1)
+old_call='xhci_address_hub_child_v113(xhci_state,phys_state,parent_slot,parent_root,parent_speed,p,speed)'
+new_call='xhci_address_hub_child_v113(xhci_state,phys_state,parent_slot+(parent_root*256)+(parent_speed*65536),p+(speed*256))'
+if s.count(old_call)!=1: raise SystemExit('child address call anchor')
+s=s.replace(old_call,new_call,1)
 p.write_text(s)
 out=hashlib.sha256(p.read_bytes()).hexdigest()
 print(out)
