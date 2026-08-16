@@ -1,0 +1,268 @@
+name: Frames v116 Full Interactive Desktop GUI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ full-interactive-desktop-gui ]
+    paths:
+      - '.github/workflows/frames-v116-full-interactive-desktop-gui.yml'
+      - 'bootux/**'
+      - 'architecture/integration/**'
+      - 'architecture/v109/**'
+      - 'architecture/v110/**'
+      - 'architecture/v111/**'
+      - 'architecture/v112/**'
+      - 'architecture/v113/**'
+      - 'architecture/v114/**'
+      - 'architecture/v115/**'
+      - 'architecture/v116/**'
+
+permissions:
+  contents: read
+
+env:
+  V108_KIT_SHA256: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
+  V108_SOURCE_SHA256: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
+  V101_KIT_SHA256: 84f0a5c6b47d10e11237ab1d6d4c34507a4d525b98bbe58ffc6aa20e3a8dbca5
+  V101_SOURCE_SHA256: ce58e0eceb770e5b9bc3842ce096deccd9640d986ac0acfec5065305efef2b65
+  APPROVED_LOGO_SHA256: ea3542453493238c0f50a6c703150d482edc0d5b875a6dfe678c15a42ab7ae0e
+  APPROVED_SPLASH_SHA256: 70e9ca0c9e31b56b720f3cf0bd22c5eacc35b51797782ad0f03172c2038b9fbd
+  V116_MAIN_SHA256: a8c569ca5c6b9facd85176a0fe97c8b369f9e4bbf50153f41a1b7777636a3ed5
+
+jobs:
+  certify-full-interactive-desktop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: full-interactive-desktop-gui
+
+      - name: Install build ISO and proof tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 python3-pil unzip qemu-system-x86 ovmf netcat-openbsd mtools dosfstools gdisk file xorriso
+
+      - name: Reconstruct sealed v108 r9 and certified v109 through v116 architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/full-gui-evidence"; mkdir -p "$E" "$RUNNER_TEMP/v108-kit" "$RUNNER_TEMP/v108-src"
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip"
+          test -s "$KIT"; test "$(sha256sum "$KIT" | awk '{print $1}')" = "$V108_KIT_SHA256"
+          unzip -q "$KIT" -d "$RUNNER_TEMP/v108-kit"
+          Z="$RUNNER_TEMP/v108-kit/Frames-0.9.98-Source-v108.zip"
+          test -s "$Z"; test "$(sha256sum "$Z" | awk '{print $1}')" = "$V108_SOURCE_SHA256"
+          unzip -q "$Z" -d "$RUNNER_TEMP/v108-src"
+          S="$RUNNER_TEMP/v108-src/Frames-0.9.98"
+          for p in \
+            architecture/v109/make_unified_device_architecture_v109.py \
+            architecture/v110/make_driver_runtime_v110.py \
+            architecture/v111/make_async_io_service_runtime_v111.py \
+            architecture/v112/make_device_service_integration_v112.py \
+            architecture/v113/make_driver_execution_hal_v113.py \
+            architecture/v114/make_kernel_concurrency_driver_scheduling_v114.py \
+            architecture/v115/make_driver_migration_unified_input_v115.py \
+            architecture/v116/make_usb_core_xhci_migration_v116.py; do
+              python3 "$p" "$S/kernel/main.nx"
+          done
+          test "$(sha256sum "$S/kernel/main.nx" | awk '{print $1}')" = "$V116_MAIN_SHA256"
+          sha256sum "$KIT" "$Z" "$S/kernel/main.nx" "$S/boot/uefi/frames_boot.c" > "$E/SOURCE-CHAIN-SHA256.txt"
+          echo "S=$S" >> "$GITHUB_ENV"
+
+      - name: Fold in exact approved splash and full interactive GUI integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/full-gui-evidence"; mkdir -p "$RUNNER_TEMP/v101-kit" "$RUNNER_TEMP/v101-src"
+          KIT="$GITHUB_WORKSPACE/Frames-0.9.91-Integrated-Connected-Services-Certification-Kit-v101.zip"
+          test -s "$KIT"; test "$(sha256sum "$KIT" | awk '{print $1}')" = "$V101_KIT_SHA256"
+          unzip -q "$KIT" -d "$RUNNER_TEMP/v101-kit"
+          Z="$(find "$RUNNER_TEMP/v101-kit" -type f -iname '*0.9.91*Source*.zip' -print | sort | head -n1)"
+          test -s "$Z"; test "$(sha256sum "$Z" | awk '{print $1}')" = "$V101_SOURCE_SHA256"
+          unzip -q "$Z" -d "$RUNNER_TEMP/v101-src"
+          V101="$RUNNER_TEMP/v101-src/Frames-0.9.91"; LOGO="$V101/assets/branding/FramesLogo.png"; SPLASH="$RUNNER_TEMP/SPLASH.FSP"
+          test "$(sha256sum "$LOGO" | awk '{print $1}')" = "$APPROVED_LOGO_SHA256"
+          python3 bootux/make_splash_asset.py "$LOGO" "$SPLASH" | tee "$E/APPROVED-SPLASH-ASSET.json"
+          test "$(sha256sum "$SPLASH" | awk '{print $1}')" = "$APPROVED_SPLASH_SHA256"
+          sha256sum "$LOGO" "$SPLASH" > "$E/APPROVED-SPLASH-IDENTITY.txt"
+          python3 bootux/patch_v108_uefi_approved_splash.py "$S/boot/uefi/frames_boot.c" | tee "$E/PRODUCT-GUI-REPAIRS.log"
+          python3 bootux/patch_integrated_gui_physical_test_policy.py "$S/boot/uefi/frames_boot.c" "$S/kernel/main.nx" | tee "$E/GUI-TEST-PROFILE.log"
+          python3 bootux/patch_full_interactive_desktop_gui.py "$S/kernel/main.nx" | tee "$E/FULL-INTERACTIVE-DESKTOP-PATCH.log"
+          python3 bootux/patch_full_gui_render_return_fix.py "$S/kernel/main.nx" | tee "$E/FULL-GUI-RENDER-GATE-FIX.log"
+          clang -fsyntax-only -ffreestanding -fshort-wchar -mno-red-zone -mno-sse -mno-sse2 -Wno-unused-function "$S/boot/uefi/frames_boot.c"
+          grep -q 'fn full_interactive_desktop_compose' "$S/kernel/main.nx"
+          grep -q 'serial_marker_full_interactive_desktop_ok' "$S/kernel/main.nx"
+          sha256sum "$S/boot/uefi/frames_boot.c" "$S/kernel/main.nx" > "$E/FULL-GUI-PATCHED-SOURCE-SHA256.txt"
+          echo "SPLASH=$SPLASH" >> "$GITHUB_ENV"
+
+      - name: Build full interactive GUI product
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/full-gui-evidence"; cd "$S"
+          chmod +x tools/*.sh tools/*.py sdk/*.sh 2>/dev/null || true
+          find toolchain -type f -name nexus -exec chmod +x {} + 2>/dev/null || true
+          ./tools/build.sh 2>&1 | tee "$E/BUILD.log"
+          grep -q 'decision: BLOCKED' "$E/BUILD.log"
+          python3 tools/sdk_selftest.py --require-pass > "$E/SDK-SELFTEST.json"
+          python3 tools/make_esp.py 2>&1 | tee "$E/MAKE-ESP.log"
+          python3 tools/make_desktop_preview_image.py 2>&1 | tee "$E/MAKE-DESKTOP-PREVIEW.log"
+          python3 tools/verify_release.py > "$E/RELEASE-VERIFY.log"
+          test -s build/BOOTX64.EFI; test -s build/FramesKernel.fkrn; test -s build/System.fex
+          test -s build/Frames-0.9.98-ESP.img; test -s build/Frames-0.9.98-Desktop-Preview.img
+          sha256sum build/BOOTX64.EFI build/FramesKernel.fkrn build/System.fex > "$E/PRODUCT-BINARIES-SHA256.txt"
+
+      - name: Compose desktop payload exact splash and GUI-test policy into ESP
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/full-gui-evidence"
+          ESP="$(readlink -f "$S/build/Frames-0.9.98-ESP.img")"; DESK="$(readlink -f "$S/build/Frames-0.9.98-Desktop-Preview.img")"
+          ESP_FIRST="$(sgdisk -i 1 "$ESP" | awk -F: '/First sector/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); split($2,a," "); print a[1]; exit}')"
+          ESP_LAST="$(sgdisk -i 1 "$ESP" | awk -F: '/Last sector/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); split($2,a," "); print a[1]; exit}')"
+          DESK_FIRST="$(sgdisk -i 1 "$DESK" | awk -F: '/First sector/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); split($2,a," "); print a[1]; exit}')"
+          ESP_MTOOLS="$ESP@@$((ESP_FIRST*512))"; DESK_MTOOLS="$DESK@@$((DESK_FIRST*512))"
+          mkdir -p "$RUNNER_TEMP/gui-files" "$RUNNER_TEMP/roundtrip"
+          for f in DESKTOP.CFG HELLO.FAP THEME.FTH APPEAR.CFG; do
+            mcopy -o -i "$DESK_MTOOLS" "::/FRAMES/$f" "$RUNNER_TEMP/gui-files/$f"
+            mcopy -o -i "$ESP_MTOOLS" "$RUNNER_TEMP/gui-files/$f" "::/FRAMES/$f"
+          done
+          printf 'FRAMES_INTEGRATED_GUI_PHYSICAL_TEST_V1\n' > "$RUNNER_TEMP/gui-files/GUITEST.CFG"
+          mcopy -o -i "$ESP_MTOOLS" "$RUNNER_TEMP/gui-files/GUITEST.CFG" ::/FRAMES/GUITEST.CFG
+          mcopy -o -i "$ESP_MTOOLS" "$SPLASH" ::/FRAMES/SPLASH.FSP
+          for f in DESKTOP.CFG HELLO.FAP THEME.FTH APPEAR.CFG GUITEST.CFG SPLASH.FSP; do mcopy -o -i "$ESP_MTOOLS" "::/FRAMES/$f" "$RUNNER_TEMP/roundtrip/$f"; done
+          test "$(sha256sum "$RUNNER_TEMP/roundtrip/SPLASH.FSP" | awk '{print $1}')" = "$APPROVED_SPLASH_SHA256"
+          for f in DESKTOP.CFG HELLO.FAP THEME.FTH APPEAR.CFG GUITEST.CFG; do cmp "$RUNNER_TEMP/gui-files/$f" "$RUNNER_TEMP/roundtrip/$f"; done
+          ! mdir -i "$ESP_MTOOLS" ::/FRAMES/PHYSBOOT.CFG >/dev/null 2>&1
+          ! mdir -i "$ESP_MTOOLS" ::/FRAMES/USBMSC.CFG >/dev/null 2>&1
+          ! mdir -i "$ESP_MTOOLS" ::/FRAMES/DEVPREV.CFG >/dev/null 2>&1
+          mdir -i "$ESP_MTOOLS" ::/FRAMES > "$E/ESP-FRAMES-DIRECTORY.txt"
+          sha256sum "$RUNNER_TEMP/roundtrip"/* > "$E/ESP-ROUNDTRIP-SHA256.txt"
+          echo "ESP=$ESP" >> "$GITHUB_ENV"; echo "ESP_FIRST=$ESP_FIRST" >> "$GITHUB_ENV"; echo "ESP_LAST=$ESP_LAST" >> "$GITHUB_ENV"
+
+      - name: Locate OVMF
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=''; vars=''
+          for p in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd; do [ -f "$p" ] && code="$p" && break; done
+          for p in /usr/share/OVMF/OVMF_VARS_4M.fd /usr/share/OVMF/OVMF_VARS.fd; do [ -f "$p" ] && vars="$p" && break; done
+          test -n "$code"; test -n "$vars"; echo "OVMF_CODE=$code" >> "$GITHUB_ENV"; echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"
+
+      - name: QEMU proof 1 - splash kernel and real multi-window desktop
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/full-gui-evidence"; MON="$RUNNER_TEMP/full-gui-mon.sock"; SERIAL="$E/RAW-ESP-SERIAL.log"
+          cp "$OVMF_VARS" "$RUNNER_TEMP/full-gui-vars.fd"; rm -f "$MON"
+          qemu-system-x86_64 -machine q35 -m 1024 -smp 2 -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" -drive if=pflash,format=raw,file="$RUNNER_TEMP/full-gui-vars.fd" -drive if=virtio,format=raw,file="$ESP" -boot menu=off -serial file:"$SERIAL" -monitor unix:"$MON",server=on,wait=off -display none -vga std -no-reboot &
+          PID=$!; trap 'kill $PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 80); do [ -S "$MON" ] && break; sleep 0.1; done; test -S "$MON"
+          python3 - "$MON" "$E" <<'PY'
+          import socket,sys,time,pathlib
+          s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect(sys.argv[1]); s.settimeout(.05)
+          try:s.recv(4096)
+          except Exception:pass
+          out=pathlib.Path(sys.argv[2])
+          for i in range(45):
+              s.sendall(f'screendump {out}/RAW-SPLASH-{i:02d}.ppm\n'.encode()); time.sleep(.15)
+          s.close()
+          PY
+          python3 bootux/verify_splash_frame.py "$E"/RAW-SPLASH-*.ppm | tee "$E/RAW-SPLASH-PROOF.json"
+          WIN="$(python3 -c 'import json;print(json.load(open("full-gui-evidence/RAW-SPLASH-PROOF.json"))["winner"]["file"])')"
+          cp "$E/$WIN" "$E/RAW-BOOT-SPLASH.ppm"; rm -f "$E"/RAW-SPLASH-[0-9][0-9].ppm
+          found=0; for i in $(seq 1 80); do if [ -s "$SERIAL" ] && grep -q 'FRAMES_FULL_INTERACTIVE_DESKTOP_OK' "$SERIAL"; then found=1; break; fi; sleep 1; done; test "$found" = 1
+          for m in FRAMES_KERNEL_START FRAMES_USB_MIGRATION_RUNTIME_V9_OK FRAMES_DESKTOP_PHASE12_OK FRAMES_APPEARANCE_SYSTEM_OK FRAMES_FULL_GUI_WINDOWS_OK FRAMES_FULL_GUI_INPUT_OK FRAMES_FULL_GUI_FILEMAN_OK FRAMES_FULL_GUI_SETTINGS_OK FRAMES_FULL_INTERACTIVE_DESKTOP_OK FRAMES_INTEGRATED_GUI_OK FRAMES_GUI_PHYSICAL_TEST_READY; do grep -q "$m" "$SERIAL"; done
+          ! grep -q 'FRAMES_DESKTOP_CERT_FAIL' "$SERIAL"
+          printf 'screendump %s\nquit\n' "$E/RAW-FULL-DESKTOP.ppm" | nc -U "$MON" >/dev/null 2>&1 || true
+          wait "$PID" || true; trap - EXIT; test -s "$E/RAW-FULL-DESKTOP.ppm"
+          python3 bootux/verify_full_desktop_frame.py "$E/RAW-FULL-DESKTOP.ppm" | tee "$E/RAW-FULL-DESKTOP-VISUAL.json"
+          python3 bootux/verify_gui_transition_frame.py "$E/RAW-BOOT-SPLASH.ppm" "$E/RAW-FULL-DESKTOP.ppm" | tee "$E/RAW-SPLASH-TO-FULL-GUI.json"
+
+      - name: Build UEFI physical-test ISO only after full desktop proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/full-gui-evidence"
+          test "$(python3 -c 'import json;print(json.load(open("full-gui-evidence/RAW-FULL-DESKTOP-VISUAL.json"))["status"])')" = PASS
+          COUNT=$((ESP_LAST-ESP_FIRST+1)); EFI_BOOT="$RUNNER_TEMP/efiboot-full-gui.img"
+          dd if="$ESP" of="$EFI_BOOT" bs=512 skip="$ESP_FIRST" count="$COUNT" status=none
+          mdir -i "$EFI_BOOT" ::/EFI/BOOT/BOOTX64.EFI >/dev/null; mdir -i "$EFI_BOOT" ::/FRAMES > "$E/ISO-EFIBOOT-FRAMES.txt"
+          mkdir -p "$RUNNER_TEMP/iso-root/EFI" "$RUNNER_TEMP/iso-root/FRAMES"; cp "$EFI_BOOT" "$RUNNER_TEMP/iso-root/EFI/efiboot.img"
+          cp "$S/build/FramesKernel.fkrn" "$RUNNER_TEMP/iso-root/FRAMES/FramesKernel.fkrn"; cp "$S/build/System.fex" "$RUNNER_TEMP/iso-root/FRAMES/System.fex"
+          printf 'Frames v116 Full Interactive Desktop GUI physical-test media.\nDestructive writes remain uncertified and blocked.\n' > "$RUNNER_TEMP/iso-root/README.TXT"
+          OUT="$GITHUB_WORKSPACE/Frames-0.9.106-v116-Full-Interactive-Desktop-GUI-UEFI.iso"
+          xorriso -as mkisofs -iso-level 3 -R -J -V FRAMES_FULL_GUI -eltorito-alt-boot -e EFI/efiboot.img -no-emul-boot -o "$OUT" "$RUNNER_TEMP/iso-root"
+          test -s "$OUT"; sha256sum "$OUT" | tee "$E/PHYSICAL-TEST-ISO-SHA256.txt"
+          xorriso -indev "$OUT" -report_el_torito plain > "$E/EL-TORITO-REPORT.txt" 2>&1
+          echo "ISO=$OUT" >> "$GITHUB_ENV"
+
+      - name: QEMU proof 2 - boot the ISO itself into full interactive desktop
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/full-gui-evidence"; MON="$RUNNER_TEMP/full-gui-iso-mon.sock"; SERIAL="$E/ISO-SERIAL.log"
+          cp "$OVMF_VARS" "$RUNNER_TEMP/full-gui-iso-vars.fd"; rm -f "$MON"
+          qemu-system-x86_64 -machine q35 -m 1024 -smp 2 -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" -drive if=pflash,format=raw,file="$RUNNER_TEMP/full-gui-iso-vars.fd" -cdrom "$ISO" -boot d -serial file:"$SERIAL" -monitor unix:"$MON",server=on,wait=off -display none -vga std -no-reboot &
+          PID=$!; trap 'kill $PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 80); do [ -S "$MON" ] && break; sleep 0.1; done; test -S "$MON"
+          python3 - "$MON" "$E" <<'PY'
+          import socket,sys,time,pathlib
+          s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect(sys.argv[1]); s.settimeout(.05)
+          try:s.recv(4096)
+          except Exception:pass
+          out=pathlib.Path(sys.argv[2])
+          for i in range(55):
+              s.sendall(f'screendump {out}/ISO-SPLASH-{i:02d}.ppm\n'.encode()); time.sleep(.15)
+          s.close()
+          PY
+          python3 bootux/verify_splash_frame.py "$E"/ISO-SPLASH-*.ppm | tee "$E/ISO-SPLASH-PROOF.json"
+          WIN="$(python3 -c 'import json;print(json.load(open("full-gui-evidence/ISO-SPLASH-PROOF.json"))["winner"]["file"])')"
+          cp "$E/$WIN" "$E/ISO-BOOT-SPLASH.ppm"; rm -f "$E"/ISO-SPLASH-[0-9][0-9].ppm
+          found=0; for i in $(seq 1 85); do if [ -s "$SERIAL" ] && grep -q 'FRAMES_FULL_INTERACTIVE_DESKTOP_OK' "$SERIAL"; then found=1; break; fi; sleep 1; done; test "$found" = 1
+          for m in FRAMES_KERNEL_START FRAMES_USB_MIGRATION_RUNTIME_V9_OK FRAMES_DESKTOP_PHASE12_OK FRAMES_APPEARANCE_SYSTEM_OK FRAMES_FULL_GUI_WINDOWS_OK FRAMES_FULL_GUI_INPUT_OK FRAMES_FULL_GUI_FILEMAN_OK FRAMES_FULL_GUI_SETTINGS_OK FRAMES_FULL_INTERACTIVE_DESKTOP_OK FRAMES_INTEGRATED_GUI_OK FRAMES_GUI_PHYSICAL_TEST_READY; do grep -q "$m" "$SERIAL"; done
+          ! grep -q 'FRAMES_DESKTOP_CERT_FAIL' "$SERIAL"
+          printf 'screendump %s\nquit\n' "$E/ISO-FULL-DESKTOP.ppm" | nc -U "$MON" >/dev/null 2>&1 || true
+          wait "$PID" || true; trap - EXIT; test -s "$E/ISO-FULL-DESKTOP.ppm"
+          python3 bootux/verify_full_desktop_frame.py "$E/ISO-FULL-DESKTOP.ppm" | tee "$E/ISO-FULL-DESKTOP-VISUAL.json"
+          python3 bootux/verify_gui_transition_frame.py "$E/ISO-BOOT-SPLASH.ppm" "$E/ISO-FULL-DESKTOP.ppm" | tee "$E/ISO-SPLASH-TO-FULL-GUI.json"
+
+      - name: Final fail-closed full interactive desktop certification
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/full-gui-evidence"
+          python3 - "$E" "$ISO" <<'PY'
+          import hashlib,json,pathlib,sys
+          e=pathlib.Path(sys.argv[1]); iso=pathlib.Path(sys.argv[2])
+          raw=json.loads((e/'RAW-FULL-DESKTOP-VISUAL.json').read_text()); dvd=json.loads((e/'ISO-FULL-DESKTOP-VISUAL.json').read_text())
+          rs=(e/'RAW-ESP-SERIAL.log').read_text(errors='replace'); ds=(e/'ISO-SERIAL.log').read_text(errors='replace')
+          required=['FRAMES_FULL_GUI_WINDOWS_OK','FRAMES_FULL_GUI_INPUT_OK','FRAMES_FULL_GUI_FILEMAN_OK','FRAMES_FULL_GUI_SETTINGS_OK','FRAMES_FULL_INTERACTIVE_DESKTOP_OK','FRAMES_INTEGRATED_GUI_OK']
+          checks={'approved_splash_exact':'70e9ca0c9e31b56b720f3cf0bd22c5eacc35b51797782ad0f03172c2038b9fbd' in (e/'APPROVED-SPLASH-IDENTITY.txt').read_text(),'raw_visual_full_desktop':raw.get('status')=='PASS','iso_visual_full_desktop':dvd.get('status')=='PASS','raw_required_markers':all(x in rs for x in required),'iso_required_markers':all(x in ds for x in required),'raw_no_desktop_cert_fail':'FRAMES_DESKTOP_CERT_FAIL' not in rs,'iso_no_desktop_cert_fail':'FRAMES_DESKTOP_CERT_FAIL' not in ds,'write_policy_still_blocked':'decision: BLOCKED' in (e/'BUILD.log').read_text(errors='replace')}
+          status='PASS' if all(checks.values()) else 'FAIL'
+          out={'status':status,'profile':'frames-v116-full-interactive-desktop-gui-physical-test','iso_sha256':hashlib.sha256(iso.read_bytes()).hexdigest(),'approved_splash_sha256':'70e9ca0c9e31b56b720f3cf0bd22c5eacc35b51797782ad0f03172c2038b9fbd','visual_requirement':'multiple native window-manager windows plus full desktop content','checks':checks,'physical_test_allowed':status=='PASS','physical_destructive_writes_certified':False,'promotion_allowed':False}
+          (e/'FINAL-FULL-INTERACTIVE-DESKTOP-GUI-CERTIFICATION.json').write_text(json.dumps(out,indent=2)+'\n')
+          if status!='PASS': raise SystemExit(1)
+          PY
+          cd "$E"; find . -maxdepth 1 -type f ! -name EVIDENCE-FILES-SHA256.txt -print0 | sort -z | xargs -0 sha256sum > EVIDENCE-FILES-SHA256.txt
+
+      - name: Upload full interactive desktop ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-0.9.106-v116-Full-Interactive-Desktop-GUI-UEFI-ISO
+          path: ${{ github.workspace }}/Frames-0.9.106-v116-Full-Interactive-Desktop-GUI-UEFI.iso
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Upload full GUI evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v116-Full-Interactive-Desktop-GUI-Evidence
+          path: full-gui-evidence/
+          if-no-files-found: error
+          retention-days: 30
