@@ -4,8 +4,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ExpectedSha256 = 'abeead78504b6562ee6ecef47027c95803594dd21527cfc3120205a5ef9b7068'
-$ExpectedSize = 67160064
+$ExpectedSha256 = '7d1c212ad71778a84579e91c2e12ebafe3801a8bcd8a0a0856e506d47ebe20c7'
+$ExpectedSize = 67401728
 
 $resolved = (Resolve-Path -LiteralPath $IsoPath).Path
 $item = Get-Item -LiteralPath $resolved
@@ -34,4 +34,4 @@ if ($result.status -ne 'PASS') {
     exit 1
 }
 
-Write-Host 'Certified ISO identity PASS. Physical boot validation may proceed within the documented safety boundary.'
+Write-Host 'Certified USB-compatible full-GUI ISO identity PASS. Physical boot validation may proceed within the documented safety boundary.'
