@@ -102,7 +102,7 @@ jobs:
           test -s build/FramesKernel.fkrn
           test -s build/System.fex
 
-      - name: Preserve product ESP and create USB-friendly UEFI ISO
+      - name: Preserve product ESP and create fail-closed UEFI El Torito ISO
         shell: bash
         run: |
           set -euo pipefail
@@ -115,6 +115,7 @@ jobs:
           COUNT=$((LAST - FIRST + 1))
           EFI_IMG="$RUNNER_TEMP/v101-product-efiboot.img"
           dd if="$ESP" of="$EFI_IMG" bs=512 skip="$FIRST" count="$COUNT" status=none
+          test -s "$EFI_IMG"
           fsck.vfat -n "$EFI_IMG" | tee "$GITHUB_WORKSPACE/integration-evidence/EFI-FAT-CHECK.txt" || true
           mdir -i "$EFI_IMG" ::/ | tee "$GITHUB_WORKSPACE/integration-evidence/EFI-ROOT-DIR.txt"
           mdir -i "$EFI_IMG" ::/EFI/BOOT/ | tee "$GITHUB_WORKSPACE/integration-evidence/EFI-BOOT-DIR.txt"
@@ -130,14 +131,17 @@ jobs:
           find build -maxdepth 1 -type f \( -iname '*Desktop*.img' -o -iname '*.fthm' -o -iname '*.cfg' -o -iname '*.fapp' \) -exec cp -t "$ROOT/FRAMES" {} + 2>/dev/null || true
           printf '%s\n' 'Frames v116 Full Product Integration Test Boot' 'Product shell: Frames 0.9.91 Integrated Connected Services v101' 'Kernel additions: certified v109-v116 architecture port' 'Integration test image; not a new release promotion.' > "$ROOT/README.TXT"
           OUT="$GITHUB_WORKSPACE/Frames-v116-Full-Product-v101-Integrated-UEFI.iso"
-          xorriso -as mkisofs -iso-level 3 -R -J -V FRAMES_FULL -append_partition 2 0xef "$EFI_IMG" -appended_part_as_gpt -e --interval:appended_partition_2:all:: -no-emul-boot -o "$OUT" "$ROOT" 2>&1 | tee "$GITHUB_WORKSPACE/integration-evidence/XORRISO.log"
+          xorriso -as mkisofs -iso-level 3 -R -J -V FRAMES_FULL -eltorito-alt-boot -e EFI/product-efiboot.img -no-emul-boot -o "$OUT" "$ROOT" 2>&1 | tee "$GITHUB_WORKSPACE/integration-evidence/XORRISO.log"
           test -s "$OUT"
           sha256sum "$OUT" | tee "$GITHUB_WORKSPACE/Frames-v116-Full-Product-v101-Integrated-UEFI.iso.sha256"
+          xorriso -indev "$OUT" -report_el_torito plain > "$GITHUB_WORKSPACE/integration-evidence/EL-TORITO-REPORT.txt" 2>&1
+          xorriso -indev "$OUT" -find / -maxdepth 3 -type f -exec lsdl > "$GITHUB_WORKSPACE/integration-evidence/ISO-CONTENTS.txt" 2>&1
+          grep -q 'UEFI' "$GITHUB_WORKSPACE/integration-evidence/EL-TORITO-REPORT.txt"
+          grep -q '/EFI/product-efiboot.img' "$GITHUB_WORKSPACE/integration-evidence/EL-TORITO-REPORT.txt"
           echo "ISO=$OUT" >> "$GITHUB_ENV"
 
-      - name: QEMU OVMF full-product smoke and framebuffer capture
+      - name: QEMU OVMF full-product fail-closed runtime boot proof
         shell: bash
-        continue-on-error: true
         run: |
           set -euo pipefail
           code=""; vars=""
@@ -148,13 +152,54 @@ jobs:
           MON="$RUNNER_TEMP/qemu-monitor.sock"
           SERIAL="$GITHUB_WORKSPACE/integration-evidence/FULL-PRODUCT-SERIAL.log"
           SHOT="$GITHUB_WORKSPACE/integration-evidence/FULL-PRODUCT-FRAMEBUFFER.ppm"
+          rm -f "$MON"
           qemu-system-x86_64 -machine q35 -m 1024 -smp 2 -drive if=pflash,format=raw,readonly=on,file="$code" -drive if=pflash,format=raw,file="$RUNNER_TEMP/OVMF_VARS.fd" -cdrom "$ISO" -boot d -serial file:"$SERIAL" -monitor unix:"$MON",server=on,wait=off -display none -vga std -no-reboot &
           QPID=$!
           for i in $(seq 1 60); do [ -S "$MON" ] && break; sleep 1; done
-          sleep 35
-          printf 'screendump %s\ninfo status\nquit\n' "$SHOT" | nc -U "$MON" || true
-          wait "$QPID" || true
-          grep -E 'FRAMES_|GUI|DESKTOP|SHELL|COMPOS|CONNECTED|SYSTEM_SERVICE' "$SERIAL" | tail -300 > "$GITHUB_WORKSPACE/integration-evidence/PRODUCT-RUNTIME-MARKERS.txt" || true
+          test -S "$MON"
+          sleep 45
+          printf 'screendump %s\ninfo status\nquit\n' "$SHOT" | nc -U "$MON" > "$GITHUB_WORKSPACE/integration-evidence/QEMU-MONITOR.txt" 2>&1
+          wait "$QPID"
+          test -s "$SERIAL"
+          test -s "$SHOT"
+          ! grep -q 'failed to load Boot0001' "$SERIAL"
+          grep -q 'BdsDxe: starting Boot0001' "$SERIAL"
+          grep -q 'FRAMES_KERNEL_START' "$SERIAL"
+          grep -q 'FRAMES_HAL_RUNTIME_V6_OK' "$SERIAL"
+          grep -q 'FRAMES_CONCURRENCY_RUNTIME_V7_OK' "$SERIAL"
+          grep -q 'FRAMES_UNIFIED_INPUT_RUNTIME_V8_OK' "$SERIAL"
+          grep -q 'FRAMES_INPUT_MIGRATION_SNAPSHOT_V8_OK' "$SERIAL"
+          grep -q 'FRAMES_USB_MIGRATION_RUNTIME_V9_OK' "$SERIAL"
+          grep -E 'BdsDxe: starting Boot0001|FRAMES_(KERNEL_START|DESKTOP_POLICY_OK|HAL_RUNTIME_V6_OK|CONCURRENCY_RUNTIME_V7_OK|UNIFIED_INPUT_RUNTIME_V8_OK|INPUT_MIGRATION_SNAPSHOT_V8_OK|USB_MIGRATION_RUNTIME_V9_OK|PRE1_SNAPSHOT_READY|GUI_DESKTOP_INTEGRATED_OK)' "$SERIAL" | tail -300 > "$GITHUB_WORKSPACE/integration-evidence/PRODUCT-RUNTIME-MARKERS.txt"
+          test -s "$GITHUB_WORKSPACE/integration-evidence/PRODUCT-RUNTIME-MARKERS.txt"
+
+      - name: Final fail-closed full-product integration gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/integration-evidence"
+          test -s "$E/V101-KIT-SHA256.txt"
+          test -s "$E/V101-SOURCE-SHA256.txt"
+          test -s "$E/PRODUCT-IDENTITY.txt"
+          test -s "$E/V116-PRODUCT-KERNEL-MAIN-SHA256-AFTER.txt"
+          test -s "$E/PRODUCT-V116-FKRN-SHA256.txt"
+          test -s "$E/EL-TORITO-REPORT.txt"
+          test -s "$E/FULL-PRODUCT-SERIAL.log"
+          test -s "$E/FULL-PRODUCT-FRAMEBUFFER.ppm"
+          test -s "$E/PRODUCT-RUNTIME-MARKERS.txt"
+          grep -q 'version=0.9.91' "$E/PRODUCT-IDENTITY.txt"
+          grep -q 'UEFI' "$E/EL-TORITO-REPORT.txt"
+          grep -q '/EFI/product-efiboot.img' "$E/EL-TORITO-REPORT.txt"
+          ! grep -q 'failed to load Boot0001' "$E/FULL-PRODUCT-SERIAL.log"
+          grep -q 'FRAMES_KERNEL_START' "$E/FULL-PRODUCT-SERIAL.log"
+          grep -q 'FRAMES_HAL_RUNTIME_V6_OK' "$E/FULL-PRODUCT-SERIAL.log"
+          grep -q 'FRAMES_CONCURRENCY_RUNTIME_V7_OK' "$E/FULL-PRODUCT-SERIAL.log"
+          grep -q 'FRAMES_UNIFIED_INPUT_RUNTIME_V8_OK' "$E/FULL-PRODUCT-SERIAL.log"
+          grep -q 'FRAMES_INPUT_MIGRATION_SNAPSHOT_V8_OK' "$E/FULL-PRODUCT-SERIAL.log"
+          grep -q 'FRAMES_USB_MIGRATION_RUNTIME_V9_OK' "$E/FULL-PRODUCT-SERIAL.log"
+          printf '{"status":"PASS","profile":"frames-v116-full-product-v101-integration-test","product_version":"0.9.91","architecture_port":"v109-v116","packaging":"UEFI El Torito","runtime_boot_proof":true,"promotion_allowed":false,"note":"integration test only; not a new release promotion"}\n' > "$E/FINAL-FULL-PRODUCT-V116-INTEGRATION.json"
+          cd "$E"
+          find . -maxdepth 1 -type f ! -name EVIDENCE-FILES-SHA256.txt -print0 | sort -z | xargs -0 sha256sum > EVIDENCE-FILES-SHA256.txt
 
       - name: Upload full integrated ISO and evidence
         if: always()
