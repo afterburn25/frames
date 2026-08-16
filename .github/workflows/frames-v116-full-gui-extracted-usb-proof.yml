@@ -1,0 +1,166 @@
+name: Frames v116 Full GUI Extracted USB Proof
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ physical-hardware-full-gui-validation ]
+    paths:
+      - '.github/workflows/frames-v116-full-gui-extracted-usb-proof.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  MEDIA_RUN_ID: '31924483046'
+  MEDIA_ISO_SHA256: '7d1c212ad71778a84579e91c2e12ebafe3801a8bcd8a0a0856e506d47ebe20c7'
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  certify-extracted-usb-boot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: physical-hardware-full-gui-validation
+
+      - name: Install USB boot proof tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y xorriso qemu-system-x86 ovmf netcat-openbsd gdisk dosfstools python3 python3-pil
+
+      - name: Download exact USB-compatible ISO
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p input extracted-usb-evidence
+          gh run download "$MEDIA_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name Frames-0.9.106-v116-Full-Interactive-Desktop-GUI-USB-Compatible-UEFI-ISO \
+            --dir input
+          ISO="$(find input -type f -name '*.iso' -print -quit)"
+          test -s "$ISO"
+          ACTUAL="$(sha256sum "$ISO" | awk '{print $1}')"
+          test "$ACTUAL" = "$MEDIA_ISO_SHA256"
+          printf '%s  %s\n' "$ACTUAL" "$ISO" > extracted-usb-evidence/SOURCE-ISO-SHA256.txt
+          echo "ISO=$(readlink -f "$ISO")" >> "$GITHUB_ENV"
+
+      - name: Extract ISO filesystem only
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/extracted-usb-evidence"; ROOT="$RUNNER_TEMP/extracted-iso"
+          mkdir -p "$ROOT"
+          xorriso -osirrox on -indev "$ISO" -extract / "$ROOT" > "$E/ISO-EXTRACT.log" 2>&1
+          test -s "$ROOT/EFI/BOOT/BOOTX64.EFI"
+          for f in FramesKernel.fkrn System.fex DESKTOP.CFG HELLO.FAP THEME.FTH APPEAR.CFG GUITEST.CFG SPLASH.FSP; do test -s "$ROOT/FRAMES/$f"; done
+          sha256sum "$ROOT/EFI/BOOT/BOOTX64.EFI" "$ROOT/FRAMES"/* > "$E/EXTRACTED-TREE-SHA256.txt"
+          echo "ROOT=$ROOT" >> "$GITHUB_ENV"
+
+      - name: Build fresh GPT FAT32 removable USB from extracted files
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/extracted-usb-evidence"; IMG="$GITHUB_WORKSPACE/Frames-v116-Full-GUI-Extracted-USB.img"
+          truncate -s 128M "$IMG"
+          sgdisk --clear --new=1:2048:0 --typecode=1:EF00 --change-name=1:FRAMES_USB "$IMG" > "$E/USB-GPT-CREATE.log"
+          LOOP="$(sudo losetup --find --show --partscan "$IMG")"
+          trap 'sudo umount /mnt/frames-usb 2>/dev/null || true; sudo losetup -d "$LOOP" 2>/dev/null || true' EXIT
+          sudo mkfs.fat -F 32 -n FRAMES_USB "${LOOP}p1" > "$E/USB-FAT32-CREATE.log"
+          sudo mkdir -p /mnt/frames-usb
+          sudo mount "${LOOP}p1" /mnt/frames-usb
+          sudo cp -a "$ROOT/EFI" /mnt/frames-usb/EFI
+          sudo cp -a "$ROOT/FRAMES" /mnt/frames-usb/FRAMES
+          sync
+          find /mnt/frames-usb -maxdepth 3 -type f -printf '%P\n' | sort | sudo tee "$E/USB-FILE-TREE.txt" >/dev/null
+          test -s /mnt/frames-usb/EFI/BOOT/BOOTX64.EFI
+          for f in FramesKernel.fkrn System.fex DESKTOP.CFG HELLO.FAP THEME.FTH APPEAR.CFG GUITEST.CFG SPLASH.FSP; do test -s "/mnt/frames-usb/FRAMES/$f"; done
+          sudo umount /mnt/frames-usb
+          sudo losetup -d "$LOOP"
+          trap - EXIT
+          sgdisk -p "$IMG" > "$E/USB-GPT-REPORT.txt"
+          sha256sum "$IMG" > "$E/USB-IMAGE-SHA256.txt"
+          echo "USB_IMG=$(readlink -f "$IMG")" >> "$GITHUB_ENV"
+
+      - name: Locate OVMF
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=''; vars=''
+          for p in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd; do [ -f "$p" ] && code="$p" && break; done
+          for p in /usr/share/OVMF/OVMF_VARS_4M.fd /usr/share/OVMF/OVMF_VARS.fd; do [ -f "$p" ] && vars="$p" && break; done
+          test -n "$code"; test -n "$vars"
+          echo "OVMF_CODE=$code" >> "$GITHUB_ENV"; echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"
+
+      - name: Boot freshly extracted image through xHCI USB mass storage
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/extracted-usb-evidence"; MON="$RUNNER_TEMP/usb-mon.sock"; SERIAL="$E/USB-SERIAL.log"
+          cp "$OVMF_VARS" "$RUNNER_TEMP/usb-vars.fd"; rm -f "$MON"
+          qemu-system-x86_64 -machine q35 -m 1024 -smp 2 \
+            -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
+            -drive if=pflash,format=raw,file="$RUNNER_TEMP/usb-vars.fd" \
+            -device qemu-xhci,id=xhci \
+            -drive if=none,id=usbdisk,format=raw,file="$USB_IMG" \
+            -device usb-storage,drive=usbdisk,bus=xhci.0,bootindex=1,removable=on \
+            -boot menu=off -serial file:"$SERIAL" \
+            -monitor unix:"$MON",server=on,wait=off -display none -vga std -no-reboot &
+          PID=$!; trap 'kill $PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 80); do [ -S "$MON" ] && break; sleep 0.1; done; test -S "$MON"
+          python3 - "$MON" "$E" <<'PY'
+          import socket,sys,time,pathlib
+          s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect(sys.argv[1]); s.settimeout(.05)
+          try:s.recv(4096)
+          except Exception:pass
+          out=pathlib.Path(sys.argv[2])
+          for i in range(60):
+              s.sendall(f'screendump {out}/SPLASH-{i:02d}.ppm\n'.encode()); time.sleep(.15)
+          s.close()
+          PY
+          python3 bootux/verify_splash_frame.py "$E"/SPLASH-*.ppm | tee "$E/USB-SPLASH-PROOF.json"
+          WIN="$(python3 -c 'import json;print(json.load(open("extracted-usb-evidence/USB-SPLASH-PROOF.json"))["winner"]["file"])')"
+          cp "$E/$WIN" "$E/USB-BOOT-SPLASH.ppm"; rm -f "$E"/SPLASH-[0-9][0-9].ppm
+          found=0; for i in $(seq 1 90); do if [ -s "$SERIAL" ] && grep -q 'FRAMES_FULL_INTERACTIVE_DESKTOP_OK' "$SERIAL"; then found=1; break; fi; sleep 1; done; test "$found" = 1
+          for m in FRAMES_KERNEL_START FRAMES_USB_MIGRATION_RUNTIME_V9_OK FRAMES_DESKTOP_PHASE12_OK FRAMES_APPEARANCE_SYSTEM_OK FRAMES_FULL_GUI_WINDOWS_OK FRAMES_FULL_GUI_INPUT_OK FRAMES_FULL_GUI_FILEMAN_OK FRAMES_FULL_GUI_SETTINGS_OK FRAMES_FULL_INTERACTIVE_DESKTOP_OK FRAMES_INTEGRATED_GUI_OK FRAMES_GUI_PHYSICAL_TEST_READY; do grep -q "$m" "$SERIAL"; done
+          ! grep -q 'FRAMES_DESKTOP_CERT_FAIL' "$SERIAL"
+          printf 'screendump %s\nquit\n' "$E/USB-FULL-DESKTOP.ppm" | nc -U "$MON" >/dev/null 2>&1 || true
+          wait "$PID" || true; trap - EXIT
+          test -s "$E/USB-FULL-DESKTOP.ppm"
+          python3 bootux/verify_full_desktop_frame.py "$E/USB-FULL-DESKTOP.ppm" | tee "$E/USB-FULL-DESKTOP-VISUAL.json"
+          python3 bootux/verify_gui_transition_frame.py "$E/USB-BOOT-SPLASH.ppm" "$E/USB-FULL-DESKTOP.ppm" | tee "$E/USB-SPLASH-TO-FULL-GUI.json"
+
+      - name: Final fail-closed extracted USB certification
+        shell: bash
+        run: |
+          set -euo pipefail
+          E="$GITHUB_WORKSPACE/extracted-usb-evidence"
+          python3 - "$E" <<'PY'
+          import json,pathlib,sys
+          e=pathlib.Path(sys.argv[1])
+          vis=json.loads((e/'USB-FULL-DESKTOP-VISUAL.json').read_text())
+          trans=json.loads((e/'USB-SPLASH-TO-FULL-GUI.json').read_text())
+          serial=(e/'USB-SERIAL.log').read_text(errors='replace')
+          checks={
+            'source_iso_exact':'7d1c212ad71778a84579e91c2e12ebafe3801a8bcd8a0a0856e506d47ebe20c7' in (e/'SOURCE-ISO-SHA256.txt').read_text(),
+            'uefi_removable_path_present':'EFI/BOOT/BOOTX64.EFI' in (e/'USB-FILE-TREE.txt').read_text(),
+            'frames_payload_present':'FRAMES/SPLASH.FSP' in (e/'USB-FILE-TREE.txt').read_text() and 'FRAMES/DESKTOP.CFG' in (e/'USB-FILE-TREE.txt').read_text(),
+            'full_desktop_visual':vis.get('status')=='PASS',
+            'splash_to_gui_transition':trans.get('status')=='PASS',
+            'full_gui_runtime':'FRAMES_FULL_INTERACTIVE_DESKTOP_OK' in serial and 'FRAMES_INTEGRATED_GUI_OK' in serial,
+            'no_desktop_cert_fail':'FRAMES_DESKTOP_CERT_FAIL' not in serial
+          }
+          status='PASS' if all(checks.values()) else 'FAIL'
+          (e/'FINAL-EXTRACTED-USB-CERTIFICATION.json').write_text(json.dumps({'status':status,'profile':'frames-v116-full-gui-extracted-usb-boot','source_iso_sha256':'7d1c212ad71778a84579e91c2e12ebafe3801a8bcd8a0a0856e506d47ebe20c7','checks':checks,'physical_test_allowed':status=='PASS','physical_destructive_writes_certified':False,'promotion_allowed':False},indent=2)+'\n')
+          if status!='PASS': raise SystemExit(1)
+          PY
+          cd "$E"; find . -maxdepth 1 -type f ! -name EVIDENCE-FILES-SHA256.txt -print0 | sort -z | xargs -0 sha256sum > EVIDENCE-FILES-SHA256.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v116-Full-GUI-Extracted-USB-Boot-Evidence
+          path: extracted-usb-evidence/
+          if-no-files-found: error
+          retention-days: 30
