@@ -41,24 +41,33 @@ def main():
                 result['runtime_ready']=True; break
             time.sleep(.1)
         if not result['runtime_ready']: raise RuntimeError('runtime readiness timeout')
-        def rel(dx,dy):
-            call('input-send-event',{'events':[{'type':'rel','data':{'axis':'x','value':dx}},{'type':'rel','data':{'axis':'y','value':dy}}]}); time.sleep(.04)
-        # Clamp pointer to top-left, then move into the text box (1280x800 test layout -> target about 110,580).
-        for _ in range(18): rel(-120,-120)
-        rel(110,0)
-        for _ in range(5): rel(0,100)
-        rel(0,80)
-        # Hover must switch to I-beam, then click to focus the text box.
-        for _ in range(30):
+        def rel(dx,dy,delay=.025):
+            call('input-send-event',{'events':[{'type':'rel','data':{'axis':'x','value':dx}},{'type':'rel','data':{'axis':'y','value':dy}}]}); time.sleep(delay)
+        # Standard-PS/2 physical conversion is deliberately bounded/scaled. Large synthetic deltas
+        # can be rejected, so walk from the deterministic initial cursor (~396,290) into the
+        # 1280x800 INPUT TEST textbox (~x 60..640, y 556..604) using ordinary small packets.
+        for _ in range(78): rel(-6,0)
+        for _ in range(73): rel(0,6)
+        hmp(f'screendump {out}/HOVER.ppm')
+        # Hover must switch to I-beam before focus/click.
+        for _ in range(60):
             t=ser.read_text(errors='ignore') if ser.exists() else ''
             if 'FRAMES_V108_IBEAM_OK' in t: result['ibeam']=True; break
             time.sleep(.05)
+        if not result['ibeam']:
+            # Search a small rectangle around the expected textbox location using valid PS/2-sized moves.
+            for dy in (-6,6,-6,6):
+                for _ in range(8):
+                    rel(6,dy)
+                    t=ser.read_text(errors='ignore') if ser.exists() else ''
+                    if 'FRAMES_V108_IBEAM_OK' in t: result['ibeam']=True; break
+                if result['ibeam']: break
         call('input-send-event',{'events':[{'type':'btn','data':{'down':True,'button':'left'}}]}); time.sleep(.08)
         call('input-send-event',{'events':[{'type':'btn','data':{'down':False,'button':'left'}}]}); time.sleep(.12)
-        # Exact editing proof: ABC -> left -> left -> right -> delete -> backspace == A.
+        # Exact editing proof: ABC -> Left -> Left -> Right -> Delete -> Backspace == A.
         for key in ('a','b','c','left','left','right','delete','backspace'):
-            hmp('sendkey '+key); time.sleep(.16)
-        deadline=time.time()+5
+            hmp('sendkey '+key); time.sleep(.18)
+        deadline=time.time()+6
         while time.time()<deadline:
             t=ser.read_text(errors='ignore') if ser.exists() else ''
             result['ibeam']='FRAMES_V108_IBEAM_OK' in t
