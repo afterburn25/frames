@@ -1,0 +1,65 @@
+name: Frames v108 r7 Compilefix Hash Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-physical-input-bringup ]
+    paths:
+      - '.github/workflows/frames-v108-r7-compilefix-hash-probe.yml'
+      - 'tools/ci/patch_v108_physical_input_r7_compilefix.py'
+
+permissions:
+  contents: read
+
+env:
+  KIT_SHA: 61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a
+  SRC_SHA: 5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d
+  BASE_MAIN_SHA: ffc5721eca68844357dbdca63b0edf266e7e210f9d162eecde8cae0067f210a8
+  R2_MAIN_SHA: 8cf33253489331e200643fa004992fece4eaf86b6feccaa3e00c06883927f675
+  R5_MAIN_SHA: d0421388cd288a7073ca750915b1b51ceeee62acfe524a6785f855e42f9b1e7f
+  R6_MAIN_SHA: de8cd41f707268bc0d7bb2ff5ef925ba0e8981650703afdb065b1a62a1d6cca1
+  R7_PRE_SHA: b94070bfe399162a8bb5bef1694c92100716d500d9e85737896901ef3f5aa8e7
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-physical-input-bringup
+      - name: Reconstruct exact v108 through r7 compilefix and emit hash
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/probe" evidence
+          mkdir -p "$RUNNER_TEMP/probe/kit" "$RUNNER_TEMP/probe/src" evidence
+          K=Frames-0.9.98-Runtime-Certification-Kit-v108-r9.zip
+          test "$(sha256sum "$K" | awk '{print $1}')" = "$KIT_SHA"
+          unzip -q "$K" -d "$RUNNER_TEMP/probe/kit"
+          Z="$RUNNER_TEMP/probe/kit/Frames-0.9.98-Source-v108.zip"
+          test "$(sha256sum "$Z" | awk '{print $1}')" = "$SRC_SHA"
+          unzip -q "$Z" -d "$RUNNER_TEMP/probe/src"
+          F="$RUNNER_TEMP/probe/src/Frames-0.9.98"
+          test "$(sha256sum "$F/kernel/main.nx" | awk '{print $1}')" = "$BASE_MAIN_SHA"
+          python3 tools/ci/patch_v108_live_input_common.py "$F/kernel/main.nx" >/dev/null
+          python3 tools/ci/patch_v108_usb_mouse_live.py "$F/kernel/main.nx" >/dev/null
+          python3 tools/ci/patch_v108_ps2_touchpad_live.py "$F/kernel/main.nx" >/dev/null
+          python3 tools/ci/patch_v108_input_telemetry_overlay.py "$F/kernel/main.nx" >/dev/null
+          python3 tools/ci/patch_v108_input_usbboot_gate_decouple.py "$F/kernel/main.nx" >/dev/null
+          test "$(sha256sum "$F/kernel/main.nx" | awk '{print $1}')" = "$R2_MAIN_SHA"
+          python3 tools/ci/patch_v108_physical_deep_telemetry.py "$F/kernel/main.nx" >/dev/null
+          test "$(sha256sum "$F/kernel/main.nx" | awk '{print $1}')" = "$R5_MAIN_SHA"
+          python3 tools/ci/patch_v108_stable_input_diag_runtime.py "$F/kernel/main.nx" >/dev/null
+          test "$(sha256sum "$F/kernel/main.nx" | awk '{print $1}')" = "$R6_MAIN_SHA"
+          python3 tools/ci/patch_v108_physical_input_r7.py "$F/kernel/main.nx" >/dev/null
+          test "$(sha256sum "$F/kernel/main.nx" | awk '{print $1}')" = "$R7_PRE_SHA"
+          python3 tools/ci/patch_v108_physical_input_r7_compilefix.py "$F/kernel/main.nx" | tee evidence/R7-COMPILEFIX-SHA256.txt
+          ! grep -Fq 'fn v108_cursor_present(process:u64,oldx:u64,oldy:u64,newx:u64,newy:u64)' "$F/kernel/main.nx"
+          grep -Fq 'fn v108_cursor_present(process:u64,oldpos:u64,newpos:u64)' "$F/kernel/main.nx"
+          cp "$F/kernel/main.nx" evidence/kernel-r7-compilefixed.nx
+          sha256sum evidence/kernel-r7-compilefixed.nx > evidence/KERNEL-SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r7-Compilefix-Hash-Probe
+          path: evidence/**
+          if-no-files-found: error
+          retention-days: 30
