@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import traceback
 base=Path(__file__).with_name('r33c_cert_driver.py')
 src=base.read_text()
 repls={
@@ -34,4 +35,10 @@ insert=needle+"""
 if src.count(needle)!=1: raise SystemExit(f'r34 inherited gate anchor mismatch {src.count(needle)}')
 src=src.replace(needle,insert,1)
 ns={'__name__':'__main__','__file__':str(base)}
-exec(compile(src,str(base),'exec'),ns,ns)
+try:
+ exec(compile(src,str(base),'exec'),ns,ns)
+except BaseException:
+ out=Path('evidence')
+ out.mkdir(parents=True,exist_ok=True)
+ (out/'R34-FAILURE.txt').write_text(traceback.format_exc())
+ raise
