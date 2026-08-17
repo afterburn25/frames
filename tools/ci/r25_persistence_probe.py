@@ -3,7 +3,7 @@ import hashlib,json,pathlib,shutil,subprocess,tempfile
 import r25_cert_driver as d
 ROOT=pathlib.Path.cwd()
 R21_SHA=d.R21_SHA; R24_SHA=d.R24_SHA
-R25E_SHA='fd99d34b262328db9ee3b80755a0f35508f6e5d861504786e39d5417d57367c5'
+R25F_SHA='067a87bc97ae725795bedffd611e4e55dcf9def2f063868768fb4084232c81a5'
 ISO_NAME=d.ISO_NAME; IMG_NAME=d.IMG_NAME
 
 def req(x,m):
@@ -20,8 +20,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='r25probe-') as td:
         td=pathlib.Path(td); kd=td/'kit'; sd=td/'src'; kd.mkdir(); sd.mkdir(); run(['unzip','-q',kit,'-d',kd]); z=kd/'Frames-0.9.98-Source-v108.zip'; req(sha(z)==d.SRC_SHA,'source identity'); run(['unzip','-q',z,'-d',sd]); F=sd/'Frames-0.9.98'; shutil.copy2(r21,F/'kernel/main.nx')
         r24=td/'r24.nx'; shutil.copy2(r21,r24); run(['python3',ROOT/'tools/ci/patch_v108_physical_input_r24b_fixbrace.py',r24],stdout=subprocess.PIPE); req(sha(r24)==R24_SHA,'r24 identity')
-        rr=run(['python3',ROOT/'tools/ci/patch_v108_r25e_msc_armdiag.py',F/'kernel/main.nx'],stdout=subprocess.PIPE); req(sha(F/'kernel/main.nx')==R25E_SHA,'r25e identity'); shutil.copy2(F/'kernel/main.nx',ROOT/'probe-evidence/kernel-r25e.nx'); (ROOT/'probe-evidence/R25E-SHA.txt').write_text(rr.stdout)
-        # d.build_iso expects out/payload names; temporarily bind directories using symlinks to probe dirs.
+        rr=run(['python3',ROOT/'tools/ci/patch_v108_r25f_msc_inquiry_first.py',F/'kernel/main.nx'],stdout=subprocess.PIPE); req(sha(F/'kernel/main.nx')==R25F_SHA,'r25f identity'); shutil.copy2(F/'kernel/main.nx',ROOT/'probe-evidence/kernel-r25f.nx'); (ROOT/'probe-evidence/R25F-SHA.txt').write_text(rr.stdout)
         for x in ('out','payload'):
             shutil.rmtree(ROOT/x,ignore_errors=True)
         (ROOT/'out').symlink_to(ROOT/'probe-out',target_is_directory=True); (ROOT/'payload').symlink_to(ROOT/'probe-payload',target_is_directory=True)
@@ -29,7 +28,6 @@ def main():
         finally:
             (ROOT/'out').unlink(); (ROOT/'payload').unlink()
         iso=ROOT/'probe-out'/ISO_NAME; iso_sha=sha(iso); (ROOT/'probe-evidence/ISO-SHA256.txt').write_text(f'{iso_sha}  {ISO_NAME}\n')
-        # Image builder reads payload/; expose only for this call.
         (ROOT/'payload').symlink_to(ROOT/'probe-payload',target_is_directory=True)
         try: run(['python3','tools/ci/make_r25_logging_usb.py','--payload','payload','--out',ROOT/'probe-out'/IMG_NAME,'--evidence','probe-evidence'],cwd=ROOT)
         finally: (ROOT/'payload').unlink()
