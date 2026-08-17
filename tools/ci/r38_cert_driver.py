@@ -11,18 +11,24 @@ def one(old,new,label):
  if n!=1: raise SystemExit(f'r38 cert anchor {label} count {n}')
  src=src.replace(old,new,1)
 
+def alln(old,new,count,label):
+ global src
+ n=src.count(old)
+ if n!=count: raise SystemExit(f'r38 cert anchor {label} count {n}, expected {count}')
+ src=src.replace(old,new)
+
 one("'patch_v108_r37b_stable_diag.py'","'patch_v108_r38_hid_event_identity_altsetting.py'",'patch target')
-one(r'\"kernel-r37b.nx\"',r'\"kernel-r38.nx\"','kernel evidence target')
+one('kernel-r37b.nx','kernel-r38.nx','kernel evidence target')
 one('2cb422d2c7d00cdbb1da3eee4ee696c9ae0723b3f28669bf80efe256d14de650','c6962f3cb939e6b83308f85f07cb8b319ee322747cd419b99b1c2e82e5c8375d','exact kernel identity')
 one("'Frames-0.9.98-v108-r37b-G750JM-xHCI-Ring-Elantech-Stable-Diagnostics-Rufus-UEFI.iso'","'Frames-0.9.98-v108-r38-G750JM-HID-Event-Identity-AltSetting-Recovery-Rufus-UEFI.iso'",'ISO target')
 one("'R37B-SHA.txt'","'R38-SHA.txt'",'SHA evidence target')
 one("'R25K-R37B.patch'","'R25K-R38.patch'",'patch evidence target')
 one("'FRAMES_V108_R37B'","'FRAMES_V108_R38'",'ISO label target')
-one("\"(ROOT/'evidence/R37B-AGGREGATE.json')\"","\"(ROOT/'evidence/R38-AGGREGATE.json')\"",'aggregate target')
+one("R37B-AGGREGATE.json","R38-AGGREGATE.json",'aggregate target')
 one("'frames-0.9.98-v108-r37b-g750jm-xhci-ring-elantech-stable-diagnostics'","'frames-0.9.98-v108-r38-g750jm-hid-event-identity-altsetting-recovery'",'profile target')
 one("'Frames 0.9.98 v108 r37b — G750JM xHCI Ring + Elantech Stable Diagnostics'","'Frames 0.9.98 v108 r38 — G750JM HID Event Identity + Alt Setting Recovery'",'cert title target')
-one("\"print('R37B PASS_VM_PENDING_PHYSICAL',iso_sha)\"","\"print('R38 PASS_VM_PENDING_PHYSICAL',iso_sha)\"",'PASS target')
-one('R37B-FAILURE.txt','R38-FAILURE.txt','failure target')
+one("R37B PASS_VM_PENDING_PHYSICAL","R38 PASS_VM_PENDING_PHYSICAL",'PASS target')
+alln('R37B-FAILURE.txt','R38-FAILURE.txt',2,'failure target')
 one("'physical_r37':'NOT_TESTED','physical_r37b':'PENDING'","'physical_r37':'NOT_TESTED','physical_r37b':'FAIL_USB_PHYSICAL_TOUCHPAD_RECOVERED_HID_STOP_EVENT_Q0','physical_r37b_telemetry':'R37_S1_Q0_C1_K3_F2_E26','physical_r38':'PENDING'",'physical history target')
 
 needle="    req('(410*65536)+28' in s and '(py+726)' in s,'r37b compact row geometry missing')"
