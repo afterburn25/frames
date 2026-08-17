@@ -3,7 +3,7 @@ import hashlib,json,pathlib,shutil,subprocess,tempfile
 import r25_cert_driver as d
 ROOT=pathlib.Path.cwd()
 R21_SHA=d.R21_SHA; R24_SHA=d.R24_SHA
-R25F_SHA='067a87bc97ae725795bedffd611e4e55dcf9def2f063868768fb4084232c81a5'
+R25G_SHA='c2c0a71417e40f21e1ab4bc50daa42b8e105a1a22b2e56e046e7a0c51d672f2b'
 ISO_NAME=d.ISO_NAME; IMG_NAME=d.IMG_NAME
 
 def req(x,m):
@@ -20,7 +20,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='r25probe-') as td:
         td=pathlib.Path(td); kd=td/'kit'; sd=td/'src'; kd.mkdir(); sd.mkdir(); run(['unzip','-q',kit,'-d',kd]); z=kd/'Frames-0.9.98-Source-v108.zip'; req(sha(z)==d.SRC_SHA,'source identity'); run(['unzip','-q',z,'-d',sd]); F=sd/'Frames-0.9.98'; shutil.copy2(r21,F/'kernel/main.nx')
         r24=td/'r24.nx'; shutil.copy2(r21,r24); run(['python3',ROOT/'tools/ci/patch_v108_physical_input_r24b_fixbrace.py',r24],stdout=subprocess.PIPE); req(sha(r24)==R24_SHA,'r24 identity')
-        rr=run(['python3',ROOT/'tools/ci/patch_v108_r25f_msc_inquiry_first.py',F/'kernel/main.nx'],stdout=subprocess.PIPE); req(sha(F/'kernel/main.nx')==R25F_SHA,'r25f identity'); shutil.copy2(F/'kernel/main.nx',ROOT/'probe-evidence/kernel-r25f.nx'); (ROOT/'probe-evidence/R25F-SHA.txt').write_text(rr.stdout)
+        rr=run(['python3',ROOT/'tools/ci/patch_v108_r25g_bulk_event_diag.py',F/'kernel/main.nx'],stdout=subprocess.PIPE); req(sha(F/'kernel/main.nx')==R25G_SHA,'r25g identity'); shutil.copy2(F/'kernel/main.nx',ROOT/'probe-evidence/kernel-r25g.nx'); (ROOT/'probe-evidence/R25G-SHA.txt').write_text(rr.stdout)
         for x in ('out','payload'):
             shutil.rmtree(ROOT/x,ignore_errors=True)
         (ROOT/'out').symlink_to(ROOT/'probe-out',target_is_directory=True); (ROOT/'payload').symlink_to(ROOT/'probe-payload',target_is_directory=True)
