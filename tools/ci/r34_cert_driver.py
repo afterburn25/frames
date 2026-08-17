@@ -31,7 +31,8 @@ insert=needle+"""
  req('xhci_power_root_ports_v129(xhci_state)' in scan and 'reinit_after_v134=xhci_root_port_settle_v132(xhci_state)' in scan,'r34 reinit power/settle missing')
  req('volatile_write64(xhci_state+2496,before_v134)' in scan and 'volatile_write64(xhci_state+2536,reinit_err_v134)' in scan,'r34 physical reinit telemetry missing')
  req('v108_text_r34_v134' in s and 'volatile_read64(xhci+2496)' in s and 'volatile_read64(xhci+2536)' in s,'r34 overlay telemetry row missing')
- req('(410*65536)+778' in s,'r34 overlay height extension missing')"""
+ ov=fn_text(s,'v108_input_overlay_draw')
+ req('(410*65536)+742' in ov and 'py+712' in ov,'r34 compact overlay does not contain the new telemetry row')"""
 if src.count(needle)!=1: raise SystemExit(f'r34 inherited gate anchor mismatch {src.count(needle)}')
 src=src.replace(needle,insert,1)
 ns={'__name__':'__main__','__file__':str(base)}
