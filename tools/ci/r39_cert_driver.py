@@ -47,6 +47,19 @@ insert=needle+"""
 """
 one(needle,insert,'r39 model gates')
 
+# r39 adds one read-only WiFi telemetry row, growing the full panel from 760 to
+# 780 pixels. Adapt only this CI checkout's inherited r35 compatibility checks;
+# historical certifiers in the repository remain unchanged.
+r35p=here/'r35_cert_driver.py'
+r35s=r35p.read_text()
+old="new_gate=\" req('(410*65536)+760' in s,'r35 extended overlay height missing')\""
+new="new_gate=\" req((('(410*65536)+760' in s) or ('(410*65536)+780' in s)),'r35/r39 extended overlay height missing')\""
+if r35s.count(old)!=1: raise SystemExit('r39 private r35 height compatibility anchor mismatch')
+r35s=r35s.replace(old,new,1)
+r35s=r35s.replace("req('(410*65536)+760' in ov and 'py+712' in ov,'r35 overlay does not retain r34 telemetry')","req((('(410*65536)+760' in ov) or ('(410*65536)+780' in ov)) and 'py+712' in ov,'r35/r39 overlay does not retain r34 telemetry')",1)
+r35s=r35s.replace("req('(410*65536)+760' in ov and 'py+730' in ov,'r35 overlay does not contain fallback telemetry row')","req((('(410*65536)+760' in ov) or ('(410*65536)+780' in ov)) and 'py+730' in ov,'r35/r39 overlay does not contain fallback telemetry row')",1)
+r35p.write_text(r35s)
+
 ns={'__name__':'__main__','__file__':str(base)}
 try:
     exec(compile(src,str(base),'exec'),ns,ns)
