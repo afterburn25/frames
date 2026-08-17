@@ -65,7 +65,7 @@ one("(ROOT/'evidence/R36-AGGREGATE.json')","(ROOT/'evidence/R37-AGGREGATE.json')
 one("'profile':'frames-0.9.98-v108-r36-nonblocking-xhci-interrupt-recovery'","'profile':'frames-0.9.98-v108-r37-g750jm-xhci-ring-elantech-recovery'",'profile')
 one('Frames 0.9.98 v108 r36 — Nonblocking xHCI Interrupt Recovery','Frames 0.9.98 v108 r37 — G750JM xHCI Ring + Elantech Recovery','cert title')
 one("print('R36 PASS_VM_PENDING_PHYSICAL',iso_sha)","print('R37 PASS_VM_PENDING_PHYSICAL',iso_sha)",'PASS marker')
-alln("R36-FAILURE.txt","R37-FAILURE.txt",2,'failure evidence')
+alln("R36-FAILURE.txt","R37-FAILURE.txt",3,'failure evidence')
 
 oldhist="'physical_r35':'NOT_TESTED','physical_r35b':'FAIL_USB_PHYSICAL_EP0_MOUSE_TIMEOUT_TOUCHPAD_REGRESSION','physical_r35b_telemetry':'R35_F1_K1_M1_Q270_R78_E12','physical_r36':'PENDING'"
 newhist="'physical_r35':'NOT_TESTED','physical_r35b':'FAIL_USB_PHYSICAL_EP0_MOUSE_TIMEOUT_TOUCHPAD_REGRESSION','physical_r35b_telemetry':'R35_F1_K1_M1_Q270_R78_E12','physical_r36':'FAIL_USB_PHYSICAL_RUNNING_EP_NO_EVENTS_TOUCHPAD_FLICKER','physical_r36_telemetry':'R36_S1_I5_D5_M8_K562_E0','physical_r37':'PENDING'"
