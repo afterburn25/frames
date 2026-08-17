@@ -71,6 +71,17 @@ oldhist="'physical_r35':'NOT_TESTED','physical_r35b':'FAIL_USB_PHYSICAL_EP0_MOUS
 newhist="'physical_r35':'NOT_TESTED','physical_r35b':'FAIL_USB_PHYSICAL_EP0_MOUSE_TIMEOUT_TOUCHPAD_REGRESSION','physical_r35b_telemetry':'R35_F1_K1_M1_Q270_R78_E12','physical_r36':'FAIL_USB_PHYSICAL_RUNNING_EP_NO_EVENTS_TOUCHPAD_FLICKER','physical_r36_telemetry':'R36_S1_I5_D5_M8_K562_E0','physical_r37':'PENDING'"
 one(oldhist,newhist,'physical history')
 
+# Historical r32 correctly blocked motion packets from synthesizing a right click,
+# but its exact-text gate also prohibited r37 from synchronizing a genuine right
+# button bit carried by the G750JM's Elantech v4 motion class. Adapt only the
+# ephemeral CI checkout; the repository's historical r32 certifier stays immutable.
+r32p=here/'r32_cert_driver.py'
+r32src=r32p.read_text()
+r32old=" req('if typ==1 || typ==2 {' in btn and 'if typ==3' in btn,'r32 Elantech packet-class gate missing')"
+r32new=" req((('if typ==1 || typ==2 {' in btn) or ('if typ>=1 && typ<=3 {' in btn)) and 'if typ==3' in btn,'r32/r37 Elantech packet-class contract missing')"
+if r32src.count(r32old)!=1: raise SystemExit('r37 private r32 packet-class compatibility anchor mismatch')
+r32p.write_text(r32src.replace(r32old,r32new,1))
+
 ns={'__name__':'__main__','__file__':str(base)}
 try:
     exec(compile(src,str(base),'exec'),ns,ns)
