@@ -1,0 +1,10 @@
+Frames v108 r27 — Physical USB Controller Recovery
+
+Sole development priority: physical USB controller ownership/enumeration.
+
+Required evidence chain:
+OWNERSHIP -> RUN/RESET -> PORT CONNECT -> PORT ENABLE -> ENABLE SLOT -> ADDRESS DEVICE -> EP0 DESCRIPTOR -> HUB/MULTI-SLOT -> HID -> MSC READ -> FRAMES.LOG WRITE/FLUSH/READBACK.
+
+Must preserve r26 Rufus ISO handoff and r24/r26 desktop behavior. Internal NVMe/SATA/ESP remain read-only. Physical `.img` logging path remains deprecated.
+
+Audit shared xHCI event-ring consumers: unrelated events for another slot/endpoint must never be treated as fatal completion for the current waiter.
