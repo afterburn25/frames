@@ -33,14 +33,18 @@ with tempfile.TemporaryDirectory(prefix='r36-ident-') as td:
     req('ps2_poll_fallback_burst_v112(input_state,24);' in s,'r36 PS/2 fallback service missing')
     req('var v:u64=binterval; var p:u64=0; while v>1 { v=v/2; p=p+1; }' in s,'r36 lost r35b LS/FS interval repair')
 
-# r35 historically required the EP0 fallback to be integrated. Preserve the
-# original r35 certifier unchanged and make a private compatibility copy whose
-# integration gate now requires the physically justified r36 nonblocking policy.
+# r35 historically required the EP0 fallback integration and its own final screen
+# row. Preserve the original certifier unchanged and adapt only a private r36 copy.
 r35_src=(here/'r35_cert_driver.py').read_text()
 old_gate=" req('v135_hid_control_fallback_prepare(xhci,phys_state)' in s and 'v135_hid_control_fallback_poll(xhci,input_state)' in s,'r35 desktop runtime fallback integration missing')"
 new_gate=" req('v135_hid_control_fallback_prepare(xhci,phys_state)' not in s and 'v135_hid_control_fallback_poll(xhci,input_state)' not in s,'r36 blocking EP0 fallback remains integrated')"
-req(r35_src.count(old_gate)==1,'r36 r35 compatibility gate anchor mismatch')
-(here/'r35_r36_compat.py').write_text(r35_src.replace(old_gate,new_gate,1))
+req(r35_src.count(old_gate)==1,'r36 r35 compatibility integration gate anchor mismatch')
+r35_src=r35_src.replace(old_gate,new_gate,1)
+old_row=" req('v108_text_r35_v135' in s and 'volatile_read64(xhci+2560)' in s and 'volatile_read64(xhci+2616)' in s,'r35 physical telemetry row missing')"
+new_row=" req('v108_text_r36_v136' in s and 'volatile_read64(xhci+2696)' in s and 'volatile_read64(xhci+2784)' in s,'r36 physical endpoint telemetry row missing')"
+req(r35_src.count(old_row)==1,'r36 r35 compatibility telemetry gate anchor mismatch')
+r35_src=r35_src.replace(old_row,new_row,1)
+(here/'r35_r36_compat.py').write_text(r35_src)
 
 # Adapt the already-green r35b wrapper to r36 while retaining every inherited
 # VM, interaction, USB, PS/2, logging and safety gate.
