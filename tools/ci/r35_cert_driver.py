@@ -1,8 +1,31 @@
 #!/usr/bin/env python3
 from pathlib import Path
 import traceback
+here=Path(__file__).parent
+# Preserve the historical r33b/r33c certifiers unchanged. r35 intentionally grows
+# the diagnostics panel to 760px for one additional telemetry row, so adapt only
+# private compatibility copies consumed by this certification chain.
+r33b_src=(here/'r33b_cert_driver.py').read_text()
+old_gate=" req('(410*65536)+760' not in s,'r33b overlay height regression remains')"
+new_gate=" req('(410*65536)+760' in s,'r35 extended overlay height missing')"
+if r33b_src.count(old_gate)!=1: raise SystemExit('r35 r33b overlay compatibility gate anchor mismatch')
+(here/'r33b_r35_compat.py').write_text(r33b_src.replace(old_gate,new_gate,1))
+r33c_src=(here/'r33c_cert_driver.py').read_text()
+old_base="base=Path(__file__).with_name('r33b_cert_driver.py')"
+new_base="base=Path(__file__).with_name('r33b_r35_compat.py')"
+if r33c_src.count(old_base)!=1: raise SystemExit('r35 r33c base compatibility anchor mismatch')
+r33c_src=r33c_src.replace(old_base,new_base,1)
+old_needle='needle="'+old_gate+'"'
+new_needle='needle="'+new_gate+'"'
+if r33c_src.count(old_needle)!=1: raise SystemExit('r35 r33c inherited overlay needle anchor mismatch')
+r33c_src=r33c_src.replace(old_needle,new_needle,1)
+(here/'r33c_r35_compat.py').write_text(r33c_src)
+
 base=Path(__file__).with_name('r34_cert_driver.py')
 src=base.read_text()
+r34_base="base=Path(__file__).with_name('r33c_cert_driver.py')"
+if src.count(r34_base)!=1: raise SystemExit('r35 r34 base compatibility anchor mismatch')
+src=src.replace(r34_base,"base=Path(__file__).with_name('r33c_r35_compat.py')",1)
 repls={
 "R26_SHA='faed1632f131333e4e2c81c393b1e0df6a7940fde2c8506605e9b8964e7c5621'":"R26_SHA='168f103ae3ba8f6dc403b1fa4c18aab01ab8160bd63387efffd1688ef8532ad0'",
 "patch_v108_r34_late_reroute_reinit.py":"patch_v108_r35_hid_control_poll_fallback.py",
