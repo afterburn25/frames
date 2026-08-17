@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# r26b authoritative identity rerun trigger
 from pathlib import Path
 base=Path(__file__).with_name('r26_cert_driver.py')
 src=base.read_text()
