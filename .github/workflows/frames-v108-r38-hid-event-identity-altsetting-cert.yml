@@ -110,20 +110,13 @@ jobs:
           STATE=success
           DESC='r38 certification PASS'
           if [ "$R38_JOB_STATUS" != "success" ]; then STATE=failure; DESC='r38 certification FAIL'; fi
-          python3 - <<'PY'
-          import json,os
-          payload={'state':os.environ['STATE'],'context':'frames/r38-certification','description':os.environ['DESC'][:140]}
-          open('/tmp/r38-status.json','w').write(json.dumps(payload))
-          PY
+          printf '{"state":"%s","context":"frames/r38-certification","description":"%s"}\n' "$STATE" "$DESC" >/tmp/r38-status.json
           curl -fsSL -X POST \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
             --data-binary @/tmp/r38-status.json
-        env:
-          STATE: success
-          DESC: r38 certification PASS
       - name: Publish r38 CI status handoff
         if: always()
         continue-on-error: true
