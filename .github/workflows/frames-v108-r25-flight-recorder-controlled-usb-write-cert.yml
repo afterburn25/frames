@@ -26,6 +26,8 @@ on:
       - 'tools/ci/r25_cert_driver_v5.py'
       - 'tools/ci/r25_cert_driver_v6.py'
       - 'tools/ci/r25_cert_driver_v7.py'
+      - 'tools/ci/validate_physical_handoff.py'
+      - 'docs/PHYSICAL-FIX-HANDOFF-POLICY.md'
 
 permissions:
   contents: read
@@ -53,6 +55,8 @@ jobs:
           run-id: '31979817129'
       - name: Build and certify r25 combined Flight Recorder + shared xHCI + larger-media train
         run: python3 tools/ci/r25_cert_driver_v7.py
+      - name: Validate sealed Rufus physical handoff
+        run: python3 tools/ci/validate_physical_handoff.py --final final
       - name: Upload r25 candidate and evidence
         if: always()
         uses: actions/upload-artifact@v4
