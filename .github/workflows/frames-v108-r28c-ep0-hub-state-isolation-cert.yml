@@ -1,0 +1,68 @@
+name: Frames v108 r28c EP0 Hub State Isolation Certification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-usb-hub-topology-r1 ]
+    paths:
+      - '.github/workflows/frames-v108-r28c-ep0-hub-state-isolation-cert.yml'
+      - 'tools/ci/patch_v108_r28c_hub_ep0_state_isolation.py'
+      - 'tools/ci/r28c_cert_driver.py'
+      - 'tools/ci/patch_v108_r28b_ep0_identity.py'
+      - 'tools/ci/patch_v108_r28_ep0_address_evaluate.py'
+      - 'tools/ci/r28_cert_driver.py'
+      - 'tools/ci/patch_v108_r27_usb_event_mailbox.py'
+      - 'tools/ci/r27_cert_driver.py'
+      - 'tools/ci/r26_cert_driver.py'
+      - 'tools/ci/r26_log_format.py'
+      - 'tools/ci/make_r26_rufus_target.py'
+      - 'tools/ci/qemu_r25_flight_log_gate.py'
+      - 'tools/ci/qemu_r26_log_failopen_gate.py'
+      - 'tools/ci/validate_physical_handoff.py'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-usb-hub-topology-r1
+      - name: Install build, image and runtime tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 python3-pil unzip mtools dosfstools gdisk xorriso qemu-system-x86 ovmf
+      - name: Fetch exact r21 protected source
+        uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r21-Candidate
+          path: r21-candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: '31979817129'
+      - name: Build and certify r28c EP0 physical recovery
+        run: python3 tools/ci/r28c_cert_driver.py
+      - name: Validate sealed Rufus physical handoff
+        run: python3 tools/ci/validate_physical_handoff.py --final final
+      - name: Upload r28c evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r28c-Evidence
+          path: |
+            evidence/**
+            out/*.iso
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Upload sealed r28c Rufus ISO
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r28c-Rufus-Final
+          path: final/**
+          if-no-files-found: error
+          retention-days: 30
