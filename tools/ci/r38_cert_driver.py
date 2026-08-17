@@ -4,6 +4,7 @@ import traceback
 here=Path(__file__).parent
 base=here/'r37b_cert_driver.py'
 src=base.read_text()
+# r38 wrapper anchors intentionally match semantic tokens rather than escaped quoting.
 
 def one(old,new,label):
  global src
