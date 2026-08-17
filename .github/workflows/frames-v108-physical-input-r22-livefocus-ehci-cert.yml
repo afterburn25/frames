@@ -1,0 +1,54 @@
+name: Frames v108 Physical Input r22 Live Drag Focus Right EHCI Certification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-usb-hub-topology-r1 ]
+    paths:
+      - '.github/workflows/frames-v108-physical-input-r22-livefocus-ehci-cert.yml'
+      - 'tools/ci/patch_v108_physical_input_r22_livefocus_ehci.py'
+      - 'tools/ci/qemu_r22_live_drag_focus_right_gate.py'
+      - 'tools/ci/r22_cert_driver.py'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-usb-hub-topology-r1
+      - name: Install build and runtime tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 python3-pil unzip mtools dosfstools gdisk xorriso qemu-system-x86 ovmf
+      - name: Fetch exact r21 candidate source
+        uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r21-Candidate
+          path: r21-candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: '31979817129'
+      - name: Build and certify exact r22 candidate
+        run: python3 tools/ci/r22_cert_driver.py
+      - name: Upload r22 candidate and evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r22-Candidate
+          path: |
+            out/*.iso
+            evidence/**
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload sealed r22 Rufus image
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r22-Rufus-Final
+          path: final/**
+          if-no-files-found: error
+          retention-days: 30
