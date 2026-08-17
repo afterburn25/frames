@@ -11,7 +11,6 @@ repls={
 "'FRAMES_LOG_PERSIST_R26_DISABLED'":"'serial_marker_log_persist_disabled_r26'",
 "'FRAMES_INPUT_AFTER_LOG_FAIL_R26_OK'":"'serial_marker_input_after_log_fail_r26'",
 "R26-SHA.txt":"R27-SHA.txt",
-"kernel-r26.nx":"kernel-r27.nx",
 "R25K-R26.patch":"R25K-R27.patch",
 "FRAMES_V108_R26":"FRAMES_V108_R27",
 "Frames 0.9.98 v108 r26 ISO-native Flight Recorder physical candidate":"Frames 0.9.98 v108 r27 USB Event Mailbox + Controller Recovery physical candidate",
@@ -25,6 +24,11 @@ for old,new in repls.items():
     if src.count(old)!=1:
         raise SystemExit(f'r27 driver anchor mismatch {old!r}: {src.count(old)}')
     src=src.replace(old,new,1)
+# r26 references the generated kernel twice (copy + model gate). Both are
+# intentionally renamed together for r27.
+if src.count('kernel-r26.nx')!=2:
+    raise SystemExit(f"r27 kernel evidence anchor mismatch: {src.count('kernel-r26.nx')}")
+src=src.replace('kernel-r26.nx','kernel-r27.nx')
 anchor='def build_iso(F,iso):\n'
 extra=r'''_r26_model_gate=model_gate
 def model_gate(r25k,r27):
@@ -41,6 +45,5 @@ def model_gate(r25k,r27):
 '''
 if src.count(anchor)!=1: raise SystemExit('r27 model extension anchor')
 src=src.replace(anchor,extra+anchor,1)
-src=src.replace("model_gate(ROOT/'evidence/kernel-r25k.nx',ROOT/'evidence/kernel-r26.nx')","model_gate(ROOT/'evidence/kernel-r25k.nx',ROOT/'evidence/kernel-r27.nx')",1)
 ns={'__name__':'__main__','__file__':str(base)}
 exec(compile(src,str(base),'exec'),ns,ns)
