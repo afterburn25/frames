@@ -1,7 +1,20 @@
 #!/usr/bin/env python3
 from pathlib import Path
-base=Path(__file__).with_name('r31_cert_driver.py')
+# r32 intentionally supersedes the r30b one-packet right-button model contract:
+# physical r31b proved that accepting every first packet edge lets motion synthesize
+# a context-menu event. Build a private compatibility copy so historical drivers stay immutable.
+here=Path(__file__).parent
+r30b=here/'r30b_cert_driver.py'; compat=here/'r30b_r32_compat.py'
+compat_src=r30b.read_text()
+old_gate=" req('var need:u64=1;' in rb,'r30b ELAN right click still requires repeated packets')"
+new_gate=" req(('var need:u64=1;' in rb) or ('var need:u64=2; if typ==1 { need=1; }' in rb),'r30b/r32 ELAN right-click edge contract missing')"
+if compat_src.count(old_gate)!=1: raise SystemExit('r32 r30b compatibility gate anchor mismatch')
+compat.write_text(compat_src.replace(old_gate,new_gate,1))
+base=here/'r31_cert_driver.py'
 src=base.read_text()
+base_anchor="base=Path(__file__).with_name('r30b_cert_driver.py')"
+if src.count(base_anchor)!=1: raise SystemExit('r32 r31 base anchor mismatch')
+src=src.replace(base_anchor,"base=Path(__file__).with_name('r30b_r32_compat.py')",1)
 repls={
 "R26_SHA='cf7a3f890811d6ff245ec822bf5fd38d01f405c990c7dce6161efb117699797c'":"R26_SHA='dab5d471bf8cc80a38573fa52aa502f1bc488d9d3ecb655ce734350e123d732f'",
 "patch_v108_r31_usb_state_isolation.py":"patch_v108_r32_usb_settle_input_recovery.py",
