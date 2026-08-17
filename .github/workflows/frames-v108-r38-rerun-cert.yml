@@ -6,6 +6,8 @@ on:
     branches: [ v108-usb-hub-topology-r1 ]
     paths:
       - '.github/workflows/frames-v108-r38-rerun-cert.yml'
+      - 'tools/ci/r38_cert_driver.py'
+      - 'tools/ci/patch_v108_r38_hid_event_identity_altsetting.py'
 
 permissions:
   contents: read
