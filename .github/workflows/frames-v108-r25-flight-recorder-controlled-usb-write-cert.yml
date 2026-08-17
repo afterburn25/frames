@@ -8,10 +8,12 @@ on:
       - '.github/workflows/frames-v108-r25-flight-recorder-controlled-usb-write-cert.yml'
       - 'tools/ci/patch_v108_r25_flightrec_usbwrite.py'
       - 'tools/ci/patch_v108_r25b_bracefix.py'
+      - 'tools/ci/patch_v108_r25c_bracefix.py'
       - 'tools/ci/make_r25_logging_usb.py'
       - 'tools/ci/qemu_r25_flight_log_gate.py'
       - 'tools/ci/r25_cert_driver.py'
       - 'tools/ci/r25_cert_driver_v2.py'
+      - 'tools/ci/r25_cert_driver_v3.py'
 
 permissions:
   contents: read
@@ -37,8 +39,8 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: afterburn25/frames
           run-id: '31979817129'
-      - name: Build and certify corrected r25 combined train
-        run: python3 tools/ci/r25_cert_driver_v2.py
+      - name: Build and certify resealed r25 combined train
+        run: python3 tools/ci/r25_cert_driver_v3.py
       - name: Upload r25 candidate and evidence
         if: always()
         uses: actions/upload-artifact@v4
