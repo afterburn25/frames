@@ -12,7 +12,7 @@ repls={
 "FRAMES_V108_R33C":"FRAMES_V108_R34",
 "(ROOT/'evidence/R33C-AGGREGATE.json')":"(ROOT/'evidence/R34-AGGREGATE.json')",
 "'profile':'frames-0.9.98-v108-r33c-ehci-ownership-reroute-motion-telemetry-recovery'":"'profile':'frames-0.9.98-v108-r34-late-reroute-xhci-reinit-recovery'",
-"'physical_r32':'FAIL_USB_PHYSICAL_XHCI_ONE_ROOT_AFTER_SETTLE','physical_r33':'REJECTED_VM_SMOOTH_OVERLAY_REDRAW','physical_r33b':'REJECTED_VM_SMOOTH_FULL_PANEL_MOTION_REDRAW','physical_r33c':'PENDING'":"'physical_r32':'FAIL_USB_PHYSICAL_XHCI_ONE_ROOT_AFTER_SETTLE','physical_r33':'REJECTED_VM_SMOOTH_OVERLAY_REDRAW','physical_r33b':'REJECTED_VM_SMOOTH_FULL_PANEL_MOTION_REDRAW','physical_r33c':'FAIL_USB_PHYSICAL_LATE_REROUTE_NO_HID','physical_r34':'PENDING'",
+"'physical_r32':'FAIL_USB_PHYSICAL_XHCI_ONE_ROOT_AFTER_SETTLE','physical_r33':'REJECTED_VM_SMOOTH_OVERLAY_REDRAW','physical_r33b':'REJECTED_VM_SMOOTH_FULL_PANEL_MOTION_REDRAW','physical_r33c':'PENDING'":"'physical_r32':'FAIL_USB_PHYSICAL_XHCI_ONE_ROOT_AFTER_SETTLE','physical_r33':'REJECTED_VM_SMOOTH_OVERLAY_REDRAW','physical_r33b':'REJECTED_VM_SMOOTH_FULL_PANEL_MOTION_REDRAW','physical_r33c':'NOT_TESTED','physical_r34':'PENDING'",
 "Frames 0.9.98 v108 r33c — EHCI Ownership + xHCI Reroute + Motion Telemetry Recovery":"Frames 0.9.98 v108 r34 — Late-Reroute xHCI Reinitialization Recovery",
 "print('R33C PASS_VM_PENDING_PHYSICAL',iso_sha)":"print('R34 PASS_VM_PENDING_PHYSICAL',iso_sha)",
 "'kernel-r33c.nx'":"'kernel-r34.nx'",
