@@ -9,6 +9,7 @@ on:
       - 'tools/ci/patch_v108_r25l_iso_native_log.py'
       - 'tools/ci/make_r25l_rufus_log_volume.py'
       - 'tools/ci/r25l_cert_driver.py'
+      - 'tools/ci/r25l_cert_driver_v2.py'
       - 'tools/ci/qemu_r25_flight_log_gate.py'
       - 'tools/ci/validate_physical_handoff.py'
 
@@ -37,7 +38,7 @@ jobs:
           repository: afterburn25/frames
           run-id: '31979817129'
       - name: Build and certify r25l ISO-native logging train
-        run: python3 tools/ci/r25l_cert_driver.py
+        run: python3 tools/ci/r25l_cert_driver_v2.py
       - name: Validate sealed Rufus physical handoff
         run: python3 tools/ci/validate_physical_handoff.py --final final
       - name: Upload r25l evidence
