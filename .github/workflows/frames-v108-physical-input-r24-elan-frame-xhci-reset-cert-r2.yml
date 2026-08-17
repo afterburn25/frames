@@ -1,0 +1,59 @@
+name: Frames v108 Physical Input r24 Elantech Frame Lock xHCI Reset Certification r2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-usb-hub-topology-r1 ]
+    paths:
+      - '.github/workflows/frames-v108-physical-input-r24-elan-frame-xhci-reset-cert-r2.yml'
+      - 'tools/ci/patch_v108_physical_input_r24_elan_frame_xhci_reset.py'
+      - 'tools/ci/patch_v108_physical_input_r24b_fixbrace.py'
+      - 'tools/ci/r24_cert_driver.py'
+      - 'tools/ci/r24_cert_driver_v2.py'
+      - 'tools/ci/qemu_ps2_cursor_smoothness_r23.py'
+      - 'tools/ci/qemu_r23_dragright_guard_gate.py'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-usb-hub-topology-r1
+      - name: Install build and runtime tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 python3-pil unzip mtools dosfstools gdisk xorriso qemu-system-x86 ovmf
+      - name: Fetch exact r21 candidate source
+        uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r21-Candidate
+          path: r21-candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: '31979817129'
+      - name: Build and certify exact corrected r24 candidate
+        run: python3 tools/ci/r24_cert_driver_v2.py
+      - name: Upload r24 candidate and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r24-Candidate-r2
+          path: |
+            out/*.iso
+            evidence/**
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Upload sealed r24 Rufus image
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r24-Rufus-Final-r2
+          path: final/**
+          if-no-files-found: error
+          retention-days: 30
