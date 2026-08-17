@@ -21,9 +21,11 @@ for old,new in repls.items():
     if n!=1: raise SystemExit(f'r30 driver anchor mismatch {old!r}: {n}')
     src=src.replace(old,new,1)
 
-# Extend the inherited model gate inside r29's injected gate payload.
-needle=" req('v108_text_xpwr_v129' in s and 'v108_text_xrty_v129' in s,'r29 physical recovery telemetry missing')\n\"\"\"\"\"\""
-insert=""" req('v108_text_xpwr_v129' in s and 'v108_text_xrty_v129' in s,'r29 physical recovery telemetry missing')
+# r29 injects its model checks inside a triple-quoted payload in
+# r29_cert_driver.py. Extend that payload using one stable plain-text check
+# rather than coupling r30 to the wrapper's closing quote representation.
+needle=" req('v108_text_xpwr_v129' in s and 'v108_text_xrty_v129' in s,'r29 physical recovery telemetry missing')"
+insert=needle+"""
  scan=fn_text(s,'v108_xhci_scan_pointer_v116')
  req('v108_msc_snapshot_v125(xhci_state,hardware_state,phys_state,fr)' not in scan,'r30 HID scan still configures MSC before HID')
  for q in ('hid_probe_v130','volatile_write64(xhci_state+2072','volatile_write64(xhci_state+2160'):
@@ -32,8 +34,7 @@ insert=""" req('v108_text_xpwr_v129' in s and 'v108_text_xrty_v129' in s,'r29 ph
  req('var need:u64=1;' in rb,'r30 ELAN right click still requires repeated packets')
  gi=fn_text(s,'gui_input_buttons')
  req('if right!=0 && old_right==0' in gi and 'volatile_write64(state+128,1)' in gi,'r30 right-down context open missing')
- req('v108_text_x2a_v130' in s and 'v108_text_x2f_v130' in s and 'v108_text_rbtn_v130' in s,'r30 physical telemetry labels missing')
-\"\"\""""
+ req('v108_text_x2a_v130' in s and 'v108_text_x2f_v130' in s and 'v108_text_rbtn_v130' in s,'r30 physical telemetry labels missing')"""
 if src.count(needle)!=1: raise SystemExit(f'r30 inherited gate payload anchor mismatch {src.count(needle)}')
 src=src.replace(needle,insert,1)
 ns={'__name__':'__main__','__file__':str(base)}
