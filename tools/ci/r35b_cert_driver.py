@@ -16,12 +16,15 @@ repls={
 "Frames 0.9.98 v108 r35 — HID EP0 Control-Poll Fallback Recovery":"Frames 0.9.98 v108 r35b — G750JM/HM87 HID Interval Recovery",
 "print('R35 PASS_VM_PENDING_PHYSICAL',iso_sha)":"print('R35B PASS_VM_PENDING_PHYSICAL',iso_sha)",
 "'kernel-r35.nx'":"'kernel-r35b.nx'",
-"(out/'R35-FAILURE.txt')":"(out/'R35B-FAILURE.txt')",
 }
 for old,new in repls.items():
     n=src.count(old)
     if n!=1: raise SystemExit(f'r35b driver anchor mismatch {old!r}: {n}')
     src=src.replace(old,new,1)
+fail_old="(out/'R35-FAILURE.txt')"
+fail_new="(out/'R35B-FAILURE.txt')"
+if src.count(fail_old)!=2: raise SystemExit(f'r35b inherited failure-file anchor mismatch {src.count(fail_old)}')
+src=src.replace(fail_old,fail_new)
 needle=" req('cy<768' in s,'r35 lower telemetry cursor overlap coverage missing')"
 insert=needle+"""
  req('var v:u64=binterval; var p:u64=0; while v>1 { v=v/2; p=p+1; }' in s,'r35b LS/FS floor interval conversion missing')
