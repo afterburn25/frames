@@ -85,8 +85,10 @@ new_arm=r'''fn flight_log_arm_v125(fr:u64,msc:u64) -> u64 {
 repl_fn('flight_log_arm_v125',new_arm)
 
 # MSC persistence must never monopolize the desktop/input loop. Keep HID timing unchanged.
-if s.count('while spins<16000000 {')<2: raise SystemExit('wait-loop anchors missing')
-s=s.replace('while spins<16000000 {','while spins<500000 {',1)
+a,b=span(s,'xhci_wait_bulk_event'); wf=s[a:b]
+if 'while spins<16000000 {' not in wf: raise SystemExit('MSC bulk wait anchor missing')
+wf=wf.replace('while spins<16000000 {','while spins<500000 {',1)
+s=s[:a]+wf+s[b:]
 old="        let fr=volatile_read64(hardware_state+648); let msc=volatile_read64(hardware_state+640); if fr!=0 && msc!=0 && volatile_read64(fr+64)!=0 { if flight_flush_one_v125(fr,msc,xhci)==0 { flight_record_v125(fr,262402,volatile_read64(fr+104),volatile_read64(fr+88)); } }\n        if xhci!=0"
 if old not in s: raise SystemExit('synchronous desktop flush anchor missing')
 s=s.replace(old,"        let fr=volatile_read64(hardware_state+648); let msc=volatile_read64(hardware_state+640);\n        if xhci!=0",1)
@@ -104,7 +106,7 @@ s=s.replace('let flight_buffer = bump_alloc(&mut heap_cursor, heap_end, 65536);'
 if s.count('flight_recorder_init_v125(flight_state,flight_buffer,65536)')!=1: raise SystemExit('flight buffer init anchor missing')
 s=s.replace('flight_recorder_init_v125(flight_state,flight_buffer,65536)','flight_recorder_init_v125(flight_state,flight_buffer,262144)',1)
 
-expected='8b3f3f689fedd1c82f5b9159176646a0f431775f3a991160ff7f109a052592cf'
+expected='01958cc0495a68ff12f399a21e7fb8a25d676e5e4a09e9810814d99bc57ca11d'
 actual=hashlib.sha256(s.encode()).hexdigest()
 if actual!=expected: raise SystemExit(f'r25l identity mismatch {actual}')
 p.write_text(s)
