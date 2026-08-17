@@ -1,0 +1,58 @@
+name: Frames v108 r25 Flight Recorder Controlled USB Write Certification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-usb-hub-topology-r1 ]
+    paths:
+      - '.github/workflows/frames-v108-r25-flight-recorder-controlled-usb-write-cert.yml'
+      - 'tools/ci/patch_v108_r25_flightrec_usbwrite.py'
+      - 'tools/ci/make_r25_logging_usb.py'
+      - 'tools/ci/qemu_r25_flight_log_gate.py'
+      - 'tools/ci/r25_cert_driver.py'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-usb-hub-topology-r1
+      - name: Install build, image and runtime tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 python3-pil unzip mtools dosfstools gdisk xorriso qemu-system-x86 ovmf
+      - name: Fetch exact r21 protected source
+        uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r21-Candidate
+          path: r21-candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: '31979817129'
+      - name: Build and certify r25 combined train
+        run: python3 tools/ci/r25_cert_driver.py
+      - name: Upload r25 candidate and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r25-Candidate
+          path: |
+            out/*.iso
+            out/*.img
+            evidence/**
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Upload sealed physical-test media
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r25-FlightRecorder-Final
+          path: final/**
+          if-no-files-found: error
+          retention-days: 30
