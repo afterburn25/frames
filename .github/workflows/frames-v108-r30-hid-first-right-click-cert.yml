@@ -1,0 +1,75 @@
+name: Frames v108 r30 HID First Right Click Certification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-usb-hub-topology-r1 ]
+    paths:
+      - '.github/workflows/frames-v108-r30-hid-first-right-click-cert.yml'
+      - 'tools/ci/patch_v108_r30_hid_first_right_click.py'
+      - 'tools/ci/r30_cert_driver.py'
+      - 'tools/ci/patch_v108_r29_root_port_recovery.py'
+      - 'tools/ci/r29_cert_driver.py'
+      - 'tools/ci/harden_qemu_text_edit_gate_r28.py'
+      - 'tools/ci/patch_v108_r28c_hub_ep0_state_isolation.py'
+      - 'tools/ci/patch_v108_r28b_ep0_identity.py'
+      - 'tools/ci/patch_v108_r28_ep0_address_evaluate.py'
+      - 'tools/ci/patch_v108_r27_usb_event_mailbox.py'
+      - 'tools/ci/r28c_cert_driver.py'
+      - 'tools/ci/r28_cert_driver.py'
+      - 'tools/ci/r27_cert_driver.py'
+      - 'tools/ci/r26_cert_driver.py'
+      - 'tools/ci/r26_log_format.py'
+      - 'tools/ci/make_r26_rufus_target.py'
+      - 'tools/ci/qemu_r25_flight_log_gate.py'
+      - 'tools/ci/qemu_r26_log_failopen_gate.py'
+      - 'tools/ci/validate_physical_handoff.py'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-usb-hub-topology-r1
+      - name: Install build, image and runtime tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 python3-pil unzip mtools dosfstools gdisk xorriso qemu-system-x86 ovmf
+      - name: Fetch exact r21 protected source
+        uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r21-Candidate
+          path: r21-candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: '31979817129'
+      - name: Harden TCG text readiness harness
+        run: python3 tools/ci/harden_qemu_text_edit_gate_r28.py
+      - name: Build and certify r30 physical USB and right-click recovery
+        run: python3 tools/ci/r30_cert_driver.py
+      - name: Validate sealed Rufus physical handoff
+        run: python3 tools/ci/validate_physical_handoff.py --final final
+      - name: Upload r30 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r30-Evidence
+          path: |
+            evidence/**
+            out/*.iso
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Upload sealed r30 Rufus ISO
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r30-Rufus-Final
+          path: final/**
+          if-no-files-found: error
+          retention-days: 30
