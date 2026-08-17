@@ -5,7 +5,7 @@ KIT_SHA='61b0fc25513719fce554729724c7848647de9cffe54434d4ab5f7ba8af42a36a'
 SRC_SHA='5f8c13adac6d34e64bd47d9463a3e261cd0b51bb5ddb500aa9f7b87c2914a52d'
 R21_SHA='bed3740e10c3bab8b5c81ca6b2fb77668b33bdc9109039a38e2e40aa09c7efb9'
 R24_SHA='1b56b621de728aabdbbe8c100f92816564369e984f1fc2b5e4815080011aedaf'
-R25L_SHA='8b3f3f689fedd1c82f5b9159176646a0f431775f3a991160ff7f109a052592cf'
+R25L_SHA='01958cc0495a68ff12f399a21e7fb8a25d676e5e4a09e9810814d99bc57ca11d'
 ISO_NAME='Frames-0.9.98-v108-Physical-Input-Repair-r25l-ISO-Native-FlightRecorder-Rufus-UEFI.iso'
 CI_LOG_NAME='r25l-ci-rufus-log-volume.img'
 NONCE=3545795563478602310
@@ -42,6 +42,7 @@ def model_gate(r24,r25l):
  flush=fn_text(s,'flight_flush_one_v125')
  for q in ('usb_msc_bot_write10_v125','usb_msc_bot_nodata_v125','usb_msc_bot_read10','nvme_read_checksum(back,512)!=expected','volatile_write64(fr+64,0)'):req(q in flush,'verified/fail-closed flush missing '+q)
  wait=fn_text(s,'xhci_wait_bulk_event');req('while spins<500000' in wait,'bounded MSC wait missing')
+ hid=fn_text(s,'xhci_wait_hid_event');req('while spins<16000000' in hid,'HID wait timing changed')
  delta=subprocess.run(['diff','-u',str(r24),str(r25l)],text=True,stdout=subprocess.PIPE).stdout.lower()
  for bad in ('nvme_io_write_block_cert(', 'nvme_write_target_arm(', 'storage_write_commit', 'ahci_write'):
   req(not any(line.startswith('+') and bad in line for line in delta.splitlines()),'new internal write path '+bad)
