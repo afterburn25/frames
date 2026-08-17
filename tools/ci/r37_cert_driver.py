@@ -24,7 +24,7 @@ def alln(old,new,count,label):
 # Use the r37 patch anywhere r36 would have reconstructed its kernel.
 alln('patch_v108_r36_nonblocking_interrupt_recovery.py','patch_v108_r37_g750jm_xhci_ring_ps2.py',2,'patch path')
 one("with tempfile.TemporaryDirectory(prefix='r36-ident-') as td:","with tempfile.TemporaryDirectory(prefix='r37-ident-') as td:",'identity temp')
-alln('r36_sha','r37_sha',4,'identity variable')
+alln('r36_sha','r37_sha',3,'identity variable')
 alln("kernel-r36.nx","kernel-r37.nx",2,'kernel evidence name')
 
 # r37 keeps the r36 helpers but extends the command path with Stop Endpoint.
