@@ -12,7 +12,7 @@ def one(old,new,label):
  src=src.replace(old,new,1)
 
 one("'patch_v108_r37b_stable_diag.py'","'patch_v108_r38_hid_event_identity_altsetting.py'",'patch target')
-one('"kernel-r37b.nx"','"kernel-r38.nx"','kernel evidence target')
+one(r'\"kernel-r37b.nx\"',r'\"kernel-r38.nx\"','kernel evidence target')
 one('2cb422d2c7d00cdbb1da3eee4ee696c9ae0723b3f28669bf80efe256d14de650','c6962f3cb939e6b83308f85f07cb8b319ee322747cd419b99b1c2e82e5c8375d','exact kernel identity')
 one("'Frames-0.9.98-v108-r37b-G750JM-xHCI-Ring-Elantech-Stable-Diagnostics-Rufus-UEFI.iso'","'Frames-0.9.98-v108-r38-G750JM-HID-Event-Identity-AltSetting-Recovery-Rufus-UEFI.iso'",'ISO target')
 one("'R37B-SHA.txt'","'R38-SHA.txt'",'SHA evidence target')
