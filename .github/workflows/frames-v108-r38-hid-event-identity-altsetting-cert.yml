@@ -52,7 +52,7 @@ on:
       - 'tools/ci/validate_physical_handoff.py'
 
 permissions:
-  contents: read
+  contents: write
   actions: read
 
 jobs:
@@ -99,3 +99,39 @@ jobs:
           path: final/**
           if-no-files-found: error
           retention-days: 30
+      - name: Publish r38 CI status handoff
+        if: always()
+        continue-on-error: true
+        env:
+          R38_JOB_STATUS: ${{ job.status }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json,os
+          out={
+            'profile':'frames-v108-r38-ci-handoff',
+            'job_status':os.environ.get('R38_JOB_STATUS','unknown'),
+            'run_id':os.environ.get('GITHUB_RUN_ID',''),
+            'run_attempt':os.environ.get('GITHUB_RUN_ATTEMPT',''),
+            'head_sha':os.environ.get('GITHUB_SHA',''),
+            'ref':os.environ.get('GITHUB_REF',''),
+          }
+          isos=list(Path('final').glob('*.iso'))
+          if isos:
+            p=isos[0]; b=p.read_bytes()
+            out.update({'iso_name':p.name,'iso_size':len(b),'iso_sha256':hashlib.sha256(b).hexdigest()})
+          fail=Path('evidence/R38-FAILURE.txt')
+          if fail.exists(): out['failure']=fail.read_text(errors='replace')[-16000:]
+          agg=Path('evidence/R38-AGGREGATE.json')
+          if agg.exists():
+            try: out['aggregate']=json.loads(agg.read_text())
+            except Exception: out['aggregate_raw']=agg.read_text(errors='replace')[-8000:]
+          d=Path('ci-status'); d.mkdir(exist_ok=True)
+          (d/'r38-latest.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          PY
+          git config user.name 'Frames CI'
+          git config user.email 'frames-ci@users.noreply.github.com'
+          git add ci-status/r38-latest.json
+          git commit -m "ci: publish r38 run ${GITHUB_RUN_ID} status" || exit 0
+          git pull --rebase origin v108-usb-hub-topology-r1
+          git push origin HEAD:v108-usb-hub-topology-r1
