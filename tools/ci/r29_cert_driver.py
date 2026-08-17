@@ -20,9 +20,12 @@ for old,new in repls.items():
     n=src.count(old)
     if n!=1: raise SystemExit(f'r29 driver anchor mismatch {old!r}: {n}')
     src=src.replace(old,new,1)
-# Extend the inherited r28/r28c model gate with the physical root-port contract.
-anchor="req('volatile_write64(xhci_state+1912,volatile_read64(hardware_state+744))' in s,'r28 frozen EP0 evidence missing')"
-extra=anchor+"""
+
+# r28c is itself a wrapper around r28_cert_driver.py.  Extend the literal
+# model-gate payload inside that wrapper rather than searching for text that
+# only exists after r28c executes.
+needle="  req(q in hub,'r28c hub EP0 state isolation missing '+q)\n\"\"\""
+insert="""  req(q in hub,'r28c hub EP0 state isolation missing '+q)
  req('fn xhci_power_root_ports_v129' in s,'r29 root-port power helper missing')
  pwr=fn_text(s,'xhci_power_root_ports_v129')
  for q in ('(hcc/8)%2','set_flag(w,512)','pit_wait(119320)','volatile_write64(xhci_state+2032,connected)'):
@@ -33,8 +36,8 @@ extra=anchor+"""
  req(rst.count('return 0;')==2,'r29 reset path regained per-port abort')
  req('if pspeed<=2 && volatile_read64(hardware_state+736)==0' not in s,'r29 first-root telemetry remained LSFS-only')
  req('v108_text_xpwr_v129' in s and 'v108_text_xrty_v129' in s,'r29 physical recovery telemetry missing')
-"""
-if src.count(anchor)!=1: raise SystemExit('r29 model extension anchor mismatch')
-src=src.replace(anchor,extra,1)
+\"\"\""""
+if src.count(needle)!=1: raise SystemExit(f'r29 inherited gate payload anchor mismatch {src.count(needle)}')
+src=src.replace(needle,insert,1)
 ns={'__name__':'__main__','__file__':str(base)}
 exec(compile(src,str(base),'exec'),ns,ns)
