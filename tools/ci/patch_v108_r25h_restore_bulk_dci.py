@@ -8,6 +8,6 @@ old='let config=volatile_read64(xhci_state+544); if xhci_control_no_data_out(xhc
 new='let config=volatile_read64(xhci_state+544); if xhci_control_no_data_out(xhci_state,2304+(config*65536))==0 { serial_usb_msc_diag(4,config); return 0; }\n    // Control-transfer completion reuses +576 for residue telemetry. Restore the discovered bulk endpoint DCIs before BOT begins.\n    unsafe { volatile_write64(xhci_state+576,indci); volatile_write64(xhci_state+584,outdci); }\n    unsafe { volatile_write64(xhci_state+608,inring);'
 if s.count(old)!=1: raise SystemExit(f'bulk DCI restore anchor mismatch {s.count(old)}')
 s=s.replace(old,new,1)
-expected='3d2e3a968043db2bf4c4bd2633f7a2263e4ce41167430db71a7db8ea1cdf9f87';actual=hashlib.sha256(s.encode()).hexdigest()
+expected='c8ccc58f4641f352c21500d62cfa372c623dd070c1ef7b73c515c0f288effd62';actual=hashlib.sha256(s.encode()).hexdigest()
 if actual!=expected: raise SystemExit(f'r25h identity mismatch {actual}')
 p.write_text(s);print(actual)
