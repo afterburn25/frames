@@ -3,7 +3,7 @@ import hashlib,json,pathlib,shutil,subprocess,tempfile
 import r25_cert_driver as d
 ROOT=pathlib.Path.cwd()
 R21_SHA=d.R21_SHA; R24_SHA=d.R24_SHA
-R25H_SHA='3d2e3a968043db2bf4c4bd2633f7a2263e4ce41167430db71a7db8ea1cdf9f87'
+R25H_SHA='c8ccc58f4641f352c21500d62cfa372c623dd070c1ef7b73c515c0f288effd62'
 ISO_NAME=d.ISO_NAME; IMG_NAME=d.IMG_NAME
 
 def req(x,m):
