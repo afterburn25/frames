@@ -18,7 +18,7 @@ def alln(old,new,count,label):
 
 one("'patch_v108_r57_ehci_tt_child_hid_probe.py'","'patch_v108_r58_ehci_composite_hid_census.py'",'patch target')
 one('kernel-r57.nx','kernel-r58.nx','kernel evidence target')
-one('bb436345a163096d52a04605c7bfb09cf756f90c06be6830b9ed130bb52e2c36','0000000000000000000000000000000000000000000000000000000000000000','provisional r58 identity target')
+one('bb436345a163096d52a04605c7bfb09cf756f90c06be6830b9ed130bb52e2c36','e8edf7b8d38982b27b997258230ee5f0a51ebd46586bb6cfca679a00aae16f49','exact r58 identity target')
 one("'Frames-0.9.98-v108-r57-EHCI-TT-Child-HID-Probe-Rufus-UEFI.iso'","'Frames-0.9.98-v108-r58-EHCI-Composite-HID-Census-Rufus-UEFI.iso'",'ISO target')
 one("'R57-SHA.txt'","'R58-SHA.txt'",'SHA evidence target')
 one("'R25K-R57.patch'","'R25K-R58.patch'",'patch evidence target')
