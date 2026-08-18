@@ -35,3 +35,5 @@ rep('pointer_diag_row(surface,(330*65536)+182,1313164373,ulen);                 
     'operational base row')
 
 p.write_text(s)
+
+# Rebuild trigger: 2026-08-18 r56 physical-test candidate.
