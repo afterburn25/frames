@@ -1,0 +1,37 @@
+name: Frames v108 r50 Device Endpoint Status Identity Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-usb-hub-topology-r1 ]
+    paths:
+      - '.github/workflows/frames-v108-r50-identity-probe.yml'
+      - 'tools/ci/patch_v108_r50_device_endpoint_status_proof.py'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  identity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-usb-hub-topology-r1
+      - name: Fetch exact r21 protected source
+        uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r21-Candidate
+          path: r21-candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: '31979817129'
+      - name: Generate exact r50 source identity
+        run: |
+          cp r21-candidate/evidence/kernel-r21.nx /tmp/kernel-r50.nx
+          python3 tools/ci/patch_v108_r50_device_endpoint_status_proof.py /tmp/kernel-r50.nx | tee /tmp/r50-patch-output.txt
+          SHA=$(sha256sum /tmp/kernel-r50.nx | awk '{print $1}')
+          echo "R50_EXACT_SHA256=${SHA}"
+          test "${SHA}" = "$(tail -n1 /tmp/r50-patch-output.txt)"
