@@ -14,7 +14,7 @@ on:
       - 'tools/ci/make_r49_ps2_phase.py'
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   EXPECTED_PARENT_SHA256: 1c7f1b514d9aa2f847f724e8b633286d069d745bf7c281a3967c46bbfea1a18c
@@ -171,6 +171,24 @@ jobs:
           EOF
           printf 'status=PASS\nrevision=r56\nformat=rufus-uefi-iso\niso_sha256=%s\nimage_sha256=%s\n' "$iso_sha" "$img_sha" > r56-out/BUILD-STATUS.txt
           sha256sum r56-out/* > r56-out/SHA256SUMS.txt
+
+      - name: Publish r56 physical-test ISO release asset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="frames-0.9.98-r56-physical-test"
+          iso="r56-out/Frames-0.9.98-r56-Linux-Reference-Input-Architecture-Rufus-UEFI.iso"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$iso" --clobber
+          else
+            gh release create "$tag" "$iso" \
+              --target r56-linux-input-architecture \
+              --title "Frames 0.9.98 r56 Physical Test" \
+              --notes "Rufus-compatible UEFI diagnostic ISO for the r56 Linux-reference input architecture physical test. Diagnostic-only; not a promoted release." \
+              --prerelease
+          fi
 
       - name: Upload r56 Rufus ISO and evidence
         if: always()
