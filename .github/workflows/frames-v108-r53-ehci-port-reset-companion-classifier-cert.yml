@@ -7,7 +7,9 @@ on:
     paths:
       - '.github/workflows/frames-v108-r53-ehci-port-reset-companion-classifier-cert.yml'
       - 'tools/ci/patch_v108_r53_ehci_port_reset_companion_classifier.py'
+      - 'tools/ci/patch_v108_r53_ehci_port_reset_companion_classifier_sealed.py'
       - 'tools/ci/r53_cert_driver.py'
+      - 'tools/ci/r53_sealed_cert_driver.py'
       - 'tools/ci/patch_v108_r52_intel_ehci_companion_wake.py'
       - 'tools/ci/r52_cert_driver.py'
       - 'tools/ci/patch_v108_r51_intel_ehci_route_probe.py'
@@ -61,7 +63,7 @@ jobs:
       - name: Harden TCG text readiness harness
         run: python3 tools/ci/harden_qemu_text_edit_gate_r28.py
       - name: Build and certify r53
-        run: python3 tools/ci/r53_cert_driver.py
+        run: python3 tools/ci/r53_sealed_cert_driver.py
       - name: Validate sealed Rufus physical handoff
         run: python3 tools/ci/validate_physical_handoff.py --final final
       - name: Upload r53 evidence
