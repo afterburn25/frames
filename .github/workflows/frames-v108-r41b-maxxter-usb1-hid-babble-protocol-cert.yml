@@ -1,0 +1,131 @@
+name: Frames v108 r41b Maxxter USB1 HID Babble Protocol Certification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-usb-hub-topology-r1 ]
+    paths:
+      - '.github/workflows/frames-v108-r41b-maxxter-usb1-hid-babble-protocol-cert.yml'
+      - 'tools/ci/patch_v108_r41b_maxxter_usb1_hid_babble_protocol.py'
+      - 'tools/ci/r41b_cert_driver.py'
+      - 'tools/ci/patch_v108_r41_maxxter_ls_hid_babble_protocol.py'
+      - 'tools/ci/r41_cert_driver.py'
+      - 'tools/ci/patch_v108_r40_usb_hid_identity_wifi_pci_detail_ro.py'
+      - 'tools/ci/r40_cert_driver.py'
+      - 'tools/ci/patch_v108_r39b_g750jm_hid_idle_1s_wifi_ro.py'
+      - 'tools/ci/r39b_cert_driver.py'
+      - 'tools/ci/patch_v108_r39_g750jm_hid_idle_disabled_wifi_ro.py'
+      - 'tools/ci/r39_cert_driver.py'
+      - 'tools/ci/patch_v108_r37b_stable_diag.py'
+      - 'tools/ci/r37b_cert_driver.py'
+      - 'tools/ci/patch_v108_r37_g750jm_xhci_ring_ps2.py'
+      - 'tools/ci/r37_cert_driver.py'
+      - 'tools/ci/patch_v108_r36_nonblocking_interrupt_recovery.py'
+      - 'tools/ci/r36_cert_driver.py'
+      - 'tools/ci/patch_v108_r35b_g750jm_hm87_hid_interval.py'
+      - 'tools/ci/r35b_cert_driver.py'
+      - 'tools/ci/patch_v108_r35_hid_control_poll_fallback.py'
+      - 'tools/ci/r35_cert_driver.py'
+      - 'tools/ci/patch_v108_r34_late_reroute_reinit.py'
+      - 'tools/ci/r34_cert_driver.py'
+      - 'tools/ci/patch_v108_r33c_motion_telemetry_isolation.py'
+      - 'tools/ci/r33c_cert_driver.py'
+      - 'tools/ci/patch_v108_r33b_overlay_render_recovery.py'
+      - 'tools/ci/r33b_cert_driver.py'
+      - 'tools/ci/patch_v108_r33_ehci_ownership_recovery.py'
+      - 'tools/ci/r33_cert_driver.py'
+      - 'tools/ci/patch_v108_r32_usb_settle_input_recovery.py'
+      - 'tools/ci/r32_cert_driver.py'
+      - 'tools/ci/patch_v108_r31b_overlay_state.py'
+      - 'tools/ci/patch_v108_r31_usb_state_isolation.py'
+      - 'tools/ci/r31_cert_driver.py'
+      - 'tools/ci/patch_v108_r30b_hid_first_device_state.py'
+      - 'tools/ci/r30b_cert_driver.py'
+      - 'tools/ci/patch_v108_r30_hid_first_right_click.py'
+      - 'tools/ci/patch_v108_r29_root_port_recovery.py'
+      - 'tools/ci/r29_cert_driver.py'
+      - 'tools/ci/harden_qemu_text_edit_gate_r28.py'
+      - 'tools/ci/patch_v108_r28c_hub_ep0_state_isolation.py'
+      - 'tools/ci/patch_v108_r28b_ep0_identity.py'
+      - 'tools/ci/patch_v108_r28_ep0_address_evaluate.py'
+      - 'tools/ci/patch_v108_r27_usb_event_mailbox.py'
+      - 'tools/ci/r28c_cert_driver.py'
+      - 'tools/ci/r28_cert_driver.py'
+      - 'tools/ci/r27_cert_driver.py'
+      - 'tools/ci/r26_cert_driver.py'
+      - 'tools/ci/r26_log_format.py'
+      - 'tools/ci/make_r26_rufus_target.py'
+      - 'tools/ci/qemu_r25_flight_log_gate.py'
+      - 'tools/ci/qemu_r26_log_failopen_gate.py'
+      - 'tools/ci/validate_physical_handoff.py'
+
+permissions:
+  contents: read
+  actions: read
+  statuses: write
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-usb-hub-topology-r1
+      - name: Install build, image and runtime tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 python3-pil unzip mtools dosfstools gdisk xorriso qemu-system-x86 ovmf
+      - name: Fetch exact r21 protected source
+        uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r21-Candidate
+          path: r21-candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: '31979817129'
+      - name: Harden TCG text readiness harness
+        run: python3 tools/ci/harden_qemu_text_edit_gate_r28.py
+      - name: Build and certify r41b
+        run: python3 tools/ci/r41b_cert_driver.py
+      - name: Validate sealed Rufus physical handoff
+        run: python3 tools/ci/validate_physical_handoff.py --final final
+      - name: Upload r41b evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r41b-Evidence
+          path: |
+            evidence/**
+            out/*.iso
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Upload sealed r41b Rufus ISO
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r41b-Rufus-Final
+          path: final/**
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish r41b certification status
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          STATE=success
+          DESC='r41b certification PASS'
+          if [ "$JOB_STATUS" != "success" ]; then STATE=failure; DESC='r41b certification FAIL'; fi
+          TARGET="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          python3 - "$STATE" "$DESC" "$TARGET" <<'PY'
+          import json,sys
+          open('/tmp/status.json','w').write(json.dumps({'state':sys.argv[1],'context':'frames/r41b-certification','description':sys.argv[2],'target_url':sys.argv[3]}))
+          PY
+          curl -fsSL -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            --data-binary @/tmp/status.json
