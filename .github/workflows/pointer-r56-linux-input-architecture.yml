@@ -198,3 +198,24 @@ jobs:
           path: r56-out/**
           if-no-files-found: error
           retention-days: 14
+
+      - name: Record exact Actions artifact locator
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          iso_sha="$(awk -F= '/^iso_sha256=/{print $2}' r56-out/BOOT-IDENTITY.txt)"
+          mkdir -p ci-locators
+          cat > ci-locators/r56-physical-test.txt <<EOF
+          run_id=${{ github.run_id }}
+          run_attempt=${{ github.run_attempt }}
+          head_sha=${{ github.sha }}
+          artifact_name=frames-0.9.98-r56-linux-reference-input-architecture-rufus-iso
+          iso_name=Frames-0.9.98-r56-Linux-Reference-Input-Architecture-Rufus-UEFI.iso
+          iso_sha256=$iso_sha
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ci-locators/r56-physical-test.txt
+          git commit -m "state: record r56 physical-test artifact locator" || exit 0
+          git push origin HEAD:r56-linux-input-architecture
