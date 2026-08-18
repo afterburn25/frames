@@ -1,6 +1,18 @@
 #!/usr/bin/env python3
 from pathlib import Path
 here=Path(__file__).parent
+
+# r53 preserves the r52 per-port-power operation but first clears EHCI
+# read/write-clear change bits into a sanitized local `pw`.  Adapt only the
+# inherited r52 text-shape assertion in the CI workspace; the semantic power,
+# schedule-disable, Run/HCHalted, route, runtime and safety gates remain intact.
+r52p=here/'r52_cert_driver.py'
+r52src=r52p.read_text()
+r52old="    req('set_flag(ps,4096)' in r52fn,'r52 per-port power-on proof missing')"
+r52new="    req(('set_flag(ps,4096)' in r52fn) or ('set_flag(pw,4096)' in r52fn),'r52/r53 per-port power-on proof missing')"
+if r52src.count(r52old)!=1: raise SystemExit(f'r53 r52 power compatibility anchor count {r52src.count(r52old)}')
+r52p.write_text(r52src.replace(r52old,r52new,1))
+
 base=here/'r53_cert_driver.py'
 src=base.read_text()
 old_patch="'patch_v108_r53_ehci_port_reset_companion_classifier.py'"
