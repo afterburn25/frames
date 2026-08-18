@@ -1,0 +1,40 @@
+name: Frames v108 r42 Kernel Identity Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-usb-hub-topology-r1 ]
+    paths:
+      - '.github/workflows/frames-v108-r42-kernel-identity-probe.yml'
+      - 'tools/ci/patch_v108_r42_hid_persistent_interrupt_in.py'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  derive:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-usb-hub-topology-r1
+      - name: Fetch exact r21 protected source
+        uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r21-Candidate
+          path: r21-candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: '31979817129'
+      - name: Derive exact r42 kernel identity
+        run: |
+          set -euo pipefail
+          K=$(find r21-candidate -type f -path '*/kernel/main.nx' | head -1)
+          test -n "$K"
+          cp "$K" /tmp/kernel-r42.nx
+          python3 tools/ci/patch_v108_r42_hid_persistent_interrupt_in.py /tmp/kernel-r42.nx | tee /tmp/r42-patch-sha.txt
+          echo "R42_KERNEL_SHA256=$(sha256sum /tmp/kernel-r42.nx | awk '{print $1}')"
+          grep -F 'if r42_target && state==1' /tmp/kernel-r42.nx >/dev/null
+          grep -F 'v136_xhci_command_endpoint(xhci_state,15,0)' /tmp/kernel-r42.nx >/dev/null
