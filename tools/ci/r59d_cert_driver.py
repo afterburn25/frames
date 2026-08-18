@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# r59d certification trigger after workflow registration
 from pathlib import Path
 import traceback
 here=Path(__file__).parent
