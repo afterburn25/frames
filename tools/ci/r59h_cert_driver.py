@@ -46,6 +46,18 @@ one("    req('let info2=1090591745' in r59gfn,'r59g inherited EHCI TT geometry u
 anchor="    req('(rr/2)%2' in s,'r59g SplitXState visible telemetry missing')"
 one(anchor,anchor+"\n    req('(rr/4)%32' in s,'r59h qTD error telemetry missing')",'r59h qTD error telemetry gate')
 
+# r59 itself historically certified the original 0x1c Complete-Split mask.
+# r59h intentionally replaces that one field with Linux-derived 0x06; widen
+# only this private inherited assertion while keeping hub/port/S-mask proof.
+r59p=here/'r59_cert_driver.py'
+r59src=r59p.read_text()
+r59old="    req('info2=1090591745' in r59fn,'r59 EHCI split S-mask/C-mask hub1 port2 capabilities missing')"
+r59new="    req(('info2=1090591745' in r59fn) or ('info2=1090586113' in r59fn),'r59/r59h EHCI split hub1 port2 capabilities missing')"
+if r59src.count(r59old)==1:
+    r59p.write_text(r59src.replace(r59old,r59new,1))
+elif r59src.count(r59new)!=1:
+    raise SystemExit('r59h inherited r59 split-geometry gate anchor missing')
+
 ns={'__name__':'__main__','__file__':str(base)}
 try:
     exec(compile(src,str(base),'exec'),ns,ns)
