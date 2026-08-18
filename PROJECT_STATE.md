@@ -3,7 +3,77 @@
 > Authoritative cross-chat handoff for active Frames engineering.
 > Repository/evidence overrides chat summaries and prior claims.
 
-Last updated: 2026-08-16
+Last updated: 2026-08-18
+
+## Current physical-input checkpoint — r42 evidence -> r43 candidate
+
+### r42 physical result — PARTIAL IMPROVEMENT / USB INPUT STILL FAIL
+Exact tested r42 ISO:
+- `Frames-0.9.98-v108-r42-HID-Persistent-Interrupt-IN-Rufus-UEFI.iso`
+- SHA-256 `23a4f63dca4e8cdf0cf47b833ab86d251d2fb3bc65218230391045cd4f6a0da5`
+
+Physical telemetry photographed on the user's ASUS laptop:
+- `USB H R P = 1 0 2`
+- `R42 G P D L B E = 1 0 142 8 0 0`
+
+Physical interpretation:
+- receiver/HID configuration is active (`H=1`);
+- GET_PROTOCOL succeeded (`G=1`) and returned boot protocol (`P=0`);
+- report descriptor length is 142 bytes (`D=142`);
+- interrupt request length is 8 bytes (`L=8`);
+- babble count is zero (`B=0`);
+- the old false Stop Endpoint/completion-26 condition is no longer present (`E=0`);
+- live USB report readiness remains zero (`USB R=0`), so r42 is NOT a physical USB-input PASS.
+
+Engineering conclusion: r42 successfully removed the false idle/NAK endpoint-stop failure, but the external USB HID report still does not reach the input queue. The failure is now narrowed to report delivery/decoding rather than endpoint shutdown.
+
+### r43 — HID Control Fallback Live — NEXT AUTHORIZED PHYSICAL BOOT
+r43 deliberately switches to an alternate path rather than another Stop-Endpoint timing variation. It activates the already-existing HID class-control `GET_REPORT` fallback only for the exact physical receiver `(USB1 speed, VID 9354, PID 4267, mouse protocol 2)` while preserving the normal interrupt-IN path. The fallback yields automatically once a genuine interrupt-IN completion is observed.
+
+Authoritative r43 certification identity:
+- branch `v108-usb-hub-topology-r1`
+- certification commit `2bfcc60487e45946c87de02722a9c31d9e49ba2a`
+- workflow `.github/workflows/frames-v108-r43-hid-control-fallback-cert.yml`
+- GitHub Actions run `32093965809`: PASS
+- exact r43 patched source SHA-256 `926590a17115ca1e2c9bfa99224f8e8a0d190041bdd700fde411aafe594c2725`
+- compiled `FramesKernel.fkrn` SHA-256 `006acd11440af5944c922b588f5e6195ec3ec71e8d786d81f07d686a573b905a`
+
+Exact next physical-test ISO:
+- `Frames-0.9.98-v108-r43-HID-Control-Fallback-Live-Rufus-UEFI.iso`
+- SHA-256 `29ed77ee22390f2b374ed8591293275a02c03cf6447c2a80b4187b1710eb881f`
+- size `23,328,768 bytes`
+- status `PASS_VM_PENDING_PHYSICAL`
+- physical handoff `RUFUS_ISO_ONLY`
+
+Artifacts:
+- `Frames-v108-r43-Rufus-Final`, artifact ID `9309384474`, ZIP SHA-256 `df15aa4b9104ce28d517223b990b7a8cef18a3c3d2dd5844fa07288bd63097de`
+- `Frames-v108-r43-Evidence`, artifact ID `9309384110`, ZIP SHA-256 `1bbd893519d0de92049e315fbc185f902388a32bf4a042a88f23212a209a5918`
+
+Automated r43 evidence status:
+- interaction: PASS
+- USB direct: PASS
+- USB hub: PASS
+- USB multi-child: PASS
+- USB multi-controller: PASS
+- USB keyboard: PASS
+- PS/2 delivery: PASS
+- quantitative pointer smoothness: PASS
+- text edit: PASS
+- focus persistence: PASS
+- controlled USB flight log: PASS
+- logging fail-open behavior: PASS
+- internal-media read-only safety sentinel: PASS
+- model/source contract: PASS
+- physical r43: PENDING
+
+r43 physical overlay adds `R43 C K M N A E`:
+- `C` = class-control fallback prepared;
+- `K` = keyboard HID interface ready;
+- `M` = mouse HID interface ready;
+- `N` = successful class-control report decodes/polls;
+- `A` = most recent GET_REPORT byte count;
+- `E` = fallback status/error.
+A physical USB-input PASS still requires real hardware evidence, especially `USB R` becoming nonzero/ready and usable external USB mouse input. VM PASS must not be promoted to physical PASS.
 
 ## Project identity / safety
 - Frames is an independent operating system, not Windows- or Linux-based.
@@ -66,7 +136,7 @@ Workflow:
 
 r14 was intentionally NOT sent as the next physical boot after the user requested text-editing UX before the next hands-on test.
 
-## r15 text-editing + physical-input candidate — NEXT AUTHORIZED PHYSICAL BOOT
+## r15 text-editing + physical-input candidate — historical checkpoint
 Exact r15 source SHA-256:
 - `fa0f42f558f0004f7663f79b49c3049c57c896203cf18646b1ec6f999824f941`
 
@@ -98,12 +168,12 @@ Corrected independent finalizer:
 - artifact ID `9269447513`
 - artifact ZIP digest `sha256:ef4665ff74ea7e97078f2eb162fc8f1e11082985cc714b40df94d89f1f39e694`
 
-Exact next physical-test ISO:
+Exact historical r15 physical-test ISO:
 - `Frames-0.9.98-v108-Physical-Input-Repair-r15-TextEdit-Rufus-UEFI.iso`
 - SHA-256 `c9e5177a5595a7fee0910e3a177f258dd57e70a321cb1977118939e15716dd1c`
 - size `18,817,024 bytes`
 - Rufus mode: **ISO Image mode**
-- status: `PASS_VM_PENDING_PHYSICAL`
+- status at that checkpoint: `PASS_VM_PENDING_PHYSICAL`
 
 Automated r15 evidence status:
 - VM USB direct mouse: PASS
@@ -119,32 +189,12 @@ Automated r15 evidence status:
 - VM Left/Right/Delete text editing: PASS
 - read-only internal-media sentinel: PASS
 - destructive writes: BLOCKED
-- physical r15: PENDING
-
-## r15 physical test order
-Use only ISO SHA-256 `c9e5177a5595a7fee0910e3a177f258dd57e70a321cb1977118939e15716dd1c`.
-
-1. Write with Rufus in **ISO Image mode** and boot the laptop in UEFI mode.
-2. Touchpad: move slowly and quickly in all four directions, especially repeated up/down strokes and movement across/around the Input Test box. Report any jump-back, stale trail point, stall or reversal.
-3. External USB mouse: move it in all directions. If it still cannot control the cursor, photograph the full `INPUT V108 LIVE` panel after moving it for several seconds.
-4. Left click: verify normal controls still work.
-5. Right click: right-click in the Input Test area and verify the visible `RIGHT CLICK OK` context popover/counter appears.
-6. Hover over the text box without clicking: verify the normal pointer changes to an I-beam.
-7. Click inside the text box: verify a visible insertion caret appears and visibly blinks.
-8. Type a known short string such as `ABCD1234`.
-9. Press Left and Right several times and verify the blinking caret visibly moves through the text.
-10. Place the caret inside the string and press Delete; verify the character at the caret is removed and the remaining text closes the gap.
-11. Press Backspace with the caret inside the string; verify the character before the caret is removed.
-12. Because the laptop keyboard is known to be flaky, report intended keystrokes separately from spontaneous/repeating hardware behavior.
-13. If any path fails or behaves oddly, photograph both the complete `INPUT V108 LIVE` panel and `INPUT TEST` panel.
-
-No r14 physical boot is required; r15 supersedes r14 as the next physical candidate.
 
 ## Claim policy
-- Touchpad physical movement/control: proven since r10/r11, but r13 jump-back regression requires r15 confirmation.
-- External USB mouse: physical FAIL through r13; r15 is the next physical attempt after VM-certified multi-child hub repair.
-- Keyboard text: physical partial delivery proven at r13, but laptop keyboard hardware is unreliable.
-- Right-click, I-beam, caret blink and caret editing: VM-certified in r14/r15; physical confirmation pending r15.
+- Touchpad physical movement/control: proven since r10/r11; later physical evidence remains authoritative for smoothness/regressions.
+- External USB mouse: physical input remains unresolved through r42; r43 is the next exact physical candidate.
+- Keyboard text: physical partial delivery proven, but laptop keyboard hardware is unreliable.
+- Right-click, I-beam, caret blink and caret editing: VM-certified; physical confirmation remains evidence-dependent.
 - Frames 1.0 remains NOT promoted.
 - Physical destructive writes remain BLOCKED.
 
