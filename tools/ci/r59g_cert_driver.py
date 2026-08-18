@@ -73,6 +73,17 @@ elif r59src.count(new_vis)!=1:
     raise SystemExit('r59g r59 visible-row compatibility anchor missing')
 r59p.write_text(r59src)
 
+# r59e certifies the old F/Q/A/E/P display shape. r59g keeps every underlying
+# qTD/QH forensic read/write but replaces only the visible row with I/X/G/M/C.
+r59ep=here/'r59e_cert_driver.py'
+r59esrc=r59ep.read_text()
+old_evis="    req('fm%16384' in s and '(rr/128)%2' in s and '(rr/4)%32' in s and '(fm/16384)%2' in s,'r59e visible forensic row missing')"
+new_evis="    req((('fm%16384' in s and '(rr/128)%2' in s and '(rr/4)%32' in s and '(fm/16384)%2' in s) or ('volatile_read64(xhci+3976)' in s and '(rr/2)%2' in s and 'sm=qi%256' in s and 'cm=(qi/256)%256' in s)),'r59e/r59g visible forensic row missing')"
+if r59esrc.count(old_evis)==1:
+    r59ep.write_text(r59esrc.replace(old_evis,new_evis,1))
+elif r59esrc.count(new_evis)!=1:
+    raise SystemExit('r59g r59e visible-forensic compatibility anchor missing')
+
 ns={'__name__':'__main__','__file__':str(base)}
 try:
     exec(compile(src,str(base),'exec'),ns,ns)
