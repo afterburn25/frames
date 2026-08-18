@@ -13,6 +13,17 @@ newseg="or ('volatile_read64(xhci+3792)' in s and 'volatile_read64(xhci+3800)' i
 if r54src.count(oldseg)!=1: raise SystemExit(f'r56 r54 row-compat anchor count {r54src.count(oldseg)}')
 r54p.write_text(r54src.replace(oldseg,newseg,1))
 
+# r55 normally extends that r54 assertion to its own 3920-series overlay. The
+# r56-aware r54 assertion above already contains those fields plus r56's EHCI
+# ordinal field, so let the old r55 transformer become idempotent rather than
+# treating an already-newer assertion as corruption.
+r55p=here/'r55_cert_driver.py'
+r55src=r55p.read_text()
+oldcheck="if src.count(needle)!=1: raise SystemExit(f'r55 r52/r54 row compatibility anchor count {src.count(needle)}')\nsrc=src.replace(needle,replacement,1)"
+newcheck="if src.count(needle)==1:\n    src=src.replace(needle,replacement,1)\nelif 'volatile_read64(xhci+3928)' not in src:\n    raise SystemExit(f'r55/r56 r52-r54 row compatibility anchor count {src.count(needle)}')"
+if r55src.count(oldcheck)!=1: raise SystemExit(f'r56 r55 idempotent-row anchor count {r55src.count(oldcheck)}')
+r55p.write_text(r55src.replace(oldcheck,newcheck,1))
+
 base=here/'r56_cert_driver.py'
 src=base.read_text()
 
