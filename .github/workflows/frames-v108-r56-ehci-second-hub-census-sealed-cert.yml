@@ -36,7 +36,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends lld mtools dosfstools gdisk xorriso qemu-system-x86 ovmf python3-pil
+          # Hosted runners sometimes select a severely throttled Azure mirror.
+          # Prefer the canonical Ubuntu mirror for this small deterministic tool set.
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/apt-mirrors.txt || true
+          fi
+          sudo DEBIAN_FRONTEND=noninteractive apt-get \
+            -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 \
+            install -y --no-install-recommends lld mtools dosfstools gdisk xorriso qemu-system-x86 ovmf python3-pil
           python3 - <<'PY'
           import PIL
           print('PIL', PIL.__version__)
