@@ -14,6 +14,17 @@ if r57src.count(old_compat)==1:
 elif r57src.count(new_compat)!=1:
     raise SystemExit('r59 r57/r52 row compatibility anchor missing')
 
+# r56 also had a display-only E/N/C overlay assertion. r59 retains the
+# underlying second-controller census code but replaces that visible row.
+r56p=here/'r56_cert_driver.py'
+r56src=r56p.read_text()
+old_r56="    req('volatile_read64(xhci+3928)' in s and 'volatile_read64(xhci+3936)' in s and 'volatile_read64(xhci+3944)' in s,'r56 E/N/C physical overlay fields missing')"
+new_r56="    req((('volatile_read64(xhci+3928)' in s and 'volatile_read64(xhci+3936)' in s and 'volatile_read64(xhci+3944)' in s) or ('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+4072)' in s and 'volatile_read64(xhci+4080)' in s)),'r56 E/N/C physical overlay fields missing')"
+if r56src.count(old_r56)==1:
+    r56p.write_text(r56src.replace(old_r56,new_r56,1))
+elif r56src.count(new_r56)!=1:
+    raise SystemExit('r59 r56 overlay compatibility anchor missing')
+
 base=here/'r58_cert_driver.py'
 src=base.read_text()
 
