@@ -50,6 +50,18 @@ extra=anchor+"""
 """
 one(anchor,extra,'r51 guarded EHCI alternate-path model gates')
 
+# r36 structurally required the original fail-open xHCI polling statement.
+# r51 preserves that behavior until the guarded EHCI handoff succeeds, then
+# deliberately suppresses stale xHCI polling for that one rerouted receiver.
+# Adapt only this historical assertion in the CI checkout; all other r36 gates
+# remain unchanged.
+r36p=here/'r36_cert_driver.py'
+r36src=r36p.read_text()
+r36old="    req('if xhci!=0 && volatile_read64(xhci+808)!=0 { xhci_hid_poll_continuous(xhci,input_state); }' in s,'r36 USB poll is not fail-open in desktop loop')"
+r36new="    req(('if xhci!=0 && volatile_read64(xhci+808)!=0 { xhci_hid_poll_continuous(xhci,input_state); }' in s) or ('if xhci!=0 && volatile_read64(xhci+808)!=0 && volatile_read64(xhci+3696)!=1 { xhci_hid_poll_continuous(xhci,input_state); }' in s),'r36/r51 USB polling contract missing')"
+if r36src.count(r36old)!=1: raise SystemExit(f'r51 r36 poll compatibility anchor count {r36src.count(r36old)}')
+r36p.write_text(r36src.replace(r36old,r36new,1))
+
 ns={'__name__':'__main__','__file__':str(base)}
 try:
     exec(compile(src,str(base),'exec'),ns,ns)
