@@ -53,14 +53,9 @@ if old.count(anchor)!=1: raise SystemExit('r42 recovery insertion anchor mismatc
 new=old.replace(anchor,insert,1)
 rep(old,new,'r42 persistent interrupt-IN recovery gate')
 
-# Make the physical build unmistakable while retaining the r41b telemetry
-# meanings: G=GET_PROTOCOL ok, P=protocol, D=declared report descriptor length,
-# L=current TD length, B=babble count, E=last completion code.
 old_label=fn_text('v141_text_r41_v141')
 rep(old_label,label_fn('v141_text_r41_v141','R42 G P D L B E'),'r42 physical row label')
 
-# Structural guards: exact target only, no change to recovered PS/2 path, and
-# no weakening of the bounded babble logic.
 if '(r42_speed==1 || r42_speed==2) && r42_vid==9354 && r42_pid==4267 && r42_proto==2' not in s: raise SystemExit('r42 exact-device persistent-idle scope missing')
 if 'if r42_target && state==1' not in s: raise SystemExit('r42 Running endpoint hold missing')
 if 'v136_xhci_command_endpoint(xhci_state,15,0)' not in s: raise SystemExit('r42 unexpectedly removed genuine recovery machinery')
@@ -69,4 +64,6 @@ if 'ps2_poll_fallback_burst_v112(input_state,48);' not in s or 'return ps2_elan4
 
 p.write_text(s)
 out=hashlib.sha256(s.encode()).hexdigest()
+EXPECTED='1b293c4c6a23d08786794c16910715cc68638c803fd0248a630daeac1e25c3bf'
+if out!=EXPECTED: raise SystemExit('r42 output sha mismatch '+out)
 print(out)
