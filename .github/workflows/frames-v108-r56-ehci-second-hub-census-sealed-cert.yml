@@ -1,0 +1,92 @@
+name: Frames v108 r56 EHCI Second Hub Census Sealed Certification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-usb-hub-topology-r1 ]
+    paths:
+      - '.github/workflows/frames-v108-r56-ehci-second-hub-census-sealed-cert.yml'
+      - 'tools/ci/patch_v108_r56_ehci_second_hub_census_sealed.py'
+      - 'tools/ci/r56_sealed_cert_driver.py'
+
+permissions:
+  contents: read
+  actions: read
+  statuses: write
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-usb-hub-topology-r1
+      - name: Publish sealed r56 pending status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TARGET="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          python3 - "$TARGET" <<'PY'
+          import json,sys
+          open('/tmp/status-pending.json','w').write(json.dumps({'state':'pending','context':'frames/r56-sealed-certification','description':'sealed r56 certification running','target_url':sys.argv[1]}))
+          PY
+          curl -fsSL -X POST -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" --data-binary @/tmp/status-pending.json
+      - name: Install only missing build/image/runtime tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends lld mtools dosfstools gdisk xorriso qemu-system-x86 ovmf python3-pil
+          python3 - <<'PY'
+          import PIL
+          print('PIL', PIL.__version__)
+          PY
+          for t in clang ld.lld python3 unzip mformat mkfs.fat sgdisk xorriso qemu-system-x86_64; do command -v "$t"; done
+      - name: Fetch exact r21 protected source
+        uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r21-Candidate
+          path: r21-candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: '31979817129'
+      - name: Harden TCG text readiness harness
+        run: python3 tools/ci/harden_qemu_text_edit_gate_r28.py
+      - name: Build and certify sealed r56
+        run: python3 tools/ci/r56_sealed_cert_driver.py
+      - name: Validate sealed Rufus physical handoff
+        run: python3 tools/ci/validate_physical_handoff.py --final final
+      - name: Upload sealed r56 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r56-Evidence-Sealed
+          path: |
+            evidence/**
+            out/*.iso
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Upload sealed r56 Rufus ISO
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r56-Rufus-Final-Sealed
+          path: final/**
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish sealed r56 certification status
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          STATE=success
+          DESC='sealed r56 certification PASS'
+          if [ "$JOB_STATUS" != "success" ]; then STATE=failure; DESC='sealed r56 certification FAIL'; fi
+          TARGET="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          python3 - "$STATE" "$DESC" "$TARGET" <<'PY'
+          import json,sys
+          open('/tmp/status.json','w').write(json.dumps({'state':sys.argv[1],'context':'frames/r56-sealed-certification','description':sys.argv[2],'target_url':sys.argv[3]}))
+          PY
+          curl -fsSL -X POST -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" --data-binary @/tmp/status.json
