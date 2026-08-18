@@ -53,7 +53,7 @@ for bad in ('write(10)','nvme_submit_write','ahci_write','fat_write','block_writ
     if bad in r58.lower(): raise SystemExit('r58 exceeds read-only descriptor scope '+bad)
 if s.count('{')!=s.count('}'): raise SystemExit('r58 brace mismatch')
 out=hashlib.sha256(s.encode()).hexdigest()
-EXPECTED='0000000000000000000000000000000000000000000000000000000000000000'
+EXPECTED='e8edf7b8d38982b27b997258230ee5f0a51ebd46586bb6cfca679a00aae16f49'
 if out!=EXPECTED: raise SystemExit('r58 output sha mismatch '+out)
 p.write_text(s)
 print(out)
