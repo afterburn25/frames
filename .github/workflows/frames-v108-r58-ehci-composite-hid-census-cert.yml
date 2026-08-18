@@ -1,0 +1,102 @@
+name: Frames v108 r58 EHCI Composite HID Census Certification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-usb-hub-topology-r1 ]
+    paths:
+      - '.github/workflows/frames-v108-r58-ehci-composite-hid-census-cert.yml'
+      - 'tools/ci/r58_cert_driver.py'
+      - 'tools/ci/patch_v108_r58_ehci_composite_hid_census.py'
+
+permissions:
+  contents: read
+  actions: read
+  statuses: write
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-usb-hub-topology-r1
+
+      - name: Publish r58 pending status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TARGET="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          python3 - "$TARGET" <<'PY'
+          import json,sys
+          open('/tmp/status-pending.json','w').write(json.dumps({'state':'pending','context':'frames/r58-certification','description':'r58 composite HID census certification running','target_url':sys.argv[1]}))
+          PY
+          curl -fsSL -X POST -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" --data-binary @/tmp/status-pending.json
+
+      - name: Install build/image/runtime tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/apt-mirrors.txt || true
+          fi
+          sudo DEBIAN_FRONTEND=noninteractive apt-get \
+            -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 \
+            install -y --no-install-recommends lld mtools dosfstools gdisk xorriso qemu-system-x86 ovmf python3-pil
+          for t in clang ld.lld python3 unzip mformat mkfs.fat sgdisk xorriso qemu-system-x86_64; do command -v "$t"; done
+
+      - name: Fetch exact r21 protected source
+        uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r21-Candidate
+          path: r21-candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: '31979817129'
+
+      - name: Harden inherited text readiness harness
+        run: python3 tools/ci/harden_qemu_text_edit_gate_r28.py
+
+      - name: Build and certify r58
+        run: python3 tools/ci/r58_cert_driver.py
+
+      - name: Validate sealed Rufus physical handoff
+        run: python3 tools/ci/validate_physical_handoff.py --final final
+
+      - name: Upload r58 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r58-Evidence
+          path: |
+            evidence/**
+            out/*.iso
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload r58 Rufus ISO
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r58-Rufus-Final
+          path: final/**
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish r58 certification status
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          STATE=success
+          DESC='r58 composite HID census certification PASS'
+          if [ "$JOB_STATUS" != "success" ]; then STATE=failure; DESC='r58 composite HID census certification FAIL'; fi
+          TARGET="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          python3 - "$STATE" "$DESC" "$TARGET" <<'PY'
+          import json,sys
+          open('/tmp/status.json','w').write(json.dumps({'state':sys.argv[1],'context':'frames/r58-certification','description':sys.argv[2],'target_url':sys.argv[3]}))
+          PY
+          curl -fsSL -X POST -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" --data-binary @/tmp/status.json
