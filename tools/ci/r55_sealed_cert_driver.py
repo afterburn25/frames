@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+# Trigger the sealed r55 workflow after the workflow file is present on-branch.
 here=Path(__file__).parent
 base=here/'r55_cert_driver.py'
 src=base.read_text()
