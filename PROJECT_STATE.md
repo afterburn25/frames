@@ -5,51 +5,54 @@
 
 Last updated: 2026-08-18
 
-## Current physical-input checkpoint — r42 evidence -> r43 candidate
+## Current physical-input checkpoint — r43 regression -> r44 candidate
 
-### r42 physical result — PARTIAL IMPROVEMENT / USB INPUT STILL FAIL
-Exact tested r42 ISO:
-- `Frames-0.9.98-v108-r42-HID-Persistent-Interrupt-IN-Rufus-UEFI.iso`
-- SHA-256 `23a4f63dca4e8cdf0cf47b833ab86d251d2fb3bc65218230391045cd4f6a0da5`
-
-Physical telemetry photographed on the user's ASUS laptop:
-- `USB H R P = 1 0 2`
-- `R42 G P D L B E = 1 0 142 8 0 0`
-
-Physical interpretation:
-- receiver/HID configuration is active (`H=1`);
-- GET_PROTOCOL succeeded (`G=1`) and returned boot protocol (`P=0`);
-- report descriptor length is 142 bytes (`D=142`);
-- interrupt request length is 8 bytes (`L=8`);
-- babble count is zero (`B=0`);
-- the old false Stop Endpoint/completion-26 condition is no longer present (`E=0`);
-- live USB report readiness remains zero (`USB R=0`), so r42 is NOT a physical USB-input PASS.
-
-Engineering conclusion: r42 successfully removed the false idle/NAK endpoint-stop failure, but the external USB HID report still does not reach the input queue. The failure is now narrowed to report delivery/decoding rather than endpoint shutdown.
-
-### r43 — HID Control Fallback Live — NEXT AUTHORIZED PHYSICAL BOOT
-r43 deliberately switches to an alternate path rather than another Stop-Endpoint timing variation. It activates the already-existing HID class-control `GET_REPORT` fallback only for the exact physical receiver `(USB1 speed, VID 9354, PID 4267, mouse protocol 2)` while preserving the normal interrupt-IN path. The fallback yields automatically once a genuine interrupt-IN completion is observed.
-
-Authoritative r43 certification identity:
-- branch `v108-usb-hub-topology-r1`
-- certification commit `2bfcc60487e45946c87de02722a9c31d9e49ba2a`
-- workflow `.github/workflows/frames-v108-r43-hid-control-fallback-cert.yml`
-- GitHub Actions run `32093965809`: PASS
-- exact r43 patched source SHA-256 `926590a17115ca1e2c9bfa99224f8e8a0d190041bdd700fde411aafe594c2725`
-- compiled `FramesKernel.fkrn` SHA-256 `006acd11440af5944c922b588f5e6195ec3ec71e8d786d81f07d686a573b905a`
-
-Exact next physical-test ISO:
+### r43 physical result — REJECTED / USB FAIL + TOUCHPAD REGRESSION
+Exact tested r43 ISO:
 - `Frames-0.9.98-v108-r43-HID-Control-Fallback-Live-Rufus-UEFI.iso`
 - SHA-256 `29ed77ee22390f2b374ed8591293275a02c03cf6447c2a80b4187b1710eb881f`
 - size `23,328,768 bytes`
+
+Observed physical result on the user's ASUS laptop:
+- external USB mouse: FAIL — no cursor control;
+- built-in touchpad: FAIL/REGRESSION — touchpad movement stopped in r43;
+- photographed fallback row: `R43 C K M N A E = 1 1 1 76 0 11`.
+
+Physical interpretation:
+- `C=1`: class-control fallback prepared;
+- `K=1`: keyboard HID interface ready;
+- `M=1`: mouse HID interface ready;
+- `N=76`: fallback polling path executed repeatedly;
+- `A=0`: zero GET_REPORT payload bytes were returned;
+- `E=11`: fallback ended in status/error 11;
+- the simultaneous touchpad loss reproduces the older EP0/control-fallback regression pattern rather than solving USB report delivery.
+
+Engineering conclusion: r43 is rejected as a physical regression. Do not continue tuning the live EP0/class-control GET_REPORT route. The next revision returns to the exact r42 interrupt-IN runtime behavior and adds passive transfer-ring/event-ring/DMA forensics only.
+
+### r44 — HID Transfer-Ring Forensic — NEXT AUTHORIZED PHYSICAL BOOT
+r44 is derived from exact r42 behavior, not r43. It does not integrate `v135_hid_control_fallback_prepare` or `v135_hid_control_fallback_poll`, so the r43 live EP0 polling path is removed. r44 preserves the r42 persistent interrupt-IN policy and recovered PS/2/touchpad service while adding non-blocking diagnostic telemetry around the existing xHCI transfer.
+
+r44 does not add a new Stop Endpoint cycle, endpoint reset, Set TR Dequeue, control GET_REPORT, delay loop, or extra HID doorbell. Its purpose is to determine whether the controller consumes the submitted interrupt TRB, DMA-writes report bytes, emits a Transfer Event, and whether that event points back to the submitted TRB.
+
+Authoritative r44 certification identity:
+- branch `v108-usb-hub-topology-r1`
+- certification commit `bc593c831d5b75adcb87666a77e545ace22b49c6`
+- workflow `.github/workflows/frames-v108-r44-hid-ring-forensic-cert.yml`
+- GitHub Actions run `32095264934`: PASS
+- exact r44 patched source SHA-256 `5fca6164e902f9720bef0d789ca46d2af480b065f32e1a6f61990476066962c1`
+
+Exact next physical-test ISO:
+- `Frames-0.9.98-v108-r44-HID-Transfer-Ring-Forensic-Rufus-UEFI.iso`
+- SHA-256 `e91158d6219de81c15207286a62c2ba27bb6d15f02e8ebecc97da0a0ee59c73a`
+- size `23,330,816 bytes`
 - status `PASS_VM_PENDING_PHYSICAL`
 - physical handoff `RUFUS_ISO_ONLY`
 
 Artifacts:
-- `Frames-v108-r43-Rufus-Final`, artifact ID `9309384474`, ZIP SHA-256 `df15aa4b9104ce28d517223b990b7a8cef18a3c3d2dd5844fa07288bd63097de`
-- `Frames-v108-r43-Evidence`, artifact ID `9309384110`, ZIP SHA-256 `1bbd893519d0de92049e315fbc185f902388a32bf4a042a88f23212a209a5918`
+- `Frames-v108-r44-Rufus-Final`, artifact ID `9309798612`, ZIP SHA-256 `10ce727fa6e1dc5efcceb8a51056813d8ba4869f2c041935b40d3e55b608a3af`
+- `Frames-v108-r44-Evidence`, artifact ID `9309798235`, ZIP SHA-256 `eb3472658b031e419a339195c77917475d091d490541db2a5d1eabe310bba4c5`
 
-Automated r43 evidence status:
+Automated r44 evidence status:
 - interaction: PASS
 - USB direct: PASS
 - USB hub: PASS
@@ -64,16 +67,25 @@ Automated r43 evidence status:
 - logging fail-open behavior: PASS
 - internal-media read-only safety sentinel: PASS
 - model/source contract: PASS
-- physical r43: PENDING
+- physical r44: PENDING
 
-r43 physical overlay adds `R43 C K M N A E`:
-- `C` = class-control fallback prepared;
-- `K` = keyboard HID interface ready;
-- `M` = mouse HID interface ready;
-- `N` = successful class-control report decodes/polls;
-- `A` = most recent GET_REPORT byte count;
-- `E` = fallback status/error.
-A physical USB-input PASS still requires real hardware evidence, especially `USB R` becoming nonzero/ready and usable external USB mouse input. VM PASS must not be promoted to physical PASS.
+r44 physical overlay adds `R44 A T D V M Q B`:
+- `A` = interrupt TD armed/pending;
+- `T` = submitted transfer TRB ring index;
+- `D` = hardware endpoint dequeue ring index;
+- `V` = direct Transfer Events observed for the polling path;
+- `M` = direct Transfer Events whose event parameter matches the submitted TRB;
+- `Q` = matching endpoint events recovered through the event mailbox;
+- `B` = first four bytes currently present in the HID DMA report buffer, packed little-endian.
+
+Interpretation guide for physical r44 evidence:
+- `B` changes/nonzero while `V/M/Q` stay zero: device/controller DMA reached the report buffer but event delivery/correlation is broken;
+- `D` advances while `V` stays zero: controller consumed the transfer ring but the completion event is being lost or routed elsewhere;
+- `V>0` with `M=0`: Frames sees Transfer Events but they point to a different TRB than the submitted HID transfer, indicating ring/cycle/correlation trouble;
+- `V>0` and `M>0` while `USB R` remains zero: the hardware event is seen and correlated, moving the failure downstream into completion decode/input delivery;
+- `A=1` with no `D`, `V`, `M`, `Q`, or `B` progress: the TD remains armed but the controller/device is not servicing it, pointing toward endpoint scheduling/context rather than GUI/input decode.
+
+VM PASS must not be described as a physical USB-input PASS. r44 remains diagnostic until tested on the ASUS laptop.
 
 ## Project identity / safety
 - Frames is an independent operating system, not Windows- or Linux-based.
@@ -191,8 +203,8 @@ Automated r15 evidence status:
 - destructive writes: BLOCKED
 
 ## Claim policy
-- Touchpad physical movement/control: proven since r10/r11; later physical evidence remains authoritative for smoothness/regressions.
-- External USB mouse: physical input remains unresolved through r42; r43 is the next exact physical candidate.
+- Touchpad physical movement/control: proven since r10/r11, but r43 introduced a physical touchpad regression through the live EP0 fallback. r44 removes that fallback and restores the r42 PS/2/touchpad path pending physical confirmation.
+- External USB mouse: physical input remains unresolved through r43; r43 also regressed the touchpad. r44 is the next exact physical candidate and is diagnostic rather than a claimed USB fix.
 - Keyboard text: physical partial delivery proven, but laptop keyboard hardware is unreliable.
 - Right-click, I-beam, caret blink and caret editing: VM-certified; physical confirmation remains evidence-dependent.
 - Frames 1.0 remains NOT promoted.
