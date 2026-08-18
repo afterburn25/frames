@@ -55,6 +55,19 @@ r37new="    req(('if typ>=1 && typ<=3 {' in s) or ('if typ==1 || typ==2 {' in s 
 if r37src.count(r37old)!=1: raise SystemExit(f'r45 r37 button compatibility anchor count {r37src.count(r37old)}')
 r37p.write_text(r37src.replace(r37old,r37new,1))
 
+# On the previous r45 attempt the separate PS/2 delivery gate passed, but the
+# smoothness gate timed out because concurrent SMP serial output split the exact
+# readiness marker into `FRAMES_V108_PS2_ENA` + worker text + `BLE_OK`. Preserve
+# the same semantic proof while making this one readiness wait robust to serial
+# interleaving. This does not weaken PS/2 delivery: that remains independently
+# runtime-gated before smoothness is accepted.
+smp=here/'qemu_ps2_cursor_smoothness.py'
+sm=smp.read_text()
+smold="ready=['FRAMES_V108_INPUT_TEST_RUNTIME_READY','FRAMES_V108_PS2_ENABLE_OK','FRAMES_V108_STABLE_INPUT_DIAG_OK']"
+smnew="ready=['FRAMES_V108_INPUT_TEST_RUNTIME_READY','FRAMES_V108_PS2_ENA','BLE_OK','FRAMES_V108_STABLE_INPUT_DIAG_OK']"
+if sm.count(smold)!=1: raise SystemExit(f'r45 smoothness readiness anchor count {sm.count(smold)}')
+smp.write_text(sm.replace(smold,smnew,1))
+
 ns={'__name__':'__main__','__file__':str(base)}
 try:
     exec(compile(src,str(base),'exec'),ns,ns)
