@@ -19,7 +19,7 @@ def alln(old,new,count,label):
 
 one("'patch_v108_r41b_maxxter_usb1_hid_babble_protocol.py'","'patch_v108_r42_hid_nak_tolerant_running.py'",'patch target')
 one('kernel-r41b.nx','kernel-r42.nx','kernel evidence target')
-alln('17139d64aafd6d797bab85fc925da51cf13fc0849cfa4f2a3191fcc3e686c814','7e3d5194be2f22792460ffe2f028b1ec39c7a7dd28624f3de9ffba0763cd2c6a',2,'exact kernel identity')
+alln('17139d64aafd6d797bab85fc925da51cf13fc0849cfa4f2a3191fcc3e686c814','c55c327fb1e85921c4ecf4cf79d2a764ffb8e0375a5507baeb02c8ce50f0213d',2,'exact kernel identity')
 one("'Frames-0.9.98-v108-r41b-Maxxter-USB1-HID-Babble-Protocol-Recovery-Rufus-UEFI.iso'","'Frames-0.9.98-v108-r42-HID-NAK-Tolerant-Running-Endpoint-Rufus-UEFI.iso'",'ISO target')
 one("'R41B-SHA.txt'","'R42-SHA.txt'",'SHA evidence target')
 one("'R25K-R41B.patch'","'R25K-R42.patch'",'patch evidence target')
@@ -48,7 +48,7 @@ r37p.write_text(r37src.replace(old_progress,new_progress,1))
 
 anchor="    req('speed==2 && vid==9354 && pid==4267 && protocol==2' not in s,'r41b retained low-speed-only poll scope')"
 extra=anchor+"""
-    req(r37_sha=='7e3d5194be2f22792460ffe2f028b1ec39c7a7dd28624f3de9ffba0763cd2c6a','r42 exact kernel identity mismatch '+r37_sha)
+    req(r37_sha=='c55c327fb1e85921c4ecf4cf79d2a764ffb8e0375a5507baeb02c8ce50f0213d','r42 exact kernel identity mismatch '+r37_sha)
     req('v136_xhci_command_endpoint(xhci_state,15,0)' not in s,'r42 timer-driven Stop Endpoint call still present')
     req('volatile_write64(xhci_state+2728,0)' in s and 'volatile_read64(xhci_state+808)==0' in s and 'volatile_write64(xhci_state+3256' in s,'r42 running HID NAK/pending tolerance missing')
     req('code==26 || code==27 || code==28' in s and 'volatile_write64(xhci_state+3248' in s,'r42 Stopped completion quarantine missing')
