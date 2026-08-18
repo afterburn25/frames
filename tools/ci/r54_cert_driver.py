@@ -14,6 +14,18 @@ if r52src.count(r52old)==1:
 elif r52src.count(r52new)!=1:
     raise SystemExit('r54 r52 power compatibility anchor missing')
 
+# r54 replaces the visible r52/r53 bottom telemetry row, but the underlying
+# r52 route-state fields remain present in the classifier. Adapt only the
+# historical on-screen row-shape assertion to accept the new r54 overlay while
+# retaining both route-write evidence fields.
+r52src=r52p.read_text()
+r52row_old="    req('volatile_read64(xhci+3696)' in s and 'volatile_read64(xhci+3704)' in s and 'volatile_read64(xhci+3712)' in s and 'volatile_read64(xhci+3720)' in s and 'volatile_read64(xhci+3728)' in s and 'volatile_read64(xhci+3736)' in s and 'volatile_read64(xhci+3744)' in s and 'volatile_write64(xhci_state+3752,before_bit)' in s and 'volatile_write64(xhci_state+3760,after_bit)' in s,'r52 physical EHCI companion wake row/route proof missing')"
+r52row_new="    req(((('volatile_read64(xhci+3696)' in s and 'volatile_read64(xhci+3704)' in s and 'volatile_read64(xhci+3712)' in s and 'volatile_read64(xhci+3720)' in s and 'volatile_read64(xhci+3728)' in s and 'volatile_read64(xhci+3736)' in s and 'volatile_read64(xhci+3744)' in s) or ('volatile_read64(xhci+3792)' in s and 'volatile_read64(xhci+3800)' in s and 'volatile_read64(xhci+3808)' in s and 'volatile_read64(xhci+3816)' in s and 'volatile_read64(xhci+3824)' in s and 'volatile_read64(xhci+3832)' in s and 'volatile_read64(xhci+3840)' in s)) and 'volatile_write64(xhci_state+3752,before_bit)' in s and 'volatile_write64(xhci_state+3760,after_bit)' in s),'r52/r54 physical EHCI row/route proof missing')"
+if r52src.count(r52row_old)==1:
+    r52p.write_text(r52src.replace(r52row_old,r52row_new,1))
+elif r52src.count(r52row_new)!=1:
+    raise SystemExit('r54 r52 physical-row compatibility anchor missing')
+
 base=here/'r53_cert_driver.py'
 src=base.read_text()
 
