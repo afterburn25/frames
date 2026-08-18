@@ -5,54 +5,61 @@
 
 Last updated: 2026-08-18
 
-## Current physical-input checkpoint — r43 regression -> r44 candidate
+## Current physical-input checkpoint — r44 physical failure -> r45 candidate
 
-### r43 physical result — REJECTED / USB FAIL + TOUCHPAD REGRESSION
-Exact tested r43 ISO:
-- `Frames-0.9.98-v108-r43-HID-Control-Fallback-Live-Rufus-UEFI.iso`
-- SHA-256 `29ed77ee22390f2b374ed8591293275a02c03cf6447c2a80b4187b1710eb881f`
-- size `23,328,768 bytes`
-
-Observed physical result on the user's ASUS laptop:
-- external USB mouse: FAIL — no cursor control;
-- built-in touchpad: FAIL/REGRESSION — touchpad movement stopped in r43;
-- photographed fallback row: `R43 C K M N A E = 1 1 1 76 0 11`.
-
-Physical interpretation:
-- `C=1`: class-control fallback prepared;
-- `K=1`: keyboard HID interface ready;
-- `M=1`: mouse HID interface ready;
-- `N=76`: fallback polling path executed repeatedly;
-- `A=0`: zero GET_REPORT payload bytes were returned;
-- `E=11`: fallback ended in status/error 11;
-- the simultaneous touchpad loss reproduces the older EP0/control-fallback regression pattern rather than solving USB report delivery.
-
-Engineering conclusion: r43 is rejected as a physical regression. Do not continue tuning the live EP0/class-control GET_REPORT route. The next revision returns to the exact r42 interrupt-IN runtime behavior and adds passive transfer-ring/event-ring/DMA forensics only.
-
-### r44 — HID Transfer-Ring Forensic — NEXT AUTHORIZED PHYSICAL BOOT
-r44 is derived from exact r42 behavior, not r43. It does not integrate `v135_hid_control_fallback_prepare` or `v135_hid_control_fallback_poll`, so the r43 live EP0 polling path is removed. r44 preserves the r42 persistent interrupt-IN policy and recovered PS/2/touchpad service while adding non-blocking diagnostic telemetry around the existing xHCI transfer.
-
-r44 does not add a new Stop Endpoint cycle, endpoint reset, Set TR Dequeue, control GET_REPORT, delay loop, or extra HID doorbell. Its purpose is to determine whether the controller consumes the submitted interrupt TRB, DMA-writes report bytes, emits a Transfer Event, and whether that event points back to the submitted TRB.
-
-Authoritative r44 certification identity:
-- branch `v108-usb-hub-topology-r1`
-- certification commit `bc593c831d5b75adcb87666a77e545ace22b49c6`
-- workflow `.github/workflows/frames-v108-r44-hid-ring-forensic-cert.yml`
-- GitHub Actions run `32095264934`: PASS
-- exact r44 patched source SHA-256 `5fca6164e902f9720bef0d789ca46d2af480b065f32e1a6f61990476066962c1`
-
-Exact next physical-test ISO:
+### r44 physical result — USB FAIL + TOUCHPAD FALSE-RIGHT / INPUT LOCK
+Exact tested r44 ISO:
 - `Frames-0.9.98-v108-r44-HID-Transfer-Ring-Forensic-Rufus-UEFI.iso`
 - SHA-256 `e91158d6219de81c15207286a62c2ba27bb6d15f02e8ebecc97da0a0ee59c73a`
+- size `23,330,816 bytes`
+
+Observed on the user's ASUS laptop:
+- external USB mouse: FAIL — still no cursor control;
+- built-in touchpad: initially moved;
+- while moving the touchpad, a right-click context menu was triggered without an intentional right click;
+- after that event the pointer/input path locked and mouse control was lost;
+- photographed r44 row: `R44 A T D V M Q B = 1 0 0 0 0 0 0`.
+
+r44 USB interpretation:
+- `A=1`: the interrupt TD is armed/pending;
+- `T=0`: submitted HID transfer TRB is ring index 0;
+- `D=0`: hardware endpoint dequeue telemetry did not advance from index 0;
+- `V=0`: no direct Transfer Event was observed;
+- `M=0`: no Transfer Event matched the submitted TRB;
+- `Q=0`: no matching endpoint event arrived through the event mailbox;
+- `B=0`: the HID DMA report buffer remained zero.
+
+Engineering conclusion for USB: r44 did not show evidence that the physical mouse transfer was being serviced. The failure is upstream of HID decode and GUI delivery: no report DMA and no correlated completion event were observed while the TD remained armed.
+
+Engineering conclusion for touchpad: source inspection found a concrete regression introduced in the later Elantech recovery train. `ps2_elan4_buttons_v111` had been broadened from button synchronization on packet classes 1/2 to `typ>=1 && typ<=3`, while class-3 packets were also restored as motion packets. On this physical stream, class-3 motion payload upper bits can therefore be interpreted as button bits and synthesize a right click. r45 corrects that by preserving class-3 motion while preventing class-3 motion packets from mutating button state.
+
+Do not describe the r44 incident as proof that the whole OS crashed; the physical evidence establishes an input-path lock/loss of pointer control.
+
+### r45 — Touchpad Button Isolation + xHCI DCS Proof — NEXT AUTHORIZED PHYSICAL BOOT
+r45 is derived from exact r44 and makes two narrowly scoped changes:
+1. **Touchpad button isolation:** class-3 Elantech packets remain eligible for motion delivery, but only packet classes 1/2 may update left/right button state. This directly addresses the r44 false-right-click-on-motion path.
+2. **Passive xHCI cycle-state proof:** r45 adds the software producer cycle and hardware endpoint DCS to the physical overlay. It does not force a cycle value, reset the endpoint, rewrite the dequeue pointer, add a new HID doorbell, or reintroduce the rejected r43 EP0 `GET_REPORT` fallback.
+
+Authoritative r45 certification identity:
+- branch `v108-usb-hub-topology-r1`
+- certification commit `fd181048f9d18a974dace237fc0d8d65e0939749`
+- workflow `.github/workflows/frames-v108-r45-touchpad-button-xhci-dcs-cert.yml`
+- GitHub Actions run `32097000392`: PASS
+- exact r45 patched source SHA-256 `b22fbc974398bdf6f13302fc1c05589966bad81edb72e83f0ca56b16f60b9b1b`
+- compiled `FramesKernel.fkrn` SHA-256 `798f1e20e7673317f8a94470c85430424cb27c34d1660ec9c74df92ca62aa20f`
+
+Exact next physical-test ISO:
+- `Frames-0.9.98-v108-r45-Touchpad-Button-Isolation-xHCI-DCS-Rufus-UEFI.iso`
+- SHA-256 `a14751dc74f4daee0bfcf1e1002d2cc838cc9dd9d93e3efaf5a75b4b5968e0c6`
 - size `23,330,816 bytes`
 - status `PASS_VM_PENDING_PHYSICAL`
 - physical handoff `RUFUS_ISO_ONLY`
 
 Artifacts:
-- `Frames-v108-r44-Rufus-Final`, artifact ID `9309798612`, ZIP SHA-256 `10ce727fa6e1dc5efcceb8a51056813d8ba4869f2c041935b40d3e55b608a3af`
-- `Frames-v108-r44-Evidence`, artifact ID `9309798235`, ZIP SHA-256 `eb3472658b031e419a339195c77917475d091d490541db2a5d1eabe310bba4c5`
+- `Frames-v108-r45-Rufus-Final`, artifact ID `9310375178`, ZIP SHA-256 `bcb229e6ffe223f4cace5b22feef5cbbcf89169e7cde60384d82cfbdd678df63`
+- `Frames-v108-r45-Evidence`, artifact ID `9310374692`, ZIP SHA-256 `aa65d409e9a9a06e955589f0581511873222ede7344bc91e1e805cf036e248b8`
 
-Automated r44 evidence status:
+Automated r45 evidence status:
 - interaction: PASS
 - USB direct: PASS
 - USB hub: PASS
@@ -67,25 +74,32 @@ Automated r44 evidence status:
 - logging fail-open behavior: PASS
 - internal-media read-only safety sentinel: PASS
 - model/source contract: PASS
-- physical r44: PENDING
+- physical r45: PENDING
 
-r44 physical overlay adds `R44 A T D V M Q B`:
+The successful r45 run followed two automatic CI repairs. The first inherited an obsolete r37 assertion requiring class-3 packets to mutate button state; that historical assertion was compatibility-adapted without undoing the r45 fix. The second attempt showed PS/2 delivery PASS but the smoothness readiness marker was split by concurrent SMP serial output (`FRAMES_V108_PS2_ENA` + interleaved worker text + `BLE_OK`); the readiness check was hardened to tolerate that serial interleaving while retaining the independent PS/2 runtime gate. The final run passed the complete certification chain.
+
+r45 physical overlay is `R45 A D C H V M B`:
 - `A` = interrupt TD armed/pending;
-- `T` = submitted transfer TRB ring index;
 - `D` = hardware endpoint dequeue ring index;
+- `C` = Frames software transfer-ring producer cycle;
+- `H` = hardware endpoint dequeue-cycle-state (DCS);
 - `V` = direct Transfer Events observed for the polling path;
-- `M` = direct Transfer Events whose event parameter matches the submitted TRB;
-- `Q` = matching endpoint events recovered through the event mailbox;
+- `M` = direct Transfer Events whose event parameter matches the submitted HID TRB;
 - `B` = first four bytes currently present in the HID DMA report buffer, packed little-endian.
 
-Interpretation guide for physical r44 evidence:
-- `B` changes/nonzero while `V/M/Q` stay zero: device/controller DMA reached the report buffer but event delivery/correlation is broken;
-- `D` advances while `V` stays zero: controller consumed the transfer ring but the completion event is being lost or routed elsewhere;
-- `V>0` with `M=0`: Frames sees Transfer Events but they point to a different TRB than the submitted HID transfer, indicating ring/cycle/correlation trouble;
-- `V>0` and `M>0` while `USB R` remains zero: the hardware event is seen and correlated, moving the failure downstream into completion decode/input delivery;
-- `A=1` with no `D`, `V`, `M`, `Q`, or `B` progress: the TD remains armed but the controller/device is not servicing it, pointing toward endpoint scheduling/context rather than GUI/input decode.
+Interpretation guide for physical r45 evidence:
+- `C != H`: strong evidence of a software-producer/hardware-consumer cycle-state disagreement; diagnose transfer-ring synchronization before changing HID decode.
+- `C == H`, `A=1`, and `D/V/M/B` remain unchanged/zero while the USB mouse is moved: the cycle-state hypothesis is not supported; focus next on periodic endpoint scheduling/context/device transaction service rather than GUI/input decode or event correlation.
+- `D` advances but `V=0`: hardware consumed transfer-ring work but completion-event delivery/routing is failing.
+- `B` becomes nonzero while `V/M=0`: DMA reached the report buffer but event delivery/correlation is broken.
+- `V>0` and `M=0`: Transfer Events are arriving but correlate to a different TRB/ring state.
+- `V>0` and `M>0` while visible USB input still fails: move diagnosis downstream into completion decode, HID report parsing, or Generic Pointer delivery.
 
-VM PASS must not be described as a physical USB-input PASS. r44 remains diagnostic until tested on the ASUS laptop.
+Physical test order for r45:
+1. Exercise the built-in touchpad extensively first. Confirm movement does not synthesize a right-click menu and does not lock the input path.
+2. Then move the external USB mouse continuously for at least 10–15 seconds.
+3. Photograph the complete diagnostic panel with special attention to `R45 A D C H V M B`.
+4. Physical USB PASS still requires usable external USB pointer control; telemetry alone does not promote it.
 
 ## Project identity / safety
 - Frames is an independent operating system, not Windows- or Linux-based.
@@ -112,101 +126,27 @@ Fresh unchanged certification:
 
 All current physical-input work reconstructs this exact v108 source. v109-v116 architecture transforms remain intentionally excluded from this physical-input bring-up train.
 
-## Authoritative r13 physical result — user's ASUS laptop
-Exact tested ISO:
-- `Frames-0.9.98-v108-Physical-Input-Repair-r13-USB-Hub-Rufus-UEFI.iso`
-- SHA-256 `ceb2201bd641e8f950929730e1dd6a0db8c7049aa29f0a133533e38fd55900a6`
-- size `18,796,544 bytes`
-
-Observed physical result:
-- external USB mouse: FAIL — USB telemetry active but no visible cursor control;
-- built-in touchpad: PARTIAL/FAIL — cursor is controllable and buttons work, but movement can jump back to earlier trail positions, especially during vertical motion and near the Input Test box;
-- physical left click: PASS at the interactive UI;
-- right click: untestable in r13 because no right-click target existed;
-- keyboard: PARTIAL PASS — characters reached the text box, but this laptop keyboard has known hardware faults, so individual missed/repeated characters are not automatically attributed to Frames.
-
-Physical interpretation:
-- the PS/2/AUX -> Generic Pointer -> GUI path is real and active, but r13 introduced/retained a movement discontinuity;
-- the GUI cursor/compositor path is proven by the touchpad, so the external USB mouse failure is upstream of visible pointer rendering;
-- physical USB mouse remains unresolved and physical hardware remains authoritative.
-
-## r14 corrective repair — VM certified, not physically tested
-r14 source SHA-256:
-- `2401b3a460430da6b008716e65f7be10dfb8e289da48b12045e1e1b920ed6caf`
-
-r14 changes:
-- quarantines r13/r12 typ-3 Elantech relative synthesis associated with physical jump-back discontinuities;
-- preserves/restores hub parent control context while scanning sibling children;
-- skips a boot-keyboard hub child and continues to the mouse child;
-- adds a real right-click context-menu test and right-click counter;
-- preserves existing boot, keyboard, left-click, GUI and read-only safety behavior.
-
-Workflow:
-- `.github/workflows/frames-v108-physical-input-r14-realhw-cert.yml`
-- run `31969028082`: PASS
-- all nine automated lanes PASS: USB direct, USB hub, USB multi-child hub, PS/2, quantitative smoothness, interactive UI, right-click, source model and read-only safety.
-
-r14 was intentionally NOT sent as the next physical boot after the user requested text-editing UX before the next hands-on test.
-
-## r15 text-editing + physical-input candidate — historical checkpoint
-Exact r15 source SHA-256:
-- `fa0f42f558f0004f7663f79b49c3049c57c896203cf18646b1ec6f999824f941`
-
-r15 adds to the exact r14 source:
-- pointer changes to an I-beam while hovering over the Input Test text box;
-- visible blinking insertion caret while the text box has focus;
-- click-to-position caret placement;
-- Left Arrow and Right Arrow caret navigation;
-- Home/End caret positioning support;
-- Delete-at-caret;
-- Backspace-before-caret;
-- insertion at the caret rather than append-only text entry;
-- dedicated live markers/counters for I-beam, caret, blink, Left, Right and Delete paths.
-
-Primary r15 workflow:
-- `.github/workflows/frames-v108-physical-input-r15-textedit-cert.yml`
-- run `31969530813`
-- exact r15 ISO built successfully;
-- runtime/safety lanes PASS: USB direct, USB hub, USB hub keyboard-then-mouse, PS/2, quantitative smoothness, interactive UI, right-click, live text-edit, and read-only NVMe sentinel;
-- initial model lane failed only because it searched for literal marker strings even though Nexus serial markers are encoded as `serial_putc` calls; live text-edit runtime had already emitted the markers and passed.
-
-Corrected independent finalizer:
-- `.github/workflows/frames-v108-physical-input-r15-finalize-r2.yml`
-- run `31969738151`: PASS
-- reuses the exact candidate from run `31969530813` rather than rebuilding/substituting it;
-- re-verifies all successful runtime/safety evidence;
-- corrected source-model contract: PASS;
-- final artifact: `Frames-v108-r15-Rufus-Final-r2`
-- artifact ID `9269447513`
-- artifact ZIP digest `sha256:ef4665ff74ea7e97078f2eb162fc8f1e11082985cc714b40df94d89f1f39e694`
-
-Exact historical r15 physical-test ISO:
-- `Frames-0.9.98-v108-Physical-Input-Repair-r15-TextEdit-Rufus-UEFI.iso`
-- SHA-256 `c9e5177a5595a7fee0910e3a177f258dd57e70a321cb1977118939e15716dd1c`
-- size `18,817,024 bytes`
-- Rufus mode: **ISO Image mode**
-- status at that checkpoint: `PASS_VM_PENDING_PHYSICAL`
-
-Automated r15 evidence status:
-- VM USB direct mouse: PASS
-- VM USB hub child HID: PASS
-- VM USB hub keyboard then mouse: PASS
-- VM PS/2 pointer: PASS
-- VM quantitative PS/2 smoothness: PASS
-- VM keyboard text + clickable Input Test UI: PASS
-- VM right-click context menu: PASS
-- VM I-beam hover: PASS
-- VM insertion caret: PASS
-- VM caret blink: PASS
-- VM Left/Right/Delete text editing: PASS
-- read-only internal-media sentinel: PASS
-- destructive writes: BLOCKED
+## Key physical-input history
+- **r13:** external USB mouse failed; built-in touchpad physically controlled the GUI but had jump-back discontinuities; left-click physically passed. Exact r13 ISO SHA-256 `ceb2201bd641e8f950929730e1dd6a0db8c7049aa29f0a133533e38fd55900a6`.
+- **r14:** VM-certified corrective repair; quarantined the earlier type-3 discontinuity path and added right-click testing. Not physically booted before text-edit UX work continued.
+- **r15:** VM-certified text-editing candidate with I-beam, insertion caret, navigation, Delete/Backspace and right-click context-menu checks. Historical exact ISO SHA-256 `c9e5177a5595a7fee0910e3a177f258dd57e70a321cb1977118939e15716dd1c`.
+- **r35b:** physical USB EP0 fallback timed out and regressed touchpad behavior; telemetry `R35_F1_K1_M1_Q270_R78_E12`.
+- **r36:** physical USB endpoint ran without useful events; touchpad flicker; telemetry `R36_S1_I5_D5_M8_K562_E0`.
+- **r37b:** touchpad recovered; USB HID stopped with event/completion 26; telemetry `R37_S1_Q0_C1_K3_F2_E26`.
+- **r38:** USB endpoint disabled/no transfer event; telemetry `R38_S0_Q0_A0_T0_V255_E0`.
+- **r39b:** endpoint running with Set Idle success but no transfer; Broadcom BCM4352 Wi-Fi board identity discovered; telemetry `R39_S1_Q0_I1_R0_C0_E0_WIFI_14E4_43B1_B3D0F0`.
+- **r40:** exact external receiver identified as low-speed VID 9354 / PID 4267; babble condition observed; telemetry `R40_S1_I1_H2_V9354_P4267_E3_W40_V5348_D17329_SV6715_SD8483_R3`.
+- **r41b:** control path healthy, report descriptor length 142, interrupt length 8, but interrupt TD stopped with E26; telemetry `R41B_G1_P0_D142_L8_B0_E26`.
+- **r42:** false endpoint-stop condition removed; endpoint remained running but no USB report reached Frames; telemetry `R42_G1_P0_D142_L8_B0_E0_USB_R0`.
+- **r43:** rejected physical regression. Live EP0/class-control fallback ran but returned zero report bytes/status 11 and killed touchpad movement; telemetry `R43_C1_K1_M1_N76_A0_E11`.
+- **r44:** USB still had no event/DMA progress; touchpad initially worked, then motion synthesized a false right-click menu and pointer input locked; telemetry `R44_A1_T0_D0_V0_M0_Q0_B0`.
+- **r45:** next physical candidate. VM certified; touchpad class-3 button-state mutation removed while motion retained; passive software-cycle/hardware-DCS proof added.
 
 ## Claim policy
-- Touchpad physical movement/control: proven since r10/r11, but r43 introduced a physical touchpad regression through the live EP0 fallback. r44 removes that fallback and restores the r42 PS/2/touchpad path pending physical confirmation.
-- External USB mouse: physical input remains unresolved through r43; r43 also regressed the touchpad. r44 is the next exact physical candidate and is diagnostic rather than a claimed USB fix.
-- Keyboard text: physical partial delivery proven, but laptop keyboard hardware is unreliable.
-- Right-click, I-beam, caret blink and caret editing: VM-certified; physical confirmation remains evidence-dependent.
+- Touchpad physical movement/control is proven on this laptop, but later revisions have exposed parser/button-state regressions. r45 specifically repairs the r44 false-right-on-motion source path and is pending physical confirmation.
+- External USB mouse physical input remains unresolved through r44. r45 is diagnostic plus a touchpad repair; it is not a claimed physical USB fix until the user demonstrates usable USB pointer control.
+- Keyboard text has been physically partially delivered, but the laptop keyboard itself has known hardware faults, so individual missed/repeated keys are not automatically attributed to Frames.
+- Right-click, I-beam, caret blink and caret editing remain VM-certified; physical confirmation is evidence-dependent.
 - Frames 1.0 remains NOT promoted.
 - Physical destructive writes remain BLOCKED.
 
