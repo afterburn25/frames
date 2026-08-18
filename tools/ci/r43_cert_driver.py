@@ -45,6 +45,27 @@ extra=anchor+"""
 if src.count(anchor)!=1: raise SystemExit(f'r43 model-gate injection anchor count {src.count(anchor)}')
 src=src.replace(anchor,extra,1)
 
+# r36 intentionally removed the older always-on/blocking EP0 HID fallback.
+# r43 deliberately reintroduces the already-bounded class-control machinery,
+# but only for the exact physical receiver and only as a fail-open alternate
+# path after r42 proved interrupt-IN can remain Running without a live report.
+# Adapt historical compatibility assertions in this CI checkout without
+# changing the repository's r36 source or weakening the r43 scope checks.
+r36p=here/'r36_cert_driver.py'
+r36src=r36p.read_text()
+old_prepare="    req('v135_hid_control_fallback_prepare(xhci,phys_state)' not in s,'r36 startup still invokes blocking EP0 fallback')"
+new_prepare="    req('v135_hid_control_fallback_prepare(xhci,phys_state)' not in s or ('(r43_speed==1 || r43_speed==2) && r43_vid==9354 && r43_pid==4267 && r43_proto==2' in s),'r43 reintroduced unscoped EP0 fallback')"
+if r36src.count(old_prepare)!=1: raise SystemExit(f'r43 r36 prepare compatibility anchor count {r36src.count(old_prepare)}')
+r36src=r36src.replace(old_prepare,new_prepare,1)
+old_poll="    req('v135_hid_control_fallback_poll(xhci,input_state)' not in s,'r36 live loop still invokes blocking EP0 fallback')"
+new_poll="    req('v135_hid_control_fallback_poll(xhci,input_state)' not in s or 'if volatile_read64(xhci+2560)==1 { v135_hid_control_fallback_poll(xhci,input_state); }' in s,'r43 reintroduced unguarded EP0 fallback poll')"
+if r36src.count(old_poll)!=1: raise SystemExit(f'r43 r36 poll compatibility anchor count {r36src.count(old_poll)}')
+r36src=r36src.replace(old_poll,new_poll,1)
+old_gate="new_gate=\" req('v135_hid_control_fallback_prepare(xhci,phys_state)' not in s and 'v135_hid_control_fallback_poll(xhci,input_state)' not in s,'r36 blocking EP0 fallback remains integrated')\""
+new_gate="new_gate=\" req('(r43_speed==1 || r43_speed==2) && r43_vid==9354 && r43_pid==4267 && r43_proto==2' in s and 'v135_hid_control_fallback_prepare(xhci,phys_state)' in s and 'if volatile_read64(xhci+2560)==1 { v135_hid_control_fallback_poll(xhci,input_state); }' in s,'r43 exact-device control fallback integration missing')\""
+if r36src.count(old_gate)!=1: raise SystemExit(f'r43 r36/r35 integration compatibility anchor count {r36src.count(old_gate)}')
+r36p.write_text(r36src.replace(old_gate,new_gate,1))
+
 ns={'__name__':'__main__','__file__':str(base)}
 try:
     exec(compile(src,str(base),'exec'),ns,ns)
