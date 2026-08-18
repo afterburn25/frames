@@ -19,7 +19,7 @@ def alln(old,new,count,label):
 
 one("'patch_v108_r39b_g750jm_hid_idle_1s_wifi_ro.py'","'patch_v108_r40_usb_hid_identity_wifi_pci_detail_ro.py'",'patch target')
 one('kernel-r39b.nx','kernel-r40.nx','kernel evidence target')
-alln('7ca4e51896453e0bcaa131d7f4497e64e95556cb96941c599fa4151eb71bbea5','ae9598872e6806907e8bb623050f4314dbdda140ecd6b9c620f36e1c669b4c6c',2,'exact kernel identity')
+alln('7ca4e51896453e0bcaa131d7f4497e64e95556cb96941c599fa4151eb71bbea5','ae9598872e6806907e8bb623050f4314dbdda140ecd6b9c620f36e1c669b4c6c',1,'exact kernel identity')
 one("'Frames-0.9.98-v108-r39b-G750JM-HID-Idle-1s-WiFi-Discovery-Rufus-UEFI.iso'","'Frames-0.9.98-v108-r40-USB-HID-Identity-WiFi-PCI-Detail-Rufus-UEFI.iso'",'ISO target')
 one("'R39B-SHA.txt'","'R40-SHA.txt'",'SHA evidence target')
 one("'R25K-R39B.patch'","'R25K-R40.patch'",'patch evidence target')
