@@ -1,0 +1,45 @@
+name: Frames v108 r53 Source Identity Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-usb-hub-topology-r1 ]
+    paths:
+      - '.github/workflows/frames-v108-r53-source-identity-probe.yml'
+      - 'tools/ci/patch_v108_r53_ehci_port_reset_companion_classifier.py'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  identity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-usb-hub-topology-r1
+      - name: Fetch exact r21 protected source
+        uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r21-Candidate
+          path: r21-candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: '31979817129'
+      - name: Reconstruct r53 and print deterministic identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp r21-candidate/evidence/kernel-r21.nx /tmp/kernel-r53.nx
+          set +e
+          OUT="$(python3 tools/ci/patch_v108_r53_ehci_port_reset_companion_classifier.py /tmp/kernel-r53.nx 2>&1)"
+          RC=$?
+          set -e
+          printf '%s\n' "$OUT"
+          if printf '%s\n' "$OUT" | grep -Eq 'r53 output sha mismatch [0-9a-f]{64}'; then
+            printf '%s\n' "$OUT" | grep -Eo 'r53 output sha mismatch [0-9a-f]{64}'
+            exit 0
+          fi
+          exit "$RC"
