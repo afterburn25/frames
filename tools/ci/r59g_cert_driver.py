@@ -48,18 +48,30 @@ extra=anchor+"""
 """
 one(anchor,extra,'r59g split-state/control-report model gates')
 
-# r57 adapts the inherited r52 physical-row assertion for later overlays. r59g
-# replaces that final row again with split-state/control-report forensics while
-# preserving the original bounded EHCI route mutation fields. Extend only that
-# compatibility assertion; do not weaken the route-write proof.
-r57p=here/'r57_cert_driver.py'
-r57src=r57p.read_text()
-old_tail="or ('volatile_read64(xhci+3920)' in s and 'volatile_read64(xhci+3928)' in s and 'volatile_read64(xhci+3936)' in s and 'volatile_read64(xhci+3944)' in s and 'volatile_read64(xhci+3952)' in s and 'volatile_read64(xhci+3960)' in s and 'volatile_read64(xhci+3968)' in s)) and 'volatile_write64(xhci_state+3752,before_bit)' in s and 'volatile_write64(xhci_state+3760,after_bit)' in s),'r52/r54/r56 physical EHCI row/route proof missing')"
-new_tail="or ('volatile_read64(xhci+3920)' in s and 'volatile_read64(xhci+3928)' in s and 'volatile_read64(xhci+3936)' in s and 'volatile_read64(xhci+3944)' in s and 'volatile_read64(xhci+3952)' in s and 'volatile_read64(xhci+3960)' in s and 'volatile_read64(xhci+3968)' in s) or ('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+3976)' in s and 'volatile_read64(xhci+3984)' in s and 'volatile_read64(xhci+4040)' in s and 'volatile_read64(xhci+4080)' in s)) and 'volatile_write64(xhci_state+3752,before_bit)' in s and 'volatile_write64(xhci_state+3760,after_bit)' in s),'r52/r54/r56/r59g physical EHCI row/route proof missing')"
-if r57src.count(old_tail)==1:
-    r57p.write_text(r57src.replace(old_tail,new_tail,1))
-elif r57src.count(new_tail)!=1:
-    raise SystemExit('r59g r57/r52 physical-row compatibility anchor missing')
+# r59 is the layer which extends the old r57/r52 and r56 display assertions.
+# Teach that private compatibility adapter about the r59g forensic overlay,
+# while retaining the original route-before/after writes and all model gates.
+r59p=here/'r59_cert_driver.py'
+r59src=r59p.read_text()
+old_newcompat="new_compat=\"or ('volatile_read64(xhci+3920)' in s and 'volatile_read64(xhci+3928)' in s and 'volatile_read64(xhci+3936)' in s and 'volatile_read64(xhci+3944)' in s and 'volatile_read64(xhci+3952)' in s and 'volatile_read64(xhci+3960)' in s and 'volatile_read64(xhci+3968)' in s) or ('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+4072)' in s and 'volatile_read64(xhci+4080)' in s)) and 'volatile_write64(xhci_state+3752,before_bit)' in s\""
+new_newcompat="new_compat=\"or ('volatile_read64(xhci+3920)' in s and 'volatile_read64(xhci+3928)' in s and 'volatile_read64(xhci+3936)' in s and 'volatile_read64(xhci+3944)' in s and 'volatile_read64(xhci+3952)' in s and 'volatile_read64(xhci+3960)' in s and 'volatile_read64(xhci+3968)' in s) or ('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+4072)' in s and 'volatile_read64(xhci+4080)' in s) or ('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+3976)' in s and 'volatile_read64(xhci+3984)' in s and 'volatile_read64(xhci+4040)' in s and 'volatile_read64(xhci+4080)' in s)) and 'volatile_write64(xhci_state+3752,before_bit)' in s\""
+if r59src.count(old_newcompat)==1:
+    r59src=r59src.replace(old_newcompat,new_newcompat,1)
+elif r59src.count(new_newcompat)!=1:
+    raise SystemExit('r59g r59/r57 compatibility adapter anchor missing')
+old_newr56="new_r56=\"    req((('volatile_read64(xhci+3928)' in s and 'volatile_read64(xhci+3936)' in s and 'volatile_read64(xhci+3944)' in s) or ('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+4072)' in s and 'volatile_read64(xhci+4080)' in s)),'r56 E/N/C physical overlay fields missing')\""
+new_newr56="new_r56=\"    req((('volatile_read64(xhci+3928)' in s and 'volatile_read64(xhci+3936)' in s and 'volatile_read64(xhci+3944)' in s) or ('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+4072)' in s and 'volatile_read64(xhci+4080)' in s) or ('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+3976)' in s and 'volatile_read64(xhci+3984)' in s and 'volatile_read64(xhci+4040)' in s and 'volatile_read64(xhci+4080)' in s)),'r56 E/N/C physical overlay fields missing')\""
+if r59src.count(old_newr56)==1:
+    r59src=r59src.replace(old_newr56,new_newr56,1)
+elif r59src.count(new_newr56)!=1:
+    raise SystemExit('r59g r59/r56 overlay compatibility adapter anchor missing')
+old_vis="    req('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+4072)' in s and 'volatile_read64(xhci+4080)' in s,'r59 visible runtime telemetry row missing')"
+new_vis="    req((('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+4072)' in s and 'volatile_read64(xhci+4080)' in s) or ('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+3976)' in s and 'volatile_read64(xhci+3984)' in s and 'volatile_read64(xhci+4040)' in s and 'volatile_read64(xhci+4080)' in s)),'r59/r59g visible runtime telemetry row missing')"
+if r59src.count(old_vis)==1:
+    r59src=r59src.replace(old_vis,new_vis,1)
+elif r59src.count(new_vis)!=1:
+    raise SystemExit('r59g r59 visible-row compatibility anchor missing')
+r59p.write_text(r59src)
 
 ns={'__name__':'__main__','__file__':str(base)}
 try:
