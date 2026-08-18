@@ -6,6 +6,8 @@ on:
     branches: [ v108-usb-hub-topology-r1 ]
     paths:
       - '.github/workflows/frames-v108-r53-minimal-tools-cert.yml'
+      - 'tools/ci/r53_sealed_cert_driver.py'
+      - 'tools/ci/patch_v108_r53_ehci_port_reset_companion_classifier_sealed.py'
 
 permissions:
   contents: read
