@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
 import traceback
+# Trigger r55b after its workflow exists on the branch.
 here=Path(__file__).parent
 base=here/'r55_cert_driver.py'
 src=base.read_text()
@@ -31,10 +32,6 @@ one('R55 PASS_VM_PENDING_PHYSICAL','R55B PASS_VM_PENDING_PHYSICAL','PASS target'
 alln('R55-FAILURE.txt','R55B-FAILURE.txt',2,'failure target')
 one('r55 exact kernel identity mismatch','r55b exact kernel identity mismatch','identity label')
 one("'physical_r55':'PENDING'","'physical_r55':'NOT_RELEASED_COMPILE_REJECTED_NX4004','physical_r55b':'PENDING'",'r55 compile rejection and r55b pending')
-
-# Adapt r55 structural gates to the corrected four-parameter helper. The EHCI
-# ordinal and DMA page are carried in already-reserved xHCI state slots, keeping
-# the Nexus x64 ABI at <=4 arguments without changing transaction semantics.
 one("'v155_ehci_control(xhci_state,ord,0,dma,66816,0)' in r55fn","'v155_ehci_control(xhci_state,0,66816,0)' in r55fn",'SET_ADDRESS model')
 one("'v155_ehci_control(xhci_state,ord,1,dma,2533274823952000,9)' in r55fn","'v155_ehci_control(xhci_state,1,2533274823952000,9)' in r55fn",'GET_CONFIG model')
 one("'v155_ehci_control(xhci_state,ord,1,dma,setcfg,0)' in r55fn","'v155_ehci_control(xhci_state,1,setcfg,0)' in r55fn",'SET_CONFIGURATION model')
@@ -47,7 +44,6 @@ extra=anchor+"""
     req('volatile_write64(xhci_state+4040,dma)' in r55fn,'r55b DMA state slot write missing')
 """
 one(anchor,extra,'four-parameter ABI gates')
-
 ns={'__name__':'__main__','__file__':str(base)}
 try:
     exec(compile(src,str(base),'exec'),ns,ns)
