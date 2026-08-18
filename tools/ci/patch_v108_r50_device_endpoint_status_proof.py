@@ -85,7 +85,7 @@ for q in ('usb_setup_value_v113(128,8,0,0)','usb_setup_value_v113(129,10,0,inter
 if 'v135_hid_control_fallback_poll' in cfg: raise SystemExit('r50 reintroduced continuous GET_REPORT fallback')
 if s.count('{')!=s.count('}'): raise SystemExit('r50 brace mismatch')
 out=hashlib.sha256(s.encode()).hexdigest()
-EXPECTED='PENDING_IDENTITY_PROBE'
-if EXPECTED!='PENDING_IDENTITY_PROBE' and out!=EXPECTED: raise SystemExit('r50 output sha mismatch '+out)
+EXPECTED='30d8239eb1c91a5b70246744d856e1a7aae77360baeaa024033fb135070fd6f1'
+if out!=EXPECTED: raise SystemExit('r50 output sha mismatch '+out)
 p.write_text(s)
 print(out)
