@@ -2,6 +2,18 @@
 from pathlib import Path
 import traceback
 here=Path(__file__).parent
+
+# Extend the inherited r52 display-shape compatibility through the r59 runtime
+# report row while retaining the original EHCI route-before/after proof.
+r57p=here/'r57_cert_driver.py'
+r57src=r57p.read_text()
+old_compat="or ('volatile_read64(xhci+3920)' in s and 'volatile_read64(xhci+3928)' in s and 'volatile_read64(xhci+3936)' in s and 'volatile_read64(xhci+3944)' in s and 'volatile_read64(xhci+3952)' in s and 'volatile_read64(xhci+3960)' in s and 'volatile_read64(xhci+3968)' in s)) and 'volatile_write64(xhci_state+3752,before_bit)' in s"
+new_compat="or ('volatile_read64(xhci+3920)' in s and 'volatile_read64(xhci+3928)' in s and 'volatile_read64(xhci+3936)' in s and 'volatile_read64(xhci+3944)' in s and 'volatile_read64(xhci+3952)' in s and 'volatile_read64(xhci+3960)' in s and 'volatile_read64(xhci+3968)' in s) or ('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+4072)' in s and 'volatile_read64(xhci+4080)' in s)) and 'volatile_write64(xhci_state+3752,before_bit)' in s"
+if r57src.count(old_compat)==1:
+    r57p.write_text(r57src.replace(old_compat,new_compat,1))
+elif r57src.count(new_compat)!=1:
+    raise SystemExit('r59 r57/r52 row compatibility anchor missing')
+
 base=here/'r58_cert_driver.py'
 src=base.read_text()
 
@@ -29,7 +41,9 @@ one("'Frames 0.9.98 v108 r58 — EHCI Composite HID Interface Census'","'Frames 
 one('R58 PASS_VM_PENDING_PHYSICAL','R59 PASS_VM_PENDING_PHYSICAL','PASS target')
 alln('R58-FAILURE.txt','R59-FAILURE.txt',2,'failure target')
 one('r58 exact kernel identity mismatch','r59 exact kernel identity mismatch','identity label')
-one("'physical_r56':'PHYSICAL_EHCI2_HUB8_CHILD_PORT2_FULL_SPEED','physical_r56_telemetry':'R56_S1_E2_N8_C1_B2_F2_T0','physical_r57':'PHYSICAL_TT_CHILD_ENUM_BOOT_HID_PROTOCOL1','physical_r57_telemetry':'R57_S1_P2_M8_V9354_D4267_R1_E130','physical_r58':'PENDING'","'physical_r56':'PHYSICAL_EHCI2_HUB8_CHILD_PORT2_FULL_SPEED','physical_r56_telemetry':'R56_S1_E2_N8_C1_B2_F2_T0','physical_r57':'PHYSICAL_TT_CHILD_ENUM_BOOT_HID_PROTOCOL1','physical_r57_telemetry':'R57_S1_P2_M8_V9354_D4267_R1_E130','physical_r58':'PHYSICAL_COMPOSITE_HID_MOUSE_ENDPOINT_DISCOVERED','physical_r58_telemetry':'R58_S1_P2_K129_M130_I0_L8_C2','physical_r59':'PENDING'",'physical r58 result + r59 pending')
+one("'physical_r56':'PHYSICAL_EHCI2_HUB8_CHILD_PORT2_FULL_SPEED','physical_r56_telemetry':'R56_S1_E2_N8_C1_B2_F2_T0','physical_r57':'PHYSICAL_TT_CHILD_ENUM_BOOT_HID_PROTOCOL1','physical_r57_telemetry':'R57_S1_P2_M8_V9354_D4267_R1_E130','physical_r58':'PENDING'",
+    "'physical_r56':'PHYSICAL_EHCI2_HUB8_CHILD_PORT2_FULL_SPEED','physical_r56_telemetry':'R56_S1_E2_N8_C1_B2_F2_T0','physical_r57':'PHYSICAL_TT_CHILD_ENUM_BOOT_HID_PROTOCOL1','physical_r57_telemetry':'R57_S1_P2_M8_V9354_D4267_R1_E130','physical_r58':'PHYSICAL_COMPOSITE_HID_MOUSE_ENDPOINT_DISCOVERED','physical_r58_telemetry':'R58_S1_P2_K129_M130_I0_L8_C2','physical_r59':'PENDING'",
+    'physical r58 result + r59 pending')
 anchor="    req('R58' not in s,'r58 textual label unexpectedly embedded as raw string')"
 extra=anchor+"""
     r59fn=s[s.index('fn v159_ehci_mouse_periodic_arm'):s.index('fn v135_hid_control_fallback_prepare')]
