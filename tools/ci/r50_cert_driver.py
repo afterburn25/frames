@@ -41,12 +41,13 @@ one(old_row,new_row,'r50 physical row gate')
 
 gate_anchor="    req('volatile_write32(port' not in f45 and 'xhci_control' not in f45 and 'v136_xhci_command_endpoint' not in f45 and 'pit_wait' not in f45,'r49 root-port proof became active')"
 gate_extra=gate_anchor+"""
-    req('usb_setup_value_v113(128,8,0,0)' in f45,'r50 GET_CONFIGURATION proof missing')
-    req('usb_setup_value_v113(129,10,0,interface_num)' in f45,'r50 GET_INTERFACE proof missing')
-    req('usb_setup_value_v113(130,0,0,ep_addr)' in f45,'r50 endpoint GET_STATUS proof missing')
-    req('usb_setup_value_v113(2,1,0,ep_addr)' in f45 and 'if halt_before==1' in f45,'r50 bounded clear-halt recovery missing')
-    req('volatile_write64(xhci_state+3624,cfg_val)' in f45 and 'volatile_write64(xhci_state+3680,port_speed)' in f45,'r50 device-status telemetry missing')
-    req('v135_hid_control_fallback_poll' not in f45,'r50 reintroduced continuous GET_REPORT fallback')
+    cfg50=s[s.index('fn xhci_configure_boot_hid'):s.index('fn xhci_hid_arm_continuous')]
+    req('usb_setup_value_v113(128,8,0,0)' in cfg50,'r50 GET_CONFIGURATION proof missing')
+    req('usb_setup_value_v113(129,10,0,interface_num)' in cfg50,'r50 GET_INTERFACE proof missing')
+    req('usb_setup_value_v113(130,0,0,ep_addr)' in cfg50,'r50 endpoint GET_STATUS proof missing')
+    req('usb_setup_value_v113(2,1,0,ep_addr)' in cfg50 and 'if halt_before==1' in cfg50,'r50 bounded clear-halt recovery missing')
+    req('volatile_write64(xhci_state+3624,cfg_val)' in cfg50 and 'volatile_write64(xhci_state+3680,port_speed)' in cfg50,'r50 device-status telemetry missing')
+    req('v135_hid_control_fallback_poll' not in cfg50,'r50 reintroduced continuous GET_REPORT fallback')
 """
 one(gate_anchor,gate_extra,'r50 device endpoint-status model gates')
 
