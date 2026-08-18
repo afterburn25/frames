@@ -1,0 +1,196 @@
+name: Frames 0.9.98 r56 Rufus Hybrid ISO Repair
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ r56-linux-input-architecture ]
+    paths:
+      - '.github/workflows/pointer-r56-rufus-hybrid-repair.yml'
+      - 'tools/ci/make_rufus_hybrid_iso.py'
+
+permissions:
+  contents: write
+
+env:
+  EXPECTED_PARENT_SHA256: 1c7f1b514d9aa2f847f724e8b633286d069d745bf7c281a3967c46bbfea1a18c
+  EXPECTED_R46_KERNEL_MAIN_SHA256: e5ccd3d4a453184f620e2ed5f928599bc8a7fa6959098f3aeff4916f6dcff165
+
+jobs:
+  build-r56-hybrid:
+    name: Build corrected r56 Rufus hybrid UEFI ISO
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: r56-linux-input-architecture
+
+      - name: Initialize evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf r56-hybrid-out "$RUNNER_TEMP/r56-hybrid"
+          mkdir -p r56-hybrid-out "$RUNNER_TEMP/r56-hybrid"
+          printf 'status=started\nrevision=r56\nformat=rufus-hybrid-uefi-iso\n' > r56-hybrid-out/BUILD-STATUS.txt
+
+      - name: Reconstruct protected r46 base and exact r56 diagnostic kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent_sha="$(sha256sum Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip | awk '{print $1}')"
+          test "$parent_sha" = "$EXPECTED_PARENT_SHA256"
+          unzip -q Frames-0.9.98-Pointer-Diagnostics-CI-v1.zip -d "$RUNNER_TEMP/r56-hybrid"
+          SRC="$RUNNER_TEMP/r56-hybrid/Frames-0.9.98-Pointer-CI-Source"
+          python3 - "$SRC/kernel/main.nx" <<'PY'
+          from pathlib import Path
+          import sys
+          p=Path(sys.argv[1]); s=p.read_text()
+          a='if usb_hid_found != 0 { usb_hid_configured = xhci_configure_boot_hid(xhci_state,phys_state); if usb_hid_configured != 0 { usb_hid_report_ready = xhci_read_first_hid_report(xhci_state,phys_state); } }'
+          b='if usb_hid_found != 0 { usb_hid_configured = xhci_configure_boot_hid(xhci_state,phys_state); if usb_hid_configured != 0 { usb_hid_report_ready = 1; } }'
+          c='if input_queue_ready != 0 { if usb_hid_report_ready != 0 { input_decode_ready = input_decode_boot_hid(xhci_state,input_state); } else { ps2_poll_fallback(input_state); } }'
+          d='if input_queue_ready != 0 { if usb_hid_report_ready != 0 { input_decode_ready = 1; } else { ps2_poll_fallback(input_state); } }'
+          assert s.count(a)==1 and s.count(c)==1
+          p.write_text(s.replace(a,b).replace(c,d))
+          PY
+          test "$(sha256sum "$SRC/kernel/main.nx" | awk '{print $1}')" = "$EXPECTED_R46_KERNEL_MAIN_SHA256"
+          python3 tools/ci/make_r56_linux_input_architecture.py "$SRC/kernel/main.nx"
+          grep -q 'R56' "$SRC/kernel/main.nx"
+          grep -q 'XINI' "$SRC/kernel/main.nx"
+          grep -q 'XBAS' "$SRC/kernel/main.nx"
+          grep -q 'USTG' "$SRC/kernel/main.nx"
+          sha256sum "$SRC/kernel/main.nx" > r56-hybrid-out/R56-KERNEL-SHA256.txt
+          echo "FRAMES_DIR=$SRC" >> "$GITHUB_ENV"
+
+      - name: Install build and ISO dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld python3 unzip zip xorriso mtools dosfstools util-linux file
+          find "$FRAMES_DIR" -type f -name '*.sh' -exec chmod +x {} +
+          find "$FRAMES_DIR/toolchain" -type f -name nexus -exec chmod +x {} +
+
+      - name: Build and verify Frames r56 payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"
+          ./tools/build.sh
+          python3 tools/make_esp.py
+          python3 tools/sdk_selftest.py
+          python3 tools/make_desktop_preview_image.py
+          python3 tools/verify_desktop_preview_image.py --image build/Frames-0.9.98-Desktop-Preview.img --require-pass
+          python3 tools/verify_release.py
+          cp build/Frames-0.9.98-Desktop-Preview.img "$GITHUB_WORKSPACE/r56-hybrid-out/Frames-0.9.98-r56-Linux-Reference-Input-Architecture-Rufus.img"
+          cp build/esp.img "$GITHUB_WORKSPACE/r56-hybrid-out/Frames-0.9.98-r56-UEFI-Disk.img"
+
+      - name: Create El Torito carrier ISO
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/r56-iso-root"
+          rm -rf "$ROOT"; mkdir -p "$ROOT"
+          cp r56-hybrid-out/Frames-0.9.98-r56-UEFI-Disk.img "$ROOT/efiboot.img"
+          cat > "$ROOT/README.TXT" <<'EOF'
+          Frames 0.9.98 r56 corrected Rufus hybrid UEFI physical-test image.
+          Diagnostic-only; do not promote.
+          EOF
+          xorriso -as mkisofs \
+            -R -J -V 'FRAMES_R56' \
+            -eltorito-alt-boot \
+            -e efiboot.img \
+            -no-emul-boot \
+            -o r56-hybrid-out/r56-carrier.iso \
+            "$ROOT"
+          xorriso -indev r56-hybrid-out/r56-carrier.iso -report_el_torito plain > r56-hybrid-out/ISO-ELTORITO-REPORT.txt 2>&1
+          grep -qi 'UEFI\|EFI' r56-hybrid-out/ISO-ELTORITO-REPORT.txt
+
+      - name: Finalize as true Rufus hybrid ISO
+        shell: bash
+        run: |
+          set -euo pipefail
+          FINAL="r56-hybrid-out/Frames-0.9.98-r56-Linux-Reference-Input-Architecture-Rufus-Hybrid-UEFI.iso"
+          python3 tools/ci/make_rufus_hybrid_iso.py r56-hybrid-out/r56-carrier.iso "$FINAL" | tee r56-hybrid-out/RUFUS-HYBRID-FINALIZE.txt
+          python3 tools/ci/make_rufus_hybrid_iso.py --verify "$FINAL" | tee r56-hybrid-out/RUFUS-HYBRID-VERIFY.txt
+          file "$FINAL" | tee r56-hybrid-out/FILE-TYPE.txt
+          grep -q 'ISO 9660' r56-hybrid-out/FILE-TYPE.txt
+          grep -q 'DOS/MBR boot sector' r56-hybrid-out/FILE-TYPE.txt
+          blkid -p "$FINAL" | tee r56-hybrid-out/BLKID.txt
+          grep -q 'TYPE="iso9660"' r56-hybrid-out/BLKID.txt
+          grep -q 'PTTYPE="gpt"' r56-hybrid-out/BLKID.txt
+          rm -f r56-hybrid-out/r56-carrier.iso
+
+      - name: Record physical-test identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          FINAL="r56-hybrid-out/Frames-0.9.98-r56-Linux-Reference-Input-Architecture-Rufus-Hybrid-UEFI.iso"
+          iso_sha="$(sha256sum "$FINAL" | awk '{print $1}')"
+          iso_bytes="$(stat -c %s "$FINAL")"
+          cat > r56-hybrid-out/HANDS-ON-TEST.txt <<'EOF'
+          Select Frames-0.9.98-r56-Linux-Reference-Input-Architecture-Rufus-Hybrid-UEFI.iso in Rufus.
+          Use the default Rufus write choice; if Rufus offers ISO mode versus DD mode, use DD mode for this physical diagnostic image.
+          Boot the USB in UEFI mode with the external USB mouse connected before power-on.
+          Confirm PTR DIAG R56 and photograph XINI, XBAS, XOP, USTG, UTRY, UPOR, and UVID.
+          Report mouse movement/click behavior and touchpad behavior.
+          EOF
+          cat > r56-hybrid-out/BOOT-IDENTITY.txt <<EOF
+          revision=r56
+          format=iso9660+mbr+gpt+fat32-esp
+          iso=Frames-0.9.98-r56-Linux-Reference-Input-Architecture-Rufus-Hybrid-UEFI.iso
+          iso_sha256=$iso_sha
+          iso_bytes=$iso_bytes
+          rufus_hybrid_verify=PASS
+          protected_parent_sha256=$EXPECTED_PARENT_SHA256
+          r46_kernel_main_sha256=$EXPECTED_R46_KERNEL_MAIN_SHA256
+          EOF
+          printf 'status=PASS\nrevision=r56\nformat=rufus-hybrid-uefi-iso\niso_sha256=%s\n' "$iso_sha" > r56-hybrid-out/BUILD-STATUS.txt
+          sha256sum r56-hybrid-out/* > r56-hybrid-out/SHA256SUMS.txt
+
+      - name: Publish corrected r56 ISO prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="frames-0.9.98-r56-rufus-hybrid-fix"
+          iso="r56-hybrid-out/Frames-0.9.98-r56-Linux-Reference-Input-Architecture-Rufus-Hybrid-UEFI.iso"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$iso" --clobber
+          else
+            gh release create "$tag" "$iso" \
+              --target r56-linux-input-architecture \
+              --title "Frames 0.9.98 r56 Rufus Hybrid Fix" \
+              --notes "Corrected r56 physical-test ISO with ISO9660, protective MBR, GPT, and mapped FAT32 EFI System Partition. Diagnostic-only." \
+              --prerelease
+          fi
+
+      - name: Upload corrected r56 ISO and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frames-0.9.98-r56-rufus-hybrid-uefi-iso
+          path: r56-hybrid-out/**
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Record corrected artifact locator
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          iso_sha="$(awk -F= '/^iso_sha256=/{print $2}' r56-hybrid-out/BOOT-IDENTITY.txt)"
+          mkdir -p ci-locators
+          cat > ci-locators/r56-rufus-hybrid.txt <<EOF
+          run_id=${{ github.run_id }}
+          run_attempt=${{ github.run_attempt }}
+          head_sha=${{ github.sha }}
+          artifact_name=frames-0.9.98-r56-rufus-hybrid-uefi-iso
+          iso_name=Frames-0.9.98-r56-Linux-Reference-Input-Architecture-Rufus-Hybrid-UEFI.iso
+          iso_sha256=$iso_sha
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ci-locators/r56-rufus-hybrid.txt
+          git commit -m "state: record corrected r56 Rufus hybrid artifact" || exit 0
+          git push origin HEAD:r56-linux-input-architecture
