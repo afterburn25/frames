@@ -34,7 +34,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends lld mtools dosfstools gdisk xorriso qemu-system-x86
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends lld mtools dosfstools gdisk xorriso qemu-system-x86 ovmf python3-pil
           python3 - <<'PY'
           import PIL
           print('PIL', PIL.__version__)
