@@ -5,65 +5,62 @@
 
 Last updated: 2026-08-18
 
-## Current physical-input checkpoint — r46 physical result -> r47 candidate
+## Current physical-input checkpoint — r49 physical result -> r50 candidate
 
-### r46 physical result — USB CONTEXT ACCEPTED / NO REPORT / DIRECT ROOT
-Exact tested r46 ISO:
-- `Frames-0.9.98-v108-r46-xHCI-Periodic-Endpoint-Context-Proof-Rufus-UEFI.iso`
-- SHA-256 `17f2e400c31a69f20cdb4508b55bfc791a88fdfc63175812cacefdb560980b86`
-- size `23,330,816 bytes`
+### r49 physical result — ROOT PORT/SLOT MATCH / LIVE U0 DEVICE / NO USB REPORT
+Exact tested r49 ISO:
+- `Frames-0.9.98-v108-r49-xHCI-Root-Port-Slot-Transaction-Proof-Rufus-UEFI.iso`
+- SHA-256 `89eb877f330d91203760b55cfa75502721c445b9c51074623474e42199f26321`
+- size `23,336,960 bytes`
 
-Observed on the user's ASUS laptop:
+Observed on the user's ASUS/Intel 8086:8c31 laptop:
 - external USB mouse still did not produce usable pointer control;
-- `USB H R P = 1 0 2`, so HID configuration remains present but no live USB report reached Frames;
-- authoritative r46 output-endpoint-context row: `R46 S I T B M A E = 1 5 7 0 8 8 8`;
-- HUB telemetry remained zero for the selected receiver, establishing the active receiver path as direct-root rather than a hub/TT child;
-- PS/2/touchpad telemetry remained active and no return of the r44 false-right/input-lock regression was reported.
+- built-in PS/2/Elantech touchpad path remained active;
+- authoritative physical row: `R49 P R C E L S A = 2 2 1 1 0 1 1`.
 
-r46 interpretation:
-- `S=1`: hardware Output Endpoint Context is Running;
-- `I=5`: accepted periodic interval exponent is 5;
-- `T=7`: accepted endpoint type is Interrupt IN;
-- `B=0`: Max Burst is 0;
-- `M=8`: Max Packet Size is 8 bytes;
-- `A=8`: Average TRB Length is 8 bytes;
-- `E=8`: Max ESIT Payload is 8 bytes.
+r49 interpretation:
+- `P=2`: Frames selected root port 2;
+- `R=2`: hardware Slot Context also identifies root-hub port 2;
+- `C=1`: PORTSC Current Connect Status is connected;
+- `E=1`: root port is enabled;
+- `L=0`: link state is U0/active;
+- `S=1`: xHCI PORTSC speed ID 1, which is full-speed and is coherent with Frames' full/low-speed interval conversion;
+- `A=1`: hardware-assigned USB device address is non-zero.
 
-Engineering conclusion: Intel accepted a coherent low-speed boot-HID periodic endpoint context exactly as intended, but no report arrived. Combined with r45 (`A1 D0 C1 H1 V0 M0 B0`), endpoint-context construction, producer/DCS disagreement, HID parsing, GUI delivery, and hub transaction-translator scheduling are no longer leading explanations. The failure is now at or after the transfer-TRB ownership/doorbell transaction boundary.
+Engineering conclusion: Frames and Intel xHCI agree on the exact live physical port/device identity. Combined with r46-r48 evidence, the following are no longer leading explanations: endpoint-context construction, producer/DCS mismatch, HID decode/GUI delivery, hub-TT scheduling, TRB ownership handoff, endpoint-doorbell ordering, xHC Run state, MFINDEX scheduler movement, or root-port/Slot Context identity. The remaining investigation belongs at the USB device/endpoint response boundary.
 
-### r47 — xHCI Ordered HID Handoff + Doorbell Flush — NEXT AUTHORIZED PHYSICAL BOOT
-r47 is derived from exact r46 and preserves the physically recovered r45 touchpad behavior and the r46 accepted endpoint context. It does not add Stop Endpoint, Reset Endpoint, Set TR Dequeue, EP0 GET_REPORT polling, endpoint reconfiguration, destructive writes, or a new HID decoder.
+### r50 — USB Device Endpoint Status Proof — NEXT AUTHORIZED PHYSICAL BOOT
+r50 is derived from exact r49 and preserves the physically accepted r45 touchpad button isolation plus the proven r48 scheduler/handoff behavior.
 
-r47 changes the normal interrupt-IN submission boundary only:
-1. Build the HID Normal TRB with the opposite/non-owned cycle state first.
-2. Read back parameter, status and inactive control fields before release.
-3. Flip the cycle bit to the real producer cycle last and read back the final owned TRB.
-4. Ring the exact endpoint doorbell.
-5. Immediately read the same doorbell MMIO location to flush the posted write.
-6. Record MFINDEX movement and the hardware slot route string passively.
+r50 performs one bounded EP0 state proof before the interrupt TD is armed:
+1. `GET_CONFIGURATION` to prove the device's active configuration.
+2. `GET_INTERFACE` to prove the HID alternate setting.
+3. endpoint `GET_STATUS` for the selected interrupt endpoint.
+4. Only if the device itself reports `ENDPOINT_HALT`, issue standard `CLEAR_FEATURE(ENDPOINT_HALT)` exactly once and verify the result.
+5. Record Frames' internal speed ID beside live PORTSC speed ID.
 
-This ordering follows the same core discipline used by mature xHCI implementations: make transfer memory visible before ownership/doorbell handoff and flush the posted endpoint doorbell write.
+r50 does NOT reintroduce the rejected continuous EP0 `GET_REPORT` fallback from r43.
 
-Authoritative r47 certification identity:
+Authoritative r50 certification identity:
 - repository `afterburn25/frames`
 - branch `v108-usb-hub-topology-r1`
-- certification/head commit `6cd780868bfeca093aae5cf8b8ee48632c14e57b`
-- workflow `.github/workflows/frames-v108-r47-xhci-ordered-handoff-doorbell-flush-cert.yml`
-- GitHub Actions run `32101328442`: PASS
-- exact r47 patched source SHA-256 `5037199d0ea3bde3a050ac648d2f91ef2c92e225ae303113b683cf7e453b90fa`
+- certification commit `7766815629a9bb9e611972e1a63b3e0e38bd73b5`
+- workflow `.github/workflows/frames-v108-r50-usb-device-endpoint-status-cert.yml`
+- GitHub Actions run `32106407042`: PASS
+- exact r50 patched source SHA-256 `30d8239eb1c91a5b70246744d856e1a7aae77360baeaa024033fb135070fd6f1`
 
 Exact next physical-test ISO:
-- `Frames-0.9.98-v108-r47-xHCI-Ordered-Handoff-Doorbell-Flush-Rufus-UEFI.iso`
-- SHA-256 `b3bbcf010ff790aa18851ffb0f1439cf5db7ec297db6e71d332d106ead251783`
-- size `23,332,864 bytes`
+- `Frames-0.9.98-v108-r50-USB-Device-Endpoint-Status-Proof-Rufus-UEFI.iso`
+- SHA-256 `f37e7e7669b5ebd99a0cf0cbc1474508244a112ac1c97d7772c84c53de947662`
+- size `23,339,008 bytes`
 - status `PASS_VM_PENDING_PHYSICAL`
 - physical handoff `RUFUS_ISO_ONLY`
 
 Artifacts:
-- `Frames-v108-r47-Rufus-Final`, artifact ID `9311747014`, ZIP SHA-256 `0bde29756db787f313bcf4a007e99a0923726b7e25062267f0e8044155c1ec0d`
-- `Frames-v108-r47-Evidence`, artifact ID `9311746466`, ZIP SHA-256 `4e30473c92c8265b85c5b20dd5046da26b5ee5ea45a97e1c088662a095e4abd8`
+- `Frames-v108-r50-Rufus-Final`, artifact ID `9313412628`, ZIP SHA-256 `7ee72f47d4c176f5aa5a0527b67ca077c781bd8dd5cf804b1d6e676fc012a411`
+- `Frames-v108-r50-Evidence`, artifact ID `9313412195`, ZIP SHA-256 `46c2698190a69396f414d0c4876eeb9ab35a0b7178334912f1aa4972e4f1b9a9`
 
-Automated r47 evidence status:
+Automated r50 evidence status:
 - aggregate: PASS
 - interaction: PASS
 - USB direct: PASS
@@ -79,28 +76,26 @@ Automated r47 evidence status:
 - logging fail-open behavior: PASS
 - internal-media read-only safety sentinel: PASS
 - model/source contract: PASS
-- physical r47: PENDING
+- physical r50: PENDING
 
-r47 physical overlay is `R47 H F M R Q V B`:
-- `H` = two-phase HID TRB memory readback/handoff was exact;
-- `F` = endpoint-doorbell MMIO readback flush executed;
-- `M` = xHCI MFINDEX advanced after the transfer was armed;
-- `R` = hardware Slot Context route string (`0` means direct-root);
-- `Q` = hardware HID endpoint dequeue ring index;
-- `V` = direct Transfer Events observed;
-- `B` = first four bytes in the HID DMA report buffer, packed little-endian.
+The first r50 certification attempt failed only because its new structural assertions inspected the inherited `v144_hid_forensic_snapshot` slice instead of the generated `xhci_configure_boot_hid` function. The r50 kernel source identity had already independently passed. The harness scope was corrected and run `32106407042` then passed the full inherited gate chain and sealed Rufus handoff.
 
-Physical r47 interpretation:
-- usable external USB pointer control is the only physical USB PASS;
-- `H=1 F=1 M=1 R=0` proves the TRB handoff readback, doorbell flush, xHCI scheduler clock, and direct-root topology are all present;
-- if `Q/V/B` then move/change, diagnose completion/HID delivery from that evidence;
-- if `H=1 F=1 M=1 R=0 Q=0 V=0 B=0` after sustained mouse movement, stop tuning endpoint context/doorbell timing and move to device-side transaction proof, endpoint halt/status/configuration verification, or an alternate USB2-controller transaction path.
+r50 physical overlay is `R50 C I E H X S P`:
+- `C` = device `GET_CONFIGURATION` value;
+- `I` = HID `GET_INTERFACE` alternate setting;
+- `E` = selected USB endpoint address;
+- `H` = device endpoint-halt status before any recovery;
+- `X` = clear-halt result (`0` not needed, `1` cleared+verified, `2` attempted but not verified);
+- `S` = Frames internal speed ID;
+- `P` = live PORTSC speed ID.
 
-Physical test order for r47:
-1. Exercise the built-in touchpad first and confirm normal behavior.
-2. Move the external USB mouse continuously for 10–15 seconds and click its buttons.
-3. Photograph the complete panel, especially `R47 H F M R Q V B`, `USB H R P`, and the inherited r42/r46 information.
-4. Do not infer physical USB success from telemetry alone.
+Expected healthy baseline for the current receiver is approximately `C=1 I=0 E=129 H=0 X=0 S=1 P=1`. Physical USB PASS still requires actual usable external USB pointer control; telemetry alone is not a PASS.
+
+Physical test order for r50:
+1. Confirm the built-in touchpad still behaves normally and does not reproduce r44/r43 regressions.
+2. Move the external USB mouse continuously for at least 10–15 seconds and click several times.
+3. Photograph the complete panel, especially `R50 C I E H X S P`, `USB H R P`, and the inherited USB diagnostic rows.
+4. If `C/I/E/H/S/P` are all sane and the device is not halted yet no report appears, move the next diagnosis below host scheduling into actual endpoint/device transaction response or an alternate Intel USB2 transaction path.
 
 ## Project identity / safety
 - Frames is an independent operating system, not Windows- or Linux-based.
@@ -134,18 +129,21 @@ All current physical-input work reconstructs this exact v108 source. v109-v116 a
 - **r37b:** touchpad recovered; USB HID stopped with completion 26; `R37_S1_Q0_C1_K3_F2_E26`.
 - **r38:** endpoint disabled/no transfer event; `R38_S0_Q0_A0_T0_V255_E0`.
 - **r39b:** endpoint Running with Set Idle success but no transfer; Broadcom BCM4352 Wi-Fi identified; `R39_S1_Q0_I1_R0_C0_E0`.
-- **r40:** exact external receiver identified as low-speed VID 9354 / PID 4267; babble observed; `R40_S1_I1_H2_V9354_P4267_E3`.
+- **r40:** external receiver identified as VID 9354 / PID 4267; earlier speed interpretation was low-speed; later direct PORTSC proof at r49 establishes live speed ID 1/full-speed on the tested path; babble was observed at r40.
 - **r41b:** control path healthy, descriptor 142, interrupt length 8, but TD stopped E26; `R41B_G1_P0_D142_L8_B0_E26`.
 - **r42:** false endpoint-stop removed; endpoint Running but no USB report; `R42_G1_P0_D142_L8_B0_E0_USB_R0`.
 - **r43:** rejected physical regression; EP0 fallback returned zero report bytes/status 11 and killed touchpad movement; `R43_C1_K1_M1_N76_A0_E11`.
 - **r44:** USB no event/DMA; touchpad motion synthesized false right-click then pointer input locked; `R44_A1_T0_D0_V0_M0_Q0_B0`.
 - **r45:** touchpad physically returned to normal; USB remained armed with no dequeue/event/DMA and cycle states matched; `R45_A1_D0_C1_H1_V0_M0_B0`.
 - **r46:** hardware accepted Running interrupt-IN periodic context `S1 I5 T7 B0 M8 A8 E8`, direct-root path, but `USB_R0`.
-- **r47:** VM/safety certified ordered TRB ownership + endpoint-doorbell flush candidate; physical pending.
+- **r47:** physical ordered TRB handoff and doorbell flush passed, but initial MFINDEX proof was static and no dequeue/event/DMA occurred; `R47_H1_F1_M0_R0_Q0_V0_B0`.
+- **r48:** scheduler movement physically proven with controller Running/not halted, but still no Transfer Event; `R48_T1_F1_M1_U1_H0_W0_V0`.
+- **r49:** Frames root port and hardware Slot Context matched; live port connected/enabled/U0/full-speed/addressed; still no report; `R49_P2_R2_C1_E1_L0_S1_A1`.
+- **r50:** VM/safety certified bounded device endpoint-state proof; physical pending.
 
 ## Claim policy
 - The r45 touchpad class-3 button isolation repair is physically accepted for the r44 regression unless later physical evidence supersedes it.
-- External USB mouse physical input remains unresolved through r46. r47 is a VM-certified physical candidate, not a claimed physical USB fix.
+- External USB mouse physical input remains unresolved through r49. r50 is a VM-certified physical candidate, not a claimed physical USB fix.
 - Keyboard text has been physically partially delivered, but the laptop keyboard itself has known hardware faults, so individual missed/repeated keys are not automatically attributed to Frames.
 - Right-click, I-beam, caret blink and caret editing remain VM-certified; physical confirmation is evidence-dependent.
 - Frames 1.0 remains NOT promoted.
