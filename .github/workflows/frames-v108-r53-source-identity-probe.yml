@@ -11,6 +11,7 @@ on:
 permissions:
   contents: read
   actions: read
+  statuses: write
 
 jobs:
   identity:
@@ -20,6 +21,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: v108-usb-hub-topology-r1
+      - name: Publish identity pending
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TARGET="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          python3 - "$TARGET" <<'PY'
+          import json,sys
+          open('/tmp/r53-id-status.json','w').write(json.dumps({'state':'pending','context':'frames/r53-source-identity','description':'r53 source identity running','target_url':sys.argv[1]}))
+          PY
+          curl -fsSL -X POST -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" --data-binary @/tmp/r53-id-status.json
       - name: Fetch exact r21 protected source
         uses: actions/download-artifact@v4
         with:
@@ -43,3 +54,14 @@ jobs:
             exit 0
           fi
           exit "$RC"
+      - name: Publish identity success
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TARGET="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          python3 - "$TARGET" <<'PY'
+          import json,sys
+          open('/tmp/r53-id-status.json','w').write(json.dumps({'state':'success','context':'frames/r53-source-identity','description':'r53 source identity discovered','target_url':sys.argv[1]}))
+          PY
+          curl -fsSL -X POST -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" --data-binary @/tmp/r53-id-status.json
