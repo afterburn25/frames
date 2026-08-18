@@ -50,6 +50,16 @@ extra=anchor+"""
 if src.count(anchor)!=1: raise SystemExit(f'r44 model-gate injection anchor count {src.count(anchor)}')
 src=src.replace(anchor,extra,1)
 
+# r44 repurposes the old W40 display row for USB transfer-ring forensics but
+# leaves the r40 read-only WiFi PCI snapshot and stored board identity intact.
+# Adapt only the historical display assertion in this CI checkout.
+r40p=here/'r40_cert_driver.py'
+r40src=r40p.read_text()
+old_wifi="    req('fn v140_text_wifi_v140' in s and 'volatile_read64(xhci+3072)' in s and 'volatile_read64(xhci+3080)' in s and 'volatile_read64(xhci+3064)' in s,'r40 WiFi board-identity telemetry missing')"
+new_wifi="    req('fn v140_wifi_pci_detail_ro' in s and 'volatile_write64(xhci+3064,revclass%256)' in s and 'volatile_write64(xhci+3072,subsys%65536)' in s and 'volatile_write64(xhci+3080,(subsys/65536)%65536)' in s,'r44 lost r40 read-only WiFi board-identity state')"
+if r40src.count(old_wifi)!=1: raise SystemExit(f'r44 r40 WiFi compatibility anchor count {r40src.count(old_wifi)}')
+r40p.write_text(r40src.replace(old_wifi,new_wifi,1))
+
 ns={'__name__':'__main__','__file__':str(base)}
 try:
     exec(compile(src,str(base),'exec'),ns,ns)
