@@ -1,0 +1,6 @@
+run_id=32176988909
+run_attempt=1
+head_sha=e08ecc6912f83f7988607d2788cb244f84b956d5
+artifact_name=frames-0.9.98-r56-linux-reference-input-architecture-rufus-iso
+iso_name=Frames-0.9.98-r56-Linux-Reference-Input-Architecture-Rufus-UEFI.iso
+iso_sha256=945327a5f014ac019833ff1461257ea1884e5aef961f7bd91d9c30ffc588e749
