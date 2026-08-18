@@ -11,6 +11,7 @@ on:
 permissions:
   contents: read
   actions: read
+  statuses: write
 
 jobs:
   identity:
@@ -29,9 +30,28 @@ jobs:
           repository: afterburn25/frames
           run-id: '31979817129'
       - name: Generate exact r50 source identity
+        id: identity
         run: |
           cp r21-candidate/evidence/kernel-r21.nx /tmp/kernel-r50.nx
           python3 tools/ci/patch_v108_r50_device_endpoint_status_proof.py /tmp/kernel-r50.nx | tee /tmp/r50-patch-output.txt
           SHA=$(sha256sum /tmp/kernel-r50.nx | awk '{print $1}')
           echo "R50_EXACT_SHA256=${SHA}"
           test "${SHA}" = "$(tail -n1 /tmp/r50-patch-output.txt)"
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+      - name: Publish r50 identity status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          R50_SHA: ${{ steps.identity.outputs.sha }}
+        run: |
+          TARGET="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          python3 - "$R50_SHA" "$TARGET" <<'PY'
+          import json,sys
+          sha,target=sys.argv[1:]
+          open('/tmp/status.json','w').write(json.dumps({'state':'success','context':'frames/r50-identity','description':'r50 '+sha,'target_url':target}))
+          PY
+          curl -fsSL -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            --data-binary @/tmp/status.json
