@@ -1,4 +1,5 @@
 name: Frames v108 r42 HID NAK-Tolerant Running Endpoint Certification
+# Re-trigger after workflow registration so push execution is unambiguous.
 
 on:
   workflow_dispatch:
