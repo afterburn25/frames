@@ -87,6 +87,6 @@ newcompact='''        v108_draw_small_u64(surface,((px+112)*65536)+(py+730),vola
 rep(oldcompact,newcompact,'r42 compact row')
 
 out=hashlib.sha256(s.encode()).hexdigest()
-EXPECTED='7e3d5194be2f22792460ffe2f028b1ec39c7a7dd28624f3de9ffba0763cd2c6a'
+EXPECTED='c55c327fb1e85921c4ecf4cf79d2a764ffb8e0375a5507baeb02c8ce50f0213d'
 if out!=EXPECTED: raise SystemExit('r42 output sha mismatch '+out)
 p.write_text(s); print(out)
