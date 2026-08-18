@@ -66,6 +66,17 @@ new_gate="new_gate=\" req('(r43_speed==1 || r43_speed==2) && r43_vid==9354 && r4
 if r36src.count(old_gate)!=1: raise SystemExit(f'r43 r36/r35 integration compatibility anchor count {r36src.count(old_gate)}')
 r36p.write_text(r36src.replace(old_gate,new_gate,1))
 
+# r43 repurposes the old W40 board-identity display row for the new fallback
+# telemetry, but it does not remove the read-only WiFi PCI snapshot or its
+# stored board identity. Preserve r40's substantive read-only invariant while
+# allowing the diagnostic display row itself to evolve.
+r40p=here/'r40_cert_driver.py'
+r40src=r40p.read_text()
+old_wifi="    req('fn v140_text_wifi_v140' in s and 'volatile_read64(xhci+3072)' in s and 'volatile_read64(xhci+3080)' in s and 'volatile_read64(xhci+3064)' in s,'r40 WiFi board-identity telemetry missing')"
+new_wifi="    req('fn v140_wifi_pci_detail_ro' in s and 'volatile_write64(xhci+3064,revclass%256)' in s and 'volatile_write64(xhci+3072,subsys%65536)' in s and 'volatile_write64(xhci+3080,(subsys/65536)%65536)' in s,'r43 lost r40 read-only WiFi board-identity state')"
+if r40src.count(old_wifi)!=1: raise SystemExit(f'r43 r40 WiFi compatibility anchor count {r40src.count(old_wifi)}')
+r40p.write_text(r40src.replace(old_wifi,new_wifi,1))
+
 ns={'__name__':'__main__','__file__':str(base)}
 try:
     exec(compile(src,str(base),'exec'),ns,ns)
