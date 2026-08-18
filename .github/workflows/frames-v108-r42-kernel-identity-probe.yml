@@ -11,6 +11,7 @@ on:
 permissions:
   contents: read
   actions: read
+  statuses: write
 
 jobs:
   derive:
@@ -38,3 +39,24 @@ jobs:
           echo "R42_KERNEL_SHA256=$(sha256sum /tmp/kernel-r42.nx | awk '{print $1}')"
           grep -F 'if r42_target && state==1' /tmp/kernel-r42.nx >/dev/null
           grep -F 'v136_xhci_command_endpoint(xhci_state,15,0)' /tmp/kernel-r42.nx >/dev/null
+      - name: Publish r42 identity-probe status
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          STATE=success
+          DESC='r42 identity probe PASS'
+          if [ "$JOB_STATUS" != "success" ]; then STATE=failure; DESC='r42 identity probe FAIL'; fi
+          TARGET="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          python3 - "$STATE" "$DESC" "$TARGET" <<'PY'
+          import json,sys
+          open('/tmp/status.json','w').write(json.dumps({'state':sys.argv[1],'context':'frames/r42-identity-probe','description':sys.argv[2],'target_url':sys.argv[3]}))
+          PY
+          curl -fsSL -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            --data-binary @/tmp/status.json
