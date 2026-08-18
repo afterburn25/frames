@@ -1,4 +1,4 @@
-name: Frames 0.9.98 r56 Linux-Reference Input Architecture USB Image
+name: Frames 0.9.98 r56 Linux-Reference Input Architecture Rufus ISO
 
 on:
   workflow_dispatch:
@@ -22,7 +22,7 @@ env:
 
 jobs:
   build-r56:
-    name: Build r56 controller/core boundary image
+    name: Build r56 controller/core boundary Rufus ISO
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -36,7 +36,7 @@ jobs:
           set -euo pipefail
           rm -rf r56-out
           mkdir -p r56-out
-          printf 'status=started\nrevision=r56\nstrategy=linux-reference-input-architecture\n' > r56-out/BUILD-STATUS.txt
+          printf 'status=started\nrevision=r56\nstrategy=linux-reference-input-architecture\nformat=rufus-uefi-iso\n' > r56-out/BUILD-STATUS.txt
 
       - name: Reconstruct exact protected r46 base
         shell: bash
@@ -78,16 +78,16 @@ jobs:
           grep -q 'USTG' "$FRAMES_DIR/kernel/main.nx"
           sha256sum "$FRAMES_DIR/kernel/main.nx" | tee r56-out/R56-KERNEL-SHA256.txt
 
-      - name: Install build dependencies
+      - name: Install build and ISO dependencies
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y clang lld python3 unzip zip mtools dosfstools
+          sudo apt-get install -y clang lld python3 unzip zip xorriso mtools dosfstools
           find "$FRAMES_DIR" -type f -name '*.sh' -exec chmod +x {} +
           find "$FRAMES_DIR/toolchain" -type f -name nexus -exec chmod +x {} +
 
-      - name: Build and verify raw USB image
+      - name: Build and verify r56 image
         shell: bash
         run: |
           set -euo pipefail
@@ -100,14 +100,46 @@ jobs:
           python3 tools/verify_release.py
           cp build/Frames-0.9.98-Desktop-Preview.img "$GITHUB_WORKSPACE/r56-out/Frames-0.9.98-r56-Linux-Reference-Input-Architecture-Rufus.img"
 
+      - name: Create Rufus-compatible UEFI ISO from verified ESP
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FRAMES_DIR"
+          ESP="build/esp.img"
+          if [ ! -f "$ESP" ]; then
+            ESP="$(find build -maxdepth 2 -type f \( -iname '*esp*.img' -o -iname '*efi*.img' \) | head -n1)"
+          fi
+          test -n "$ESP" -a -f "$ESP"
+          cp "$ESP" "$GITHUB_WORKSPACE/r56-out/Frames-0.9.98-r56-UEFI-ESP.img"
+          rm -rf "$RUNNER_TEMP/r56-iso-root"
+          mkdir -p "$RUNNER_TEMP/r56-iso-root"
+          cat > "$RUNNER_TEMP/r56-iso-root/README.TXT" <<'EOF'
+          Frames 0.9.98 r56 Linux-Reference Input Architecture
+          Rufus-compatible UEFI physical USB/input diagnostic image.
+          Diagnostic-only candidate; do not promote.
+          EOF
+          cp "$ESP" "$RUNNER_TEMP/r56-iso-root/efiboot.img"
+          xorriso -as mkisofs \
+            -R -J -V 'FRAMES_R56' \
+            -eltorito-alt-boot \
+            -e efiboot.img \
+            -no-emul-boot \
+            -o "$GITHUB_WORKSPACE/r56-out/Frames-0.9.98-r56-Linux-Reference-Input-Architecture-Rufus-UEFI.iso" \
+            "$RUNNER_TEMP/r56-iso-root"
+          test -s "$GITHUB_WORKSPACE/r56-out/Frames-0.9.98-r56-Linux-Reference-Input-Architecture-Rufus-UEFI.iso"
+          xorriso -indev "$GITHUB_WORKSPACE/r56-out/Frames-0.9.98-r56-Linux-Reference-Input-Architecture-Rufus-UEFI.iso" -report_el_torito plain > "$GITHUB_WORKSPACE/r56-out/ISO-ELTORITO-REPORT.txt" 2>&1
+          grep -qi 'UEFI\|EFI' "$GITHUB_WORKSPACE/r56-out/ISO-ELTORITO-REPORT.txt"
+
       - name: Record hands-on instructions and hashes
         shell: bash
         run: |
           set -euo pipefail
+          iso="r56-out/Frames-0.9.98-r56-Linux-Reference-Input-Architecture-Rufus-UEFI.iso"
           img="r56-out/Frames-0.9.98-r56-Linux-Reference-Input-Architecture-Rufus.img"
+          iso_sha="$(sha256sum "$iso" | awk '{print $1}')"
           img_sha="$(sha256sum "$img" | awk '{print $1}')"
           cat > r56-out/HANDS-ON-TEST.txt <<'EOF'
-          Write the r56 IMG directly with Rufus/raw image mode and boot UEFI.
+          Select the r56 ISO in Rufus and write it to the test USB, then boot the laptop in UEFI mode.
           Plug the physical USB mouse in BEFORE boot and leave the Frames boot USB inserted.
           Confirm PTR DIAG R56.
 
@@ -128,14 +160,23 @@ jobs:
 
           Touchpad telemetry is retained from r55 for later native protocol identification. Do not promote r56; diagnostic architecture probe only.
           EOF
-          printf 'status=PASS\nrevision=r56\nimage_sha256=%s\n' "$img_sha" > r56-out/BUILD-STATUS.txt
+          cat > r56-out/BOOT-IDENTITY.txt <<EOF
+          revision=r56
+          format=Rufus-compatible UEFI ISO
+          iso=Frames-0.9.98-r56-Linux-Reference-Input-Architecture-Rufus-UEFI.iso
+          iso_sha256=$iso_sha
+          raw_image_sha256=$img_sha
+          protected_parent_sha256=$EXPECTED_PARENT_SHA256
+          r46_kernel_main_sha256=$EXPECTED_R46_KERNEL_MAIN_SHA256
+          EOF
+          printf 'status=PASS\nrevision=r56\nformat=rufus-uefi-iso\niso_sha256=%s\nimage_sha256=%s\n' "$iso_sha" "$img_sha" > r56-out/BUILD-STATUS.txt
           sha256sum r56-out/* > r56-out/SHA256SUMS.txt
 
-      - name: Upload r56 image and evidence
+      - name: Upload r56 Rufus ISO and evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: frames-0.9.98-r56-linux-reference-input-architecture-rufus-image
+          name: frames-0.9.98-r56-linux-reference-input-architecture-rufus-iso
           path: r56-out/**
           if-no-files-found: error
           retention-days: 14
