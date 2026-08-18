@@ -42,6 +42,19 @@ new_row="""    req('volatile_read64(xhci+808)' in s and 'volatile_read64(xhci+28
     req('volatile_write32' not in f45 and 'v136_xhci_command_endpoint' not in f45 and 'xhci_control' not in f45 and 'pit_wait' not in f45,'r45 DCS snapshot became active rather than passive')"""
 one(old_row,new_row,'r45 model row and touchpad isolation gates')
 
+# r37 deliberately widened Elantech button synchronization to packet class 3.
+# r44 physical evidence showed that on this ASUS stream class-3 motion can carry
+# upper payload bits that synthesize a false right click. r45 restores the safer
+# class-1/2 button gate while preserving class-3 motion delivery. Adapt only the
+# inherited historical assertion in this CI checkout; retain every other r37
+# structural/runtime requirement unchanged.
+r37p=here/'r37_cert_driver.py'
+r37src=r37p.read_text()
+r37old="    req('if typ>=1 && typ<=3 {' in s,'r37 Elantech v4 button synchronization missing')"
+r37new="    req(('if typ>=1 && typ<=3 {' in s) or ('if typ==1 || typ==2 {' in s and 'return ps2_elan4_motion_v112(input_state,a,b);' in s),'r37/r45 Elantech button-motion contract missing')"
+if r37src.count(r37old)!=1: raise SystemExit(f'r45 r37 button compatibility anchor count {r37src.count(r37old)}')
+r37p.write_text(r37src.replace(r37old,r37new,1))
+
 ns={'__name__':'__main__','__file__':str(base)}
 try:
     exec(compile(src,str(base),'exec'),ns,ns)
