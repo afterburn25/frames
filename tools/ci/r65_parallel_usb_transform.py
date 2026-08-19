@@ -3,6 +3,8 @@
 
 This intentionally fails closed unless the source exposes the known r61/r64
 EHCI patch anchors. It does not silently patch an unrelated baseline.
+
+PR synchronization marker: workflow registered on main for pull_request CI.
 """
 from pathlib import Path
 import os, sys
