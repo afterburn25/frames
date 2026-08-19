@@ -1,0 +1,102 @@
+name: Frames v108 r66 Lynx Point Ownership Periodicity
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - v108-usb-r66-lynxpoint-ownership-periodicity
+    paths:
+      - '.github/workflows/frames-v108-r66-lynxpoint-ownership-periodicity.yml'
+      - 'tools/ci/r66_lynxpoint_forensics.py'
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  r66-forensic-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Discover and apply fail-closed r66 profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python3 tools/ci/r66_lynxpoint_forensics.py | tee out/R66-TRANSFORM.txt
+          test -s out/R66-LYNXPOINT-DISCOVERY.json
+          grep -q 'R66_FS_PERIOD_FRAMES' $(sed -n 's/^R66_KERNEL=//p' out/R66-TRANSFORM.txt)
+
+      - name: Assert r66 safety and hardware contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, pathlib
+          p=pathlib.Path('out/R66-LYNXPOINT-DISCOVERY.json')
+          d=json.loads(p.read_text())
+          assert d['required_xhci']=='8086:8c31'
+          assert d['required_ehci2']=='8086:8c2d'
+          assert d['required_hub']=='8087:8008'
+          assert d['required_receiver']=='248a:10ab'
+          assert d['required_ep']=='0x82'
+          assert d['required_mps']==8
+          assert d['required_interval_frames']==4
+          assert d['required_smask']=='0x01'
+          assert d['required_cmask']=='0x1c'
+          assert d['routing_registers']=={'XUSB2PR':'0xD0','USB2PRM':'0xD4'}
+          assert 'never alter' in d['policy']
+          PY
+          ! grep -RniE 'XUSB2PR.*write|USB2PRM.*write|0xD0.*volatile_write|0xD4.*volatile_write' tools/ci/r66_lynxpoint_forensics.py
+
+      - name: Run inherited USB verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -x tools/ci/run_tests.sh ]; then tools/ci/run_tests.sh; fi
+          if [ -f tools/ci/r61_verify.py ]; then python3 tools/ci/r61_verify.py; fi
+          if [ -f tools/ci/r64_verify.py ]; then python3 tools/ci/r64_verify.py; fi
+
+      - name: Build Rufus UEFI ISO
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -x tools/ci/build_rufus_iso.sh ]; then
+            tools/ci/build_rufus_iso.sh r66
+          elif [ -x build.sh ]; then
+            ./build.sh
+          else
+            echo 'No supported build entrypoint found' >&2
+            exit 1
+          fi
+
+      - name: Seal r66 artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          find . -maxdepth 5 -type f -name '*.iso' -print -exec sha256sum {} \; | tee out/R66-ISO-SHA256.txt
+          test -s out/R66-ISO-SHA256.txt
+          cat > out/R66-PHYSICAL-TEST-CONTRACT.txt <<'EOF'
+          R66 read-only Lynx Point test contract
+          - xHCI 8086:8c31 routing state must be observed before EHCI polling
+          - XUSB2PR 0xD0 and USB2PRM 0xD4 are read-only in this candidate
+          - EHCI2 target 8086:8c2d; hub 8087:8008; receiver 248a:10ab
+          - mouse interface 0; endpoint 0x82; MPS 8; full-speed interval 4 frames
+          - split geometry S-mask 0x01 / C-mask 0x1c
+          - EHCI EECP/legacy BIOS ownership state is a required telemetry gate
+          - no physical promotion without two consecutive interrupt-IN completions after rearm
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r66-LynxPoint-Ownership-Periodicity-Rufus-UEFI
+          path: |
+            **/*.iso
+            out/R66-LYNXPOINT-DISCOVERY.json
+            out/R66-TRANSFORM.txt
+            out/R66-ISO-SHA256.txt
+            out/R66-PHYSICAL-TEST-CONTRACT.txt
+          if-no-files-found: error
