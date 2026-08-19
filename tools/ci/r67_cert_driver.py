@@ -46,9 +46,15 @@ new="new=\"('let info2=1090591745' in r60fn and 'let legacy_info2:u64=1090586113
 repl(old,new,'r60 transformed final geometry adapter')
 
 # Exact physical hub admission now includes the observed 8087:8000 sibling.
+# Keep these edits targeted so the historical r60 old/new anchor strings are
+# not themselves rewritten before r65's runner-local adapter sees them.
 repl("'hubpid==32776'","'hubpid==32768 || hubpid==32776'",'dual Intel hub profile witnesses',1)
-repl("'let info2=1090586113'","'let info2=1090591745'",'r67 live info2 final witness',1)
-repl("'volatile_write64(xhci_state+3992,6)'","'volatile_write64(xhci_state+3992,28)'",'r67 mode final witness',1)
+repl("'let gap_uf:u64=1','let legacy_cmask=3*power2_u64(gap_uf)','let info2=1090586113',",
+     "'let gap_uf:u64=1','let legacy_cmask=3*power2_u64(gap_uf)','let info2=1090591745',",
+     'r67 final live-info2 witness',1)
+repl("'cmd=set_flag(cmd,16)','volatile_write64(xhci_state+3984,profile)','volatile_write64(xhci_state+3992,6)'):",
+     "'cmd=set_flag(cmd,16)','volatile_write64(xhci_state+3984,profile)','volatile_write64(xhci_state+3992,28)'):",
+     'r67 final mode witness',1)
 
 ns={'__name__':'__main__','__file__':str(base)}
 try:
