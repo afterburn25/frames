@@ -1,0 +1,52 @@
+name: Frames v108 r61 r59s Reference EHCI Discovery
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ v108-usb-r61-r59s-reference-ehci ]
+    paths:
+      - '.github/workflows/frames-v108-r61-r59s-reference-ehci-discovery.yml'
+      - 'tools/ci/r61_transform.py'
+      - 'tools/ci/r61_discovery_driver.py'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v108-usb-r61-r59s-reference-ehci
+      - name: Install build/image/runtime tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f /etc/apt/apt-mirrors.txt ]; then sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/apt-mirrors.txt || true; fi
+          sudo DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y --no-install-recommends lld mtools dosfstools gdisk xorriso qemu-system-x86 ovmf python3-pil
+          for t in clang ld.lld python3 unzip mformat mkfs.fat sgdisk xorriso qemu-system-x86_64; do command -v "$t"; done
+      - name: Fetch exact r21 protected source
+        uses: actions/download-artifact@v4
+        with:
+          name: Frames-v108-r21-Candidate
+          path: r21-candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: afterburn25/frames
+          run-id: '31979817129'
+      - name: Harden inherited text readiness harness
+        run: python3 tools/ci/harden_qemu_text_edit_gate_r28.py
+      - name: Reconstruct exact r59s and discover r61 identity
+        run: python3 tools/ci/r61_discovery_driver.py
+      - name: Upload r61 discovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-r61-Discovery-Evidence
+          path: |
+            evidence/R61-*.txt
+            evidence/kernel-r61-discovery.nx
+          if-no-files-found: warn
+          retention-days: 30
