@@ -2,6 +2,12 @@ name: Frames v108 r65 Parallel USB Repair Matrix
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - v108-usb-r65-parallel-repair-matrix
+    paths:
+      - '.github/workflows/frames-v108-r65-parallel-usb-repair-matrix.yml'
+      - 'tools/ci/r65_parallel_usb_transform.py'
 
 permissions:
   contents: read
