@@ -31,7 +31,7 @@ one('R60-AGGREGATE.json','R61-AGGREGATE.json','aggregate target')
 one("'frames-0.9.98-v108-r60-reference-ehci-boot-mouse'","'frames-0.9.98-v108-r61-altsetting-reset-tt-boot-mouse'",'profile target')
 one("'Frames 0.9.98 v108 r60 — Reference-Driven EHCI Boot Mouse Integration'","'Frames 0.9.98 v108 r61 — Alternate Setting + RESET_TT Boot Mouse Integration'",'cert title target')
 one('R60 PASS_VM_PENDING_PHYSICAL','R61 PASS_VM_PENDING_PHYSICAL','PASS target')
-one("'R60-FAILURE.txt'","'R61-FAILURE.txt'",'failure target')
+alln("'R60-FAILURE.txt'","'R61-FAILURE.txt'",2,'failure target')
 one('r60 exact kernel identity mismatch','r61 exact kernel identity mismatch','identity label')
 one("'physical_r59h':'PENDING','physical_r60':'PENDING'","'physical_r59h':'PENDING','physical_r60':'NOT_PHYSICALLY_TESTED_SUPERSEDED_BY_R61','physical_r59t2':'PHYSICAL_ASYNC_SPLIT_ACTIVE_NO_PROGRESS','physical_r59t2_telemetry':'R5T_G270351_N0_B0_0_B1_0_B2_0_B3_0','physical_r61':'PENDING'",'physical evidence handoff')
 
