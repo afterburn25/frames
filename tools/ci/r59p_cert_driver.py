@@ -22,7 +22,7 @@ def alln(old, new, count, label):
 
 one("'patch_v108_r59o_periodic_endpoint_speed.py'", "'patch_v108_r59p_longitudinal_split_forensics.py'", 'patch target')
 alln('kernel-r59o.nx', 'kernel-r59p.nx', 2, 'kernel evidence target')
-one('b33103bcbe4ad84ded6da2e1f4f85c9437fc2d1b0858ec269a3f505661615972', 'fa0a1cbab68bd24d89659f6e85fab19c1b478ff42825654dab4de504ef9b0214', 'exact r59p identity target')
+one('b33103bcbe4ad84ded6da2e1f4f85c9437fc2d1b0858ec269a3f505661615972', '74014535e483d0fbc8ad41558b07df7435a4d082f4a6fb7b01989135f52f596e', 'exact r59p identity target')
 one("'Frames-0.9.98-v108-r59o-Periodic-Endpoint-Speed-Rufus-UEFI.iso'", "'Frames-0.9.98-v108-r59p-Longitudinal-Split-Forensics-Rufus-UEFI.iso'", 'ISO target')
 one("'R59O-SHA.txt'", "'R59P-SHA.txt'", 'SHA evidence target')
 one("'R25K-R59O.patch'", "'R25K-R59P.patch'", 'patch evidence target')
