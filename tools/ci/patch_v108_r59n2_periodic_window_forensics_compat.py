@@ -29,7 +29,7 @@ s=s.replace(oldwin,newwin,1)
 for q in ('(ot/128)%2','while transitions<32','spins<500000','volatile_write64(xhci_state+3984,hit)','volatile_write64(xhci_state+3992,packed)','fi=(fri59n/8)%1024'):
     if q not in s: raise SystemExit('r59n2 required witness missing '+q)
 out=hashlib.sha256(s.encode()).hexdigest()
-EXPECTED='de6cbe0ccaa2256ce9fc911634679ef34a8f908f58d5bd79f8d25ac1f3e53eed'
+EXPECTED='24df5ece713f2eac409899296ccc34f8843332194e28e981d771bd01ad1db4f4'
 if out!=EXPECTED: raise SystemExit('r59n2 output sha mismatch '+out)
 p.write_text(s)
 print(out)
