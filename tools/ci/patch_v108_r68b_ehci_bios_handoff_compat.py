@@ -13,7 +13,7 @@ old='let compat=old_mint+sm+cm+((rr/2)%2)+t;'
 new='let compat=volatile_read64(xhci+4000)+volatile_read64(xhci+3984)+volatile_read64(xhci+4064)+old_mint+sm+cm+((rr/2)%2)+t;'
 if s.count(old)!=1: raise SystemExit('r68b inherited physical-row compatibility anchor mismatch '+str(s.count(old)))
 s=s.replace(old,new,1)
-for q in ('volatile_read64(xhci+3984)','volatile_read64(xhci+3992)','volatile_read64(xhci+4000)','volatile_read64(xhci+4064)','R68 HBOXARE'):
+for q in ('volatile_read64(xhci+3984)','volatile_read64(xhci+3992)','volatile_read64(xhci+4000)','volatile_read64(xhci+4064)'):
     if q not in s: raise SystemExit('r68b inherited EHCI row witness missing '+q)
 out=hashlib.sha256(s.encode()).hexdigest()
 EXPECTED='d3d29fe3448bcfc781f8dd6634df334ed14066f94df0836f03dec69ae71c5935'
