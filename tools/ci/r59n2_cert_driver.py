@@ -18,7 +18,7 @@ def alln(old,new,count,label):
 
 one("'patch_v108_r59m_hub_multi_tt_activation.py'","'patch_v108_r59n2_periodic_window_forensics_compat.py'",'patch target')
 alln('kernel-r59m.nx','kernel-r59n.nx',2,'kernel evidence target')
-one('8b236b8b21a181e5db9fbeec3c5b64840df0d3158980bde3176647e6cf651bc8','de6cbe0ccaa2256ce9fc911634679ef34a8f908f58d5bd79f8d25ac1f3e53eed','exact r59n identity target')
+one('8b236b8b21a181e5db9fbeec3c5b64840df0d3158980bde3176647e6cf651bc8','24df5ece713f2eac409899296ccc34f8843332194e28e981d771bd01ad1db4f4','exact r59n identity target')
 one("'Frames-0.9.98-v108-r59m-Hub-Multi-TT-Activation-Rufus-UEFI.iso'","'Frames-0.9.98-v108-r59n-Periodic-Window-Forensics-Rufus-UEFI.iso'",'ISO target')
 one("'R59M-SHA.txt'","'R59N-SHA.txt'",'SHA evidence target')
 one("'R25K-R59M.patch'","'R25K-R59N.patch'",'patch evidence target')
@@ -51,8 +51,8 @@ try:
     if not k.exists(): raise SystemExit('r59n evidence kernel missing')
     s=k.read_text()
     tick=s[s.index('fn v159_ehci_mouse_periodic_tick'):s.index('fn v135_hid_control_fallback_prepare')]
-    for q in ('while transitions<64','volatile_write64(xhci_state+3984,hit)','volatile_write64(xhci_state+3992,packed)','let frame_index=(now_fri/8)%1024','let uframe=now_fri%8','let live_tok=volatile_read32(qh+24)'):
-        if q not in tick: raise SystemExit('r59n high-resolution periodic forensic gate missing '+q)
+    for q in ('while transitions<32','spins<500000','volatile_write64(xhci_state+3984,hit)','volatile_write64(xhci_state+3992,packed)','let frame_index=(now_fri/8)%1024','let uframe=now_fri%8','let live_tok=volatile_read32(qh+24)'):
+        if q not in tick: raise SystemExit('r59n bounded high-resolution periodic forensic gate missing '+q)
     for q in ('volatile_read64(xhci+3880)','volatile_read64(xhci+3888)','fls=(c/4)%4','fi=(fri59n/8)%1024','volatile_read32(frame+(fi*4))==qlo+2','volatile_read32(dm+12)==tdlo','(ot/128)%2'):
         if q not in s: raise SystemExit('r59n inherited evidence witness missing '+q)
     low=tick.lower()
