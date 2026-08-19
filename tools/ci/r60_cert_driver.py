@@ -73,6 +73,25 @@ if t.count(old)==1: t=t.replace(old,new,1)
 elif t.count(new)!=1: raise SystemExit('r60 inherited live polling gate anchor missing')
 p.write_text(t)
 
+# r59e's forensic contract was written for the earlier diagnostic-only layout.
+# r60 deliberately replaces FRINDEX/packed-qTD display storage with the live
+# QH overlay token plus completed report telemetry. Widen only those inherited
+# witnesses; keep the QH current-qTD, PSS, completion, DMA and safety checks.
+p=here/'r59e_cert_driver.py'; t=p.read_text()
+adapters=[
+("    req('volatile_read32(op+12)%16384' in r59efn,'r59e FRINDEX observation missing')",
+ "    req(('volatile_read32(op+12)%16384' in r59efn) or ('volatile_read32(qh+24)' in r59efn),'r59e/r60 live EHCI execution observation missing')"),
+("    req('volatile_write64(xhci_state+4072,qmatch)' in r59efn,'r59e QH/qTD match telemetry missing')",
+ "    req(('volatile_write64(xhci_state+4072,qmatch)' in r59efn) or ('cur==(qtd%4294967296)' in r59efn and 'volatile_write64(xhci_state+4072,volatile_read64(xhci_state+4072)+1)' in r59efn),'r59e/r60 QH/qTD execution telemetry missing')"),
+("    req('volatile_write64(xhci_state+4080,tok)' in r59efn,'r59e qTD token telemetry missing')",
+ "    req(('volatile_write64(xhci_state+4080,tok)' in r59efn) or ('volatile_write64(xhci_state+4080,raw)' in r59efn and 'volatile_write64(xhci_state+4088,otok)' in r59efn),'r59e/r60 transfer-token/report telemetry missing')"),
+("    req('volatile_write64(xhci_state+4088,fri+(pss*16384))' in r59efn,'r59e FRINDEX/PSS packed telemetry missing')",
+ "    req(('volatile_write64(xhci_state+4088,fri+(pss*16384))' in r59efn) or ('volatile_write64(xhci_state+4088,actual)' in r59efn and 'volatile_read32(op+4)/16384' in r59efn),'r59e/r60 execution-state telemetry missing')")]
+for old,new in adapters:
+    if t.count(old)==1: t=t.replace(old,new,1)
+    elif t.count(new)!=1: raise SystemExit('r60 inherited r59e telemetry gate anchor missing')
+p.write_text(t)
+
 ns={'__name__':'__main__','__file__':str(base)}
 try:
     exec(compile(src,str(base),'exec'),ns,ns)
