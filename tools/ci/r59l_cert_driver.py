@@ -18,7 +18,7 @@ def alln(old,new,count,label):
 
 one("'patch_v108_r59j_correct_split_schedule_overlay.py'","'patch_v108_r59l_periodic_fls_frindex_forensics.py'",'patch target')
 one('kernel-r59j.nx','kernel-r59l.nx','kernel evidence target')
-one('69168127d829d3b182ab874fef9bbdd1c734ecffca9e5457f94f8d53b012fc54','f7c853be4d96868b44f263a797eafcb07be95c378baf50644276f35d836e0950','exact r59l identity target')
+one('69168127d829d3b182ab874fef9bbdd1c734ecffca9e5457f94f8d53b012fc54','2c4734c29577a4710b27577ec2dfa33dcf6f117a25e21607dff5ee6b9632a6de','exact r59l identity target')
 one("'Frames-0.9.98-v108-r59j-Correct-Split-Schedule-Overlay-Rufus-UEFI.iso'","'Frames-0.9.98-v108-r59l-Periodic-FLS-FRINDEX-Forensics-Rufus-UEFI.iso'",'ISO target')
 one("'R59J-SHA.txt'","'R59L-SHA.txt'",'SHA evidence target')
 one("'R25K-R59J.patch'","'R25K-R59L.patch'",'patch evidence target')
@@ -42,7 +42,7 @@ try:
     arm=s[s.index('fn v159_ehci_mouse_periodic_arm'):s.index('fn v135_hid_control_fallback_prepare')]
     for q in ('cmd=clear_flag(cmd,4)','cmd=clear_flag(cmd,8)','let info2=1090591745','volatile_write32(op+20,flo)','cmd=set_flag(cmd,16)'):
         if q not in arm: raise SystemExit('r59l periodic/FLS source gate missing '+q)
-    for q in ('fls=(c/4)%4','fi=(fr/8)%1024','volatile_read32(frame+(fi*4))==qlo+2','volatile_read32(dm+12)==tdlo','(ot/128)%2','(volatile_read32(op+4)/16384)%2'):
+    for q in ('fls=(c/4)%4','fi=(fri59l/8)%1024','volatile_read32(frame+(fi*4))==qlo+2','volatile_read32(dm+12)==tdlo','(ot/128)%2','(volatile_read32(op+4)/16384)%2'):
         if q not in s: raise SystemExit('r59l FRINDEX telemetry gate missing '+q)
     low=arm.lower()
     if any(x in low for x in ('write(10)','nvme_submit_write','ahci_write','fat_write','block_write','input_push(')):
