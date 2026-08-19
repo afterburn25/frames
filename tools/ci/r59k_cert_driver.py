@@ -2,6 +2,19 @@
 from pathlib import Path
 import traceback
 here=Path(__file__).parent
+
+# r59k intentionally routes the live desktop probe through the asynchronous
+# TT engine while retaining the original periodic engine as certified source
+# evidence. Widen only the inherited r59 live-hook assertion in this checkout.
+r59p=here/'r59_cert_driver.py'
+r59src=r59p.read_text()
+r59old="    req('r59_redraw=v159_ehci_mouse_periodic_tick(xhci)' in s and 'var telemetry_redraw:u64=r59_redraw' in s,'r59 live desktop polling/redraw hook missing')"
+r59new="    req((('r59_redraw=v159_ehci_mouse_periodic_tick(xhci)' in s) or ('r59_redraw=v160_ehci_mouse_async_tick(xhci)' in s)) and 'var telemetry_redraw:u64=r59_redraw' in s,'r59/r59k live desktop polling/redraw hook missing')"
+if r59src.count(r59old)==1:
+    r59p.write_text(r59src.replace(r59old,r59new,1))
+elif r59src.count(r59new)!=1:
+    raise SystemExit('r59k inherited r59 live-hook compatibility anchor missing')
+
 base=here/'r59j_cert_driver.py'
 src=base.read_text()
 
@@ -33,9 +46,6 @@ one("'physical_r59j':'PENDING'",
     "'physical_r59j':'PHYSICAL_QH_ACTIVE_NO_SPLIT_NO_PROGRESS','physical_r59j_telemetry':'R5J_S1_N0_A1_X0_E0_R8_D0','physical_r59k':'PENDING'",
     'physical r59j result + r59k pending')
 
-# r59k deliberately leaves the full periodic implementation in the source as
-# certified evidence, but routes the live physical probe through the already
-# proven asynchronous EHCI TT engine.  Require the new engine and both hooks.
 needle="ns={'__name__':'__main__','__file__':str(base)}"
 model="""
 # r59k asynchronous TT alternative-path model gates are enforced by the exact
