@@ -38,20 +38,13 @@ one("'physical_r59h':'PENDING','physical_r60':'PENDING'","'physical_r59h':'PENDI
 # r57 owns the idempotent compatibility rewrite for the old r52/r54/r56
 # bottom-row assertion. r61 replaces only the visible row while retaining the
 # original bounded Intel route mutation and its before/after telemetry writes.
-r57p=here/'r57_cert_driver.py'
-r57src=r57p.read_text()
+r57p=here/'r57_cert_driver.py'; r57src=r57p.read_text()
 old_tail="or ('volatile_read64(xhci+3920)' in s and 'volatile_read64(xhci+3928)' in s and 'volatile_read64(xhci+3936)' in s and 'volatile_read64(xhci+3944)' in s and 'volatile_read64(xhci+3952)' in s and 'volatile_read64(xhci+3960)' in s and 'volatile_read64(xhci+3968)' in s)) and 'volatile_write64(xhci_state+3752,before_bit)' in s and 'volatile_write64(xhci_state+3760,after_bit)' in s),'r52/r54/r56 physical EHCI row/route proof missing')"
 new_tail="or ('volatile_read64(xhci+3920)' in s and 'volatile_read64(xhci+3928)' in s and 'volatile_read64(xhci+3936)' in s and 'volatile_read64(xhci+3944)' in s and 'volatile_read64(xhci+3952)' in s and 'volatile_read64(xhci+3960)' in s and 'volatile_read64(xhci+3968)' in s) or ('volatile_read64(xhci+3984)' in s and 'volatile_read64(xhci+3992)' in s and 'volatile_read64(xhci+4000)' in s and 'volatile_read64(xhci+4064)' in s)) and 'volatile_write64(xhci_state+3752,before_bit)' in s and 'volatile_write64(xhci_state+3760,after_bit)' in s),'r52/r54/r56/r61 physical EHCI row/route proof missing')"
-if r57src.count(old_tail)==1:
-    r57p.write_text(r57src.replace(old_tail,new_tail,1))
-elif r57src.count(new_tail)!=1:
-    raise SystemExit('r61 r57/r52 route-row compatibility anchor missing')
+if r57src.count(old_tail)==1: r57p.write_text(r57src.replace(old_tail,new_tail,1))
+elif r57src.count(new_tail)!=1: raise SystemExit('r61 r57/r52 route-row compatibility anchor missing')
 
-# r59 subsequently tries to extend r57's old row assertion to the original
-# r59 runtime row. Make that adapter idempotent when r61 has already widened
-# r57 first. This changes only private certification plumbing.
-r59p=here/'r59_cert_driver.py'
-r59src=r59p.read_text()
+r59p=here/'r59_cert_driver.py'; r59src=r59p.read_text()
 old_block="""if r57src.count(old_compat)==1:
     r57p.write_text(r57src.replace(old_compat,new_compat,1))
 elif r57src.count(new_compat)!=1:
@@ -64,73 +57,49 @@ elif 'volatile_read64(xhci+3984)' in r57src and 'volatile_read64(xhci+4064)' in 
     pass
 else:
     raise SystemExit('r59/r61 r57/r52 row compatibility anchor missing')"""
-if r59src.count(old_block)==1:
-    r59src=r59src.replace(old_block,new_block,1)
-elif r59src.count(new_block)!=1:
-    raise SystemExit('r61 r59 row-adapter compatibility anchor missing')
-
-# r59 also broadens r56's old visible E/N/C assertion to its own runtime row.
-# r61 replaces that row again with A/I/T/G/N/B/X, so include those four r61
-# telemetry reads as a third display-only alternative.
+if r59src.count(old_block)==1: r59src=r59src.replace(old_block,new_block,1)
+elif r59src.count(new_block)!=1: raise SystemExit('r61 r59 row-adapter compatibility anchor missing')
 old_nr="new_r56=\"    req((('volatile_read64(xhci+3928)' in s and 'volatile_read64(xhci+3936)' in s and 'volatile_read64(xhci+3944)' in s) or ('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+4072)' in s and 'volatile_read64(xhci+4080)' in s)),'r56 E/N/C physical overlay fields missing')\""
 new_nr="new_r56=\"    req((('volatile_read64(xhci+3928)' in s and 'volatile_read64(xhci+3936)' in s and 'volatile_read64(xhci+3944)' in s) or ('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+4072)' in s and 'volatile_read64(xhci+4080)' in s) or ('volatile_read64(xhci+3984)' in s and 'volatile_read64(xhci+3992)' in s and 'volatile_read64(xhci+4000)' in s and 'volatile_read64(xhci+4064)' in s)),'r56 E/N/C physical overlay fields missing')\""
-if r59src.count(old_nr)==1:
-    r59src=r59src.replace(old_nr,new_nr,1)
-elif r59src.count(new_nr)!=1:
-    raise SystemExit('r61 r59/r56 overlay compatibility anchor missing')
+if r59src.count(old_nr)==1: r59src=r59src.replace(old_nr,new_nr,1)
+elif r59src.count(new_nr)!=1: raise SystemExit('r61 r59/r56 overlay compatibility anchor missing')
 r59p.write_text(r59src)
+
+# r59g normally expands r59's r56 replacement once more for the r59g row.
+# r61 has already supplied a valid third alternative, so make that adapter
+# recognize the pre-widened assignment rather than treating it as corruption.
+r59gp=here/'r59g_cert_driver.py'; r59gsrc=r59gp.read_text()
+g_old="""if r59src.count(old_newr56)==1:
+    r59src=r59src.replace(old_newr56,new_newr56,1)
+elif r59src.count(new_newr56)!=1:
+    raise SystemExit('r59g r59/r56 overlay compatibility adapter anchor missing')"""
+g_new="""if r59src.count(old_newr56)==1:
+    r59src=r59src.replace(old_newr56,new_newr56,1)
+elif r59src.count(new_newr56)==1:
+    pass
+elif 'volatile_read64(xhci+3992)' in r59src and 'volatile_read64(xhci+4000)' in r59src and 'volatile_read64(xhci+4064)' in r59src:
+    pass
+else:
+    raise SystemExit('r59g/r61 r59/r56 overlay compatibility adapter anchor missing')"""
+if r59gsrc.count(g_old)==1: r59gp.write_text(r59gsrc.replace(g_old,g_new,1))
+elif r59gsrc.count(g_new)!=1: raise SystemExit('r61 r59g overlay-adapter compatibility anchor missing')
 
 ns={'__name__':'__main__','__file__':str(base)}
 try:
     exec(compile(src,str(base),'exec'),ns,ns)
     k=Path('evidence/kernel-r61.nx')
-    if not k.exists():
-        raise SystemExit('r61 evidence kernel missing')
+    if not k.exists(): raise SystemExit('r61 evidence kernel missing')
     s=k.read_text()
-    if hashlib.sha256(s.encode()).hexdigest()!='5903008c46c2d6e4be84a5eab7fa44a322ba7a594ff8cb810fcbe277e716d9ee':
-        raise SystemExit('r61 evidence kernel SHA mismatch')
+    if hashlib.sha256(s.encode()).hexdigest()!='5903008c46c2d6e4be84a5eab7fa44a322ba7a594ff8cb810fcbe277e716d9ee': raise SystemExit('r61 evidence kernel SHA mismatch')
     arm=s[s.index('fn v159_ehci_mouse_periodic_arm'):s.index('fn v159_ehci_mouse_periodic_tick')]
     tick=s[s.index('fn v159_ehci_mouse_periodic_tick'):s.index('fn v135_hid_control_fallback_prepare')]
-    for q in (
-        'let full_setup=usb_setup_length_v113(usb_setup_value_v113(128,6,512,0),total)',
-        'let al0=volatile_read8(data0+off0+3)',
-        'if if0==mif && ic0==3 && sub0==1 && pr0==2',
-        'if ea0==mep && at0%4==3 { epfound=1; }',
-        'let setif=1+(11*256)+(malt*65536)+(mif*4294967296)',
-        'v157_ehci_tt_control(xhci_state,2,setif,0)',
-        'v155_ehci_control(xhci_state,1,5066549597570688,18)',
-        'if hubproto==2 { ttidx=port; }',
-        'let resettt=35+(9*256)+(ttidx*4294967296)',
-        'v155_ehci_control(xhci_state,1,resettt,0)',
-        'volatile_write64(xhci_state+3984,malt)',
-        'volatile_write64(xhci_state+3992,ifrc)',
-        'volatile_write64(xhci_state+4000,ttrc)',
-        'let info2=1090591745',
-        'let token=560512',
-    ):
-        if q not in arm:
-            raise SystemExit('r61 preflight/periodic witness missing '+q)
-    for q in (
-        'input_push(input_state,4,0,buttons)',
-        'input_push(input_state,5,0,dx)',
-        'input_push(input_state,6,0,dy)',
-        'volatile_write32(qtd+8,560512)',
-    ):
-        if q not in tick:
-            raise SystemExit('r61 retained r60 completion/delivery witness missing '+q)
-    for q in (
-        'gate=1+(ta*2)+(qa*4)+(sx*8)+(er*16)+(rem*1024)+(orem*32768)',
-        'volatile_read64(xhci+3984)',
-        'volatile_read64(xhci+3992)',
-        'volatile_read64(xhci+4000)',
-        'volatile_read64(xhci+4064)',
-    ):
-        if q not in s:
-            raise SystemExit('r61 physical telemetry witness missing '+q)
+    for q in ('let full_setup=usb_setup_length_v113(usb_setup_value_v113(128,6,512,0),total)','let al0=volatile_read8(data0+off0+3)','if if0==mif && ic0==3 && sub0==1 && pr0==2','if ea0==mep && at0%4==3 { epfound=1; }','let setif=1+(11*256)+(malt*65536)+(mif*4294967296)','v157_ehci_tt_control(xhci_state,2,setif,0)','v155_ehci_control(xhci_state,1,5066549597570688,18)','if hubproto==2 { ttidx=port; }','let resettt=35+(9*256)+(ttidx*4294967296)','v155_ehci_control(xhci_state,1,resettt,0)','volatile_write64(xhci_state+3984,malt)','volatile_write64(xhci_state+3992,ifrc)','volatile_write64(xhci_state+4000,ttrc)','let info2=1090591745','let token=560512'):
+        if q not in arm: raise SystemExit('r61 preflight/periodic witness missing '+q)
+    for q in ('input_push(input_state,4,0,buttons)','input_push(input_state,5,0,dx)','input_push(input_state,6,0,dy)','volatile_write32(qtd+8,560512)'):
+        if q not in tick: raise SystemExit('r61 retained r60 completion/delivery witness missing '+q)
+    for q in ('gate=1+(ta*2)+(qa*4)+(sx*8)+(er*16)+(rem*1024)+(orem*32768)','volatile_read64(xhci+3984)','volatile_read64(xhci+3992)','volatile_read64(xhci+4000)','volatile_read64(xhci+4064)'):
+        if q not in s: raise SystemExit('r61 physical telemetry witness missing '+q)
     low=(arm+tick).lower()
-    if any(x in low for x in ('write(10)','nvme_submit_write','ahci_write','fat_write','block_write')):
-        raise SystemExit('r61 exceeds read-only input-integration scope')
+    if any(x in low for x in ('write(10)','nvme_submit_write','ahci_write','fat_write','block_write')): raise SystemExit('r61 exceeds read-only input-integration scope')
 except BaseException:
-    out=Path('evidence'); out.mkdir(parents=True,exist_ok=True)
-    (out/'R61-FAILURE.txt').write_text(traceback.format_exc())
-    raise
+    out=Path('evidence'); out.mkdir(parents=True,exist_ok=True); (out/'R61-FAILURE.txt').write_text(traceback.format_exc()); raise
