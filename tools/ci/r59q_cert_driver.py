@@ -70,17 +70,28 @@ if r57src.count(r57_old)==1:
 elif r57src.count(r57_new)!=1:
     raise SystemExit('r59q r57/r52 route-row compatibility anchor missing')
 
-# r59 itself opens r57 and extends that same compatibility expression. Make
-# its private adapter recognize the already-expanded r59q expression as an
-# idempotent valid state instead of aborting before the inherited chain runs.
+# r59 itself opens r57 and r56 and extends their visible-row compatibility.
+# Make those private adapters trace-aware before the inherited chain executes.
 r59p=here/'r59_cert_driver.py'
 r59src=r59p.read_text()
 r59_old="elif r57src.count(new_compat)!=1:\n    raise SystemExit('r59 r57/r52 row compatibility anchor missing')"
 r59_new="elif r57src.count(new_compat)==1:\n    pass\nelif 'volatile_read64(xhci+3984)' in r57src and 'volatile_read64(xhci+3992)' in r57src and 'volatile_read64(xhci+4064)' in r57src and 'volatile_read64(xhci+4072)' in r57src and 'volatile_read64(xhci+4080)' in r57src and 'volatile_read64(xhci+4088)' in r57src and 'volatile_write64(xhci_state+3752,before_bit)' in r57src and 'volatile_write64(xhci_state+3760,after_bit)' in r57src:\n    pass\nelse:\n    raise SystemExit('r59/r59q r57/r52 row compatibility anchor missing')"
-if r59src.count(r59_old)==1:
-    r59p.write_text(r59src.replace(r59_old,r59_new,1))
-elif r59src.count(r59_new)!=1:
-    raise SystemExit('r59q private r59 adapter anchor missing')
+if r59src.count(r59_old)!=1:
+    raise SystemExit('r59q private r59 route adapter anchor missing '+str(r59src.count(r59_old)))
+r59src=r59src.replace(r59_old,r59_new,1)
+
+old_r56_expr="(('volatile_read64(xhci+3928)' in s and 'volatile_read64(xhci+3936)' in s and 'volatile_read64(xhci+3944)' in s) or ('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+4072)' in s and 'volatile_read64(xhci+4080)' in s))"
+new_r56_expr="(('volatile_read64(xhci+3928)' in s and 'volatile_read64(xhci+3936)' in s and 'volatile_read64(xhci+3944)' in s) or ('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+4072)' in s and 'volatile_read64(xhci+4080)' in s) or ('volatile_read64(xhci+3984)' in s and 'volatile_read64(xhci+3992)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+4072)' in s and 'volatile_read64(xhci+4080)' in s and 'volatile_read64(xhci+4088)' in s))"
+if r59src.count(old_r56_expr)!=1:
+    raise SystemExit('r59q private r59/r56 overlay adapter anchor missing '+str(r59src.count(old_r56_expr)))
+r59src=r59src.replace(old_r56_expr,new_r56_expr,1)
+
+old_r59_visible="    req('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+4072)' in s and 'volatile_read64(xhci+4080)' in s,'r59 visible runtime telemetry row missing')"
+new_r59_visible="    req((('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+4072)' in s and 'volatile_read64(xhci+4080)' in s) or ('volatile_read64(xhci+3984)' in s and 'volatile_read64(xhci+3992)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+4072)' in s and 'volatile_read64(xhci+4080)' in s and 'volatile_read64(xhci+4088)' in s)),'r59 visible runtime telemetry row missing')"
+if r59src.count(old_r59_visible)!=1:
+    raise SystemExit('r59q private r59 visible-row anchor missing '+str(r59src.count(old_r59_visible)))
+r59src=r59src.replace(old_r59_visible,new_r59_visible,1)
+r59p.write_text(r59src)
 
 ns={'__name__':'__main__','__file__':str(base)}
 try:
