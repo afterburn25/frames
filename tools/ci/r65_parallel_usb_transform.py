@@ -5,7 +5,7 @@ This intentionally fails closed unless the source exposes the known r61/r64
 EHCI patch anchors. It does not silently patch an unrelated baseline.
 
 PR synchronization marker: workflow registered on main for pull_request CI.
-Synchronization pulse 3: force push + PR synchronize after workflow registration.
+Synchronization pulse 4: retrigger after removing pull_request path filters.
 """
 from pathlib import Path
 import os, sys
@@ -35,18 +35,12 @@ if anchor_file is None:
 s = anchor_file.read_text(errors='ignore')
 original = s
 
-# Overlay-authority variant: once the controller says Current==qTD and the
-# overlay is inactive, status/remaining must remain sourced from the overlay.
 if flags['overlay_authority']:
     s = s.replace('tok=volatile_read32(qtd+8)', 'tok=otok /* r65: live QH overlay authoritative after completion */')
 
-# Toggle preservation: retain QTD_TOGGLE from the completed overlay rather
-# than writing a zero token into QH+24 during rearm.
 if flags['preserve_toggle']:
     s = s.replace('volatile_write32(qh+24,0)', 'volatile_write32(qh+24,(otok & 0x80000000u)) /* r65 preserve DATA toggle */')
 
-# Persistent-periodic mode: suppress the per-packet PSE stop/start sequence
-# only when exact anchors are present. Otherwise fail closed.
 if flags['persistent_periodic_qh']:
     old = s
     s = s.replace('v121_ehci_periodic_stop();', '/* r65 persistent periodic QH: no global PSE stop */')
@@ -54,9 +48,6 @@ if flags['persistent_periodic_qh']:
     if s == old:
         sys.exit('r65C/D: FAIL-CLOSED: periodic stop/start anchors not found')
 
-# Dummy-qTD requires an existing helper/anchor. Do not invent descriptor
-# layout blindly in CI. Candidate D therefore only proceeds on source that
-# already exposes a dummy-qTD hook from r64/newer work.
 if flags['dummy_qtd']:
     hooks = ('dummy_qtd', 'dummyqtd', 'QH_UNLINK_DUMMY_OVERLAY')
     if not any(h in s for h in hooks):
