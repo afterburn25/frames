@@ -15,6 +15,19 @@ if r59src.count(r59old)==1:
 elif r59src.count(r59new)!=1:
     raise SystemExit('r59k inherited r59 live-hook compatibility anchor missing')
 
+# r59j's forensic display gate required the full periodic overlay row. r59k
+# still reads the live overlay Active/error fields, but intentionally replaces
+# split/remaining/toggle display columns with raw mouse buttons/X/Y. Accept
+# either the complete r59j row or the explicit r59k async-report row.
+r59jp=here/'r59j_cert_driver.py'
+r59jsrc=r59jp.read_text()
+old_overlay="'volatile_read32(dm+24)' in s and '(ot/128)%2' in s and '(ot/2)%2' in s and '(ot/4)%32' in s and '(ot/65536)%32768' in s and '(ot/2147483648)%2' in s"
+new_overlay="(('volatile_read32(dm+24)' in s and '(ot/128)%2' in s and '(ot/2)%2' in s and '(ot/4)%32' in s and '(ot/65536)%32768' in s and '(ot/2147483648)%2' in s) or ('volatile_read32(dm+24)' in s and '(ot/128)%2' in s and '(ot/4)%32' in s and 'rr%256' in s and '(rr/256)%256' in s and '(rr/65536)%256' in s))"
+if r59jsrc.count(old_overlay)==1:
+    r59jp.write_text(r59jsrc.replace(old_overlay,new_overlay,1))
+elif r59jsrc.count(new_overlay)!=1:
+    raise SystemExit('r59k inherited r59j overlay compatibility anchor missing')
+
 base=here/'r59j_cert_driver.py'
 src=base.read_text()
 
