@@ -15,7 +15,7 @@ def repl(old,new,label,min_count=1):
 
 repl("'patch_v108_r61_altsetting_reset_tt_boot_mouse.py'","'patch_v108_r62_hid_control_poll_mouse.py'",'patch target')
 repl('kernel-r61.nx','kernel-r62.nx','kernel evidence target',2)
-repl('5903008c46c2d6e4be84a5eab7fa44a322ba7a594ff8cb810fcbe277e716d9ee','1123e519510917e832d660d21faf8955c7f21ab174283d04930fb378f96569c6','exact r62 identity target',2)
+repl('5903008c46c2d6e4be84a5eab7fa44a322ba7a594ff8cb810fcbe277e716d9ee','6b33eb57003c965d29e918a959df60d801ce79770ffbfdc47ea17177f613578b','exact r62 identity target',2)
 repl("'Frames-0.9.98-v108-r61-AltSetting-RESET-TT-Boot-Mouse-Rufus-UEFI.iso'","'Frames-0.9.98-v108-r62-HID-Control-Poll-Mouse-Recovery-Rufus-UEFI.iso'",'ISO target')
 repl("'R61-SHA.txt'","'R62-SHA.txt'",'SHA evidence target')
 repl("'R25K-R61.patch'","'R25K-R62.patch'",'patch evidence target')
@@ -36,7 +36,7 @@ try:
     k=Path('evidence/kernel-r62.nx')
     if not k.exists(): raise SystemExit('r62 evidence kernel missing')
     s=k.read_text()
-    if hashlib.sha256(s.encode()).hexdigest()!='1123e519510917e832d660d21faf8955c7f21ab174283d04930fb378f96569c6':
+    if hashlib.sha256(s.encode()).hexdigest()!='6b33eb57003c965d29e918a959df60d801ce79770ffbfdc47ea17177f613578b':
         raise SystemExit('r62 evidence kernel SHA mismatch')
     ast=s.index('fn v159_ehci_mouse_periodic_arm')
     tst=s.index('fn v159_ehci_mouse_periodic_tick')
