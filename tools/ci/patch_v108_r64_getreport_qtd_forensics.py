@@ -40,7 +40,7 @@ old_tail='''    let stok=volatile_read32(qt+8); let qstok=volatile_read32(qs+8);
     return 1;
 }'''
 new_tail='''    let stok=volatile_read32(qt+8); let qstok=volatile_read32(qs+8); let serr=(stok/64)%2; let qerr=(qstok/64)%2;
-    let is_getreport=(setupv%256)==161 && ((setupv/256)%256)==1;
+    var is_getreport:u64=0; if setupv%256==161 && ((setupv/256)%256)==1 { is_getreport=1; }
     if is_getreport!=0 {
         let spack=((stok/128)%2)+(((stok/64)%2)*2)+(((stok/4)%16)*4);
         let qpack=((qstok/128)%2)+(((qstok/64)%2)*2)+(((qstok/4)%16)*4);
@@ -78,7 +78,7 @@ for q in (
 ):
     if q not in live: raise SystemExit('r64 lost r63 control-poll witness '+q)
 for q in (
-    'let is_getreport=(setupv%256)==161 && ((setupv/256)%256)==1',
+    'var is_getreport:u64=0',
     'let dactive=(dtok/128)%2',
     'let dhalt=(dtok/64)%2',
     'let derr=(dtok/4)%16',
@@ -98,7 +98,7 @@ for bad in ('write(10)','nvme_submit_write','ahci_write','fat_write','block_writ
 if s.count('{')!=s.count('}'):
     raise SystemExit('r64 brace mismatch')
 out=hashlib.sha256(s.encode()).hexdigest()
-EXPECTED='35a2721b69a6ed12bdfe319ca47db8bc51cfc3cf75030be333411dbd6b8d3919'
+EXPECTED='db605f05538b796d7553ad45cf9de7881b8e111ee8eda30e034a29821b3fd316'
 if out!=EXPECTED:
     raise SystemExit('r64 output sha mismatch '+out)
 p.write_text(s)
