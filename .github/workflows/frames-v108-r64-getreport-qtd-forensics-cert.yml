@@ -1,5 +1,6 @@
 name: Frames v108 r68b EHCI BIOS Handoff Persistent TT QH Certification
 
+# r68b corrected generated-label verifier pulse
 on:
   workflow_dispatch:
   push:
