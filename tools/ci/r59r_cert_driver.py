@@ -35,6 +35,20 @@ alln('R59Q-FAILURE.txt','R59R-FAILURE.txt',2,'failure target')
 one('r59q exact kernel identity mismatch','r59r exact kernel identity mismatch','identity label')
 one("'physical_r59q':'PENDING'","'physical_r59q':'PHYSICAL_QH_OVERLAY_COMPLETED_ZERO_REMAINING_STALE_QTD_GATE','physical_r59q_telemetry':'R5Q_S15_C10_D1_X1_A0_E0_R0_N0_INFERRED','physical_r59r':'PENDING'",'physical r59q result + r59r pending')
 
+# r59's original structural gate assumes the qTD memory token is the
+# authoritative completion status. r59q physical evidence proves this target
+# controller advances the QH overlay while the original qTD token stays stale.
+# Broaden only that private certification predicate; retain Active, error, and
+# remaining-byte status requirements for either valid status source.
+r59p=here/'r59_cert_driver.py'
+r59src=r59p.read_text()
+old_poll="    req('(tok/128)%2' in r59fn and 'let errs=(tok/4)%32' in r59fn,'r59 qTD completion/error polling missing')"
+new_poll="    req(((('(tok/128)%2' in r59fn and 'let errs=(tok/4)%32' in r59fn)) or (('(live_tok/128)%2' in r59fn and 'let errs=(live_tok/4)%32' in r59fn and 'let rem=(live_tok/65536)%32768' in r59fn))),'r59/r59r qTD-or-QH-overlay completion/error polling missing')"
+if r59src.count(old_poll)==1:
+    r59p.write_text(r59src.replace(old_poll,new_poll,1))
+elif r59src.count(new_poll)!=1:
+    raise SystemExit('r59r r59 completion-status compatibility anchor missing')
+
 ns={'__name__':'__main__','__file__':str(base)}
 try:
     exec(compile(src,str(base),'exec'),ns,ns)
