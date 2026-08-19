@@ -32,8 +32,6 @@ alln('R59H-FAILURE.txt','R60-FAILURE.txt',2,'failure target')
 one('r59h exact kernel identity mismatch','r60 exact kernel identity mismatch','identity label')
 one("'physical_r59h':'PENDING'","'physical_r59h':'PENDING','physical_r60':'PENDING'",'r60 physical pending')
 
-# r60 intentionally returns to the default Linux TT new-scheduler geometry:
-# Start-Split uframe 0 and Complete-Splits uframes 2/3/4 => C-mask 0x1c.
 oldgeom="    req('let info2=1090586113' in r59gfn and 'let info2=1090591745' not in r59gfn,'r59h Linux-derived C-mask 0x06 repair missing')"
 newgeom="    req('let info2=1090591745' in r59gfn and 'let info2=1090586113' not in r59gfn,'r60 default TT new-scheduler C-mask 0x1c missing')"
 one(oldgeom,newgeom,'default Linux split geometry')
@@ -67,19 +65,22 @@ if t.count(old)==1: t=t.replace(old,new,1)
 elif t.count(new)!=1: raise SystemExit('r60 inherited qTD token gate anchor missing')
 p.write_text(t)
 
-anchor="one(anchor,anchor+\"\\n    req('(rr/4)%32' in s,'r59h qTD error telemetry missing')\",'r59h qTD error telemetry gate')"
-extra=anchor+"""
-
-# r60 reference-driven end-to-end integration gates
-r60_anchor="    req('(rr/4)%32' in s,'r59h qTD error telemetry missing')"
-r60_extra=r60_anchor+"\n    r60fn=s[s.index('fn v159_ehci_mouse_periodic_arm'):s.index('fn v135_hid_control_fallback_prepare')]\n    req('let info2=1090591745' in r60fn and 'let info2=1090586113' not in r60fn,'r60 TT new-scheduler geometry missing')\n    req('let token=560512' in r60fn and 'volatile_write32(qtd+8,560512)' in r60fn,'r60 IOC interrupt-IN qTD missing')\n    req('33+(11*256)+(mif*4294967296)' in r60fn and 'volatile_read8(dma+576)!=0' in r60fn,'r60 HID boot protocol selection/verification missing')\n    req('volatile_read32(qh+24)' in r60fn,'r60 QH overlay-token observation missing')\n    req('v159_ehci_mouse_periodic_tick(xhci_state:u64,input_state:u64)' in r60fn,'r60 input-aware periodic tick missing')\n    req('input_push(input_state,4,0,buttons)' in r60fn and 'input_push(input_state,5,0,dx)' in r60fn and 'input_push(input_state,6,0,dy)' in r60fn,'r60 Generic Pointer delivery missing')\n    low60=r60fn.lower(); req(all(x not in low60 for x in ['write(10)','nvme_submit_write','ahci_write','fat_write','block_write']),'r60 exceeds read-only input-integration scope')"
-one(r60_anchor,r60_extra,'r60 reference integration model gates')
-"""
-one(anchor,extra,'r60 model-gate injection')
-
 ns={'__name__':'__main__','__file__':str(base)}
 try:
     exec(compile(src,str(base),'exec'),ns,ns)
+    final_src=Path('evidence/kernel-r60.nx').read_text()
+    r60fn=final_src[final_src.index('fn v159_ehci_mouse_periodic_arm'):final_src.index('fn v135_hid_control_fallback_prepare')]
+    checks=[
+        ('let info2=1090591745' in r60fn and 'let info2=1090586113' not in r60fn,'r60 TT new-scheduler geometry missing'),
+        ('let token=560512' in r60fn and 'volatile_write32(qtd+8,560512)' in r60fn,'r60 IOC interrupt-IN qTD missing'),
+        ('33+(11*256)+(mif*4294967296)' in r60fn and 'volatile_read8(dma+576)!=0' in r60fn,'r60 HID boot protocol selection/verification missing'),
+        ('volatile_read32(qh+24)' in r60fn,'r60 QH overlay-token observation missing'),
+        ('v159_ehci_mouse_periodic_tick(xhci_state:u64,input_state:u64)' in r60fn,'r60 input-aware periodic tick missing'),
+        ('input_push(input_state,4,0,buttons)' in r60fn and 'input_push(input_state,5,0,dx)' in r60fn and 'input_push(input_state,6,0,dy)' in r60fn,'r60 Generic Pointer delivery missing'),
+        (all(x not in r60fn.lower() for x in ['write(10)','nvme_submit_write','ahci_write','fat_write','block_write']),'r60 exceeds read-only input-integration scope'),
+    ]
+    for ok,msg in checks:
+        if not ok: raise SystemExit(msg)
 except BaseException:
     out=Path('evidence'); out.mkdir(parents=True,exist_ok=True)
     (out/'R60-FAILURE.txt').write_text(traceback.format_exc())
