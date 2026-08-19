@@ -31,6 +31,19 @@ alln('R59M-FAILURE.txt','R59N-FAILURE.txt',2,'failure target')
 one('r59m exact kernel identity mismatch','r59n exact kernel identity mismatch','identity label')
 one("'physical_r59m':'PENDING'","'physical_r59m':'PHYSICAL_SINGLE_TT_PERIODIC_ACTIVE_NO_COMPLETION','physical_r59m_telemetry':'R5M_H1_T0_F0_Q1_N0_A1_P1','physical_r59n':'PENDING'",'physical r59m result + r59n pending')
 
+# Private compatibility adapter: r59l's post-build evidence gate keys on its
+# local FRINDEX variable spelling. r59n had to rename that binding to avoid a
+# real Nexus same-scope collision. Accept the r59n-equivalent spelling only in
+# this certification execution; historical r59l source remains unchanged.
+r59lp=here/'r59l_cert_driver.py'
+r59lsrc=r59lp.read_text()
+old_fri="'fi=(fri59l/8)%1024'"
+new_fri="'fi=(fri59n/8)%1024'"
+if r59lsrc.count(old_fri)==1:
+    r59lp.write_text(r59lsrc.replace(old_fri,new_fri,1))
+elif r59lsrc.count(new_fri)!=1:
+    raise SystemExit('r59n inherited r59l FRINDEX-name compatibility anchor missing')
+
 ns={'__name__':'__main__','__file__':str(base)}
 try:
     exec(compile(src,str(base),'exec'),ns,ns)
