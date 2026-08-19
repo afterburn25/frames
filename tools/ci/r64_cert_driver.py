@@ -28,18 +28,6 @@ repl("'R63-FAILURE.txt'","'R64-FAILURE.txt'",'failure target',2)
 repl('r63 exact kernel identity mismatch','r64 exact kernel identity mismatch','identity label')
 repl("'physical_r63':'PENDING'","'physical_r63':'PHYSICAL_GETREPORT3_RC6_NO_ACCEPTED_POLLS','physical_r63_telemetry':'R63_C6_N0_D0_B0_X0_Y0','physical_r64':'PENDING'",'physical r63 result + r64 pending')
 
-# r37's historical driver contains a direct exact-kernel SHA assertion. Later
-# cert layers adapt that assertion to each sealed candidate. r64 is another
-# deterministic layer, so adjust only the runner-local historical identity
-# witness while leaving every r37 structural requirement intact.
-r37p=here/'r37_cert_driver.py'; r37src=r37p.read_text()
-old37="03f446845e111e35b8cff6b216c5fee2d214dc0a4d6e25898f8a03b891c0c511"
-new37="db605f05538b796d7553ad45cf9de7881b8e111ee8eda30e034a29821b3fd316"
-if r37src.count(old37)==1:
-    r37p.write_text(r37src.replace(old37,new37,1))
-elif r37src.count(new37)!=1:
-    raise SystemExit('r64 inherited r37 identity adapter anchor missing')
-
 ns={'__name__':'__main__','__file__':str(base)}
 try:
     exec(compile(src,str(base),'exec'),ns,ns)
