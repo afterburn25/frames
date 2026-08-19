@@ -1,4 +1,4 @@
-name: Frames v108 r65 Persistent TT Periodic QH Certification
+name: Frames v108 r66 Intel 8000 Persistent TT QH Certification
 
 on:
   workflow_dispatch:
@@ -6,10 +6,8 @@ on:
     branches: [ v108-usb-hub-topology-r1 ]
     paths:
       - '.github/workflows/frames-v108-r64-getreport-qtd-forensics-cert.yml'
-      - 'tools/ci/r65_cert_driver.py'
-      - 'tools/ci/r65_final_cert_driver.py'
-      - 'tools/ci/patch_v108_r65_persistent_tt_periodic_qh.py'
-      - 'tools/ci/patch_v108_r65_display_compat.py'
+      - 'tools/ci/r66_cert_driver.py'
+      - 'tools/ci/patch_v108_r66_intel_8000_profile_unlock.py'
 
 permissions:
   contents: read
@@ -24,14 +22,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: v108-usb-hub-topology-r1
-      - name: Publish r65 pending status
+      - name: Publish r66 pending status
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TARGET="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           python3 - "$TARGET" <<'PY'
           import json,sys
-          open('/tmp/status-pending.json','w').write(json.dumps({'state':'pending','context':'frames/r65-certification','description':'r65 persistent TT periodic QH certification running','target_url':sys.argv[1]}))
+          open('/tmp/status-pending.json','w').write(json.dumps({'state':'pending','context':'frames/r66-certification','description':'r66 Intel 8087:8000 persistent TT QH certification running','target_url':sys.argv[1]}))
           PY
           curl -fsSL -X POST -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" --data-binary @/tmp/status-pending.json
       - name: Install build/image/runtime tools
@@ -51,29 +49,29 @@ jobs:
           run-id: '31979817129'
       - name: Harden inherited text readiness harness
         run: python3 tools/ci/harden_qemu_text_edit_gate_r28.py
-      - name: Build and certify r65
-        run: python3 tools/ci/r65_final_cert_driver.py
+      - name: Build and certify r66
+        run: python3 tools/ci/r66_cert_driver.py
       - name: Validate sealed Rufus physical handoff
         run: python3 tools/ci/validate_physical_handoff.py --final final
-      - name: Upload r65 evidence
+      - name: Upload r66 evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Frames-v108-r65-Evidence
+          name: Frames-v108-r66-Evidence
           path: |
             evidence/**
             out/*.iso
           if-no-files-found: warn
           retention-days: 30
-      - name: Upload r65 Rufus ISO
+      - name: Upload r66 Rufus ISO
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Frames-v108-r65-Rufus-Final
+          name: Frames-v108-r66-Rufus-Final
           path: final/**
           if-no-files-found: error
           retention-days: 30
-      - name: Publish r65 certification status
+      - name: Publish r66 certification status
         if: always()
         continue-on-error: true
         env:
@@ -81,13 +79,11 @@ jobs:
           JOB_STATUS: ${{ job.status }}
         run: |
           STATE=success
-          DESC='r65 persistent TT periodic QH certification PASS'
-          if [ "$JOB_STATUS" != "success" ]; then STATE=failure; DESC='r65 persistent TT periodic QH certification FAIL'; fi
+          DESC='r66 Intel 8087:8000 persistent TT QH certification PASS'
+          if [ "$JOB_STATUS" != "success" ]; then STATE=failure; DESC='r66 Intel 8087:8000 persistent TT QH certification FAIL'; fi
           TARGET="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           python3 - "$STATE" "$DESC" "$TARGET" <<'PY'
           import json,sys
-          open('/tmp/status.json','w').write(json.dumps({'state':sys.argv[1],'context':'frames/r65-certification','description':sys.argv[2],'target_url':sys.argv[3]}))
+          open('/tmp/status.json','w').write(json.dumps({'state':sys.argv[1],'context':'frames/r66-certification','description':sys.argv[2],'target_url':sys.argv[3]}))
           PY
           curl -fsSL -X POST -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" --data-binary @/tmp/status.json
-
-# r65 exact-TT-profile verifier rerun
