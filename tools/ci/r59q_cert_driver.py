@@ -38,10 +38,19 @@ one('r59p exact kernel identity mismatch','r59q exact kernel identity mismatch',
 # Start-Split-window count from the bounded trace. Adapt the inherited private
 # witness machinery without weakening historical r59n/r59o/r59p sources.
 alln("'volatile_write64(xhci_state+3984,volatile_read64(xhci_state+3984)+1)'","'volatile_write64(xhci_state+3984,tr_s)'",3,'r59p hit-counter witness to r59q trace witness')
-needle=",'volatile_write64(xhci_state+3984,tr_s)'):\n        if q not in tick"
-if src.count(needle)!=1:
-    raise SystemExit('r59q r59n2 tick compatibility removal anchor count '+str(src.count(needle)))
-src=src.replace(needle,"):\n        if q not in tick",1)
+
+# r59p embeds the replacement gate it writes into r59n2 as a triple-quoted
+# source string. Remove only the r59p tick-counter witness from that embedded
+# gate; r59q keeps every other inherited longitudinal state/error witness.
+ng_start=src.index('new_gate = """')
+ng_body=ng_start+len('new_gate = """')
+ng_end=src.index('"""',ng_body)
+ng=src[ng_body:ng_end]
+old_ng=",'volatile_write64(xhci_state+3984,tr_s)'"
+if ng.count(old_ng)!=1:
+    raise SystemExit('r59q embedded r59n2 tick gate witness count '+str(ng.count(old_ng)))
+ng=ng.replace(old_ng,'',1)
+src=src[:ng_body]+ng+src[ng_end:]
 
 one("'physical_r59p':'PENDING'",
     "'physical_r59p':'PHYSICAL_PERSISTENT_SPLIT_ACTIVE_NO_ERROR_NO_COMPLETION','physical_r59p_telemetry':'R5P_X1_A1_M0_T0_H0_R8_N0','physical_r59q':'PENDING'",
