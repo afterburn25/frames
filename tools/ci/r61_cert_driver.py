@@ -65,9 +65,20 @@ elif 'volatile_read64(xhci+3984)' in r57src and 'volatile_read64(xhci+4064)' in 
 else:
     raise SystemExit('r59/r61 r57/r52 row compatibility anchor missing')"""
 if r59src.count(old_block)==1:
-    r59p.write_text(r59src.replace(old_block,new_block,1))
+    r59src=r59src.replace(old_block,new_block,1)
 elif r59src.count(new_block)!=1:
     raise SystemExit('r61 r59 row-adapter compatibility anchor missing')
+
+# r59 also broadens r56's old visible E/N/C assertion to its own runtime row.
+# r61 replaces that row again with A/I/T/G/N/B/X, so include those four r61
+# telemetry reads as a third display-only alternative.
+old_nr="new_r56=\"    req((('volatile_read64(xhci+3928)' in s and 'volatile_read64(xhci+3936)' in s and 'volatile_read64(xhci+3944)' in s) or ('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+4072)' in s and 'volatile_read64(xhci+4080)' in s)),'r56 E/N/C physical overlay fields missing')\""
+new_nr="new_r56=\"    req((('volatile_read64(xhci+3928)' in s and 'volatile_read64(xhci+3936)' in s and 'volatile_read64(xhci+3944)' in s) or ('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+4072)' in s and 'volatile_read64(xhci+4080)' in s) or ('volatile_read64(xhci+3984)' in s and 'volatile_read64(xhci+3992)' in s and 'volatile_read64(xhci+4000)' in s and 'volatile_read64(xhci+4064)' in s)),'r56 E/N/C physical overlay fields missing')\""
+if r59src.count(old_nr)==1:
+    r59src=r59src.replace(old_nr,new_nr,1)
+elif r59src.count(new_nr)!=1:
+    raise SystemExit('r61 r59/r56 overlay compatibility anchor missing')
+r59p.write_text(r59src)
 
 ns={'__name__':'__main__','__file__':str(base)}
 try:
