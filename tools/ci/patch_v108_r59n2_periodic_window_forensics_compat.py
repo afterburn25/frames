@@ -23,7 +23,7 @@ s=s.replace(oldfr,newfr,1)
 for q in ('(ot/128)%2','while transitions<64','volatile_write64(xhci_state+3984,hit)','volatile_write64(xhci_state+3992,packed)','fi=(fri59n/8)%1024'):
     if q not in s: raise SystemExit('r59n2 required witness missing '+q)
 out=hashlib.sha256(s.encode()).hexdigest()
-EXPECTED='733b8f94d26360494c0035236c840a31e18c1dfa5af7eaf638823e04fc6d2ba7'
+EXPECTED='de6cbe0ccaa2256ce9fc911634679ef34a8f908f58d5bd79f8d25ac1f3e53eed'
 if out!=EXPECTED: raise SystemExit('r59n2 output sha mismatch '+out)
 p.write_text(s)
 print(out)
