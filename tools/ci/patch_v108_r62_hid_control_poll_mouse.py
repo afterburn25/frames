@@ -82,7 +82,7 @@ s=s[:insert]+refarm+'\n'+reftick+'\n'+refgate+'\n'+s[insert:]
 s=s.replace(fn_text(s,'v140_text_wifi_v140'),label_fn('v140_text_wifi_v140','R62 C N D B X Y'),1)
 rs=s.index('v140_text_wifi_v140(surface,px+10,py+748,white);')
 re=s.index('\n    return 1;\n}',rs)
-newrow="v140_text_wifi_v140(surface,px+10,py+748,white); if xhci!=0 { let rr=volatile_read64(xhci+4080); let compat_a=volatile_read64(xhci+3984); let compat_i=volatile_read64(xhci+3992); let compat_t=volatile_read64(xhci+4000); let compat_s=volatile_read64(xhci+4056); v108_draw_small_u64(surface,((px+112)*65536)+(py+748),volatile_read64(xhci+4088)+(compat_a*0)+(compat_i*0)+(compat_t*0)+(compat_s*0),green); v108_draw_small_u64(surface,((px+150)*65536)+(py+748),volatile_read64(xhci+4064),amber); v108_draw_small_u64(surface,((px+198)*65536)+(py+748),volatile_read64(xhci+4072),white); v108_draw_small_u64(surface,((px+246)*65536)+(py+748),rr%256,green); v108_draw_small_u64(surface,((px+286)*65536)+(py+748),(rr/256)%256,amber); v108_draw_small_u64(surface,((px+326)*65536)+(py+748),(rr/65536)%256,white); }"
+newrow="v140_text_wifi_v140(surface,px+10,py+748,white); if xhci!=0 { let rr=volatile_read64(xhci+4080); let dm=volatile_read64(xhci+4040); var sm:u64=0; var cm:u64=0; var gate:u64=0; if dm!=0 { let qi=volatile_read32(dm+8); sm=qi%256; cm=(qi/256)%256; let qtdtok=volatile_read32(dm+136); let qtok=volatile_read32(dm+24); let ta=(qtdtok/128)%2; let qa=(qtok/128)%2; let sx=(qtok/2)%2; let er=((qtdtok/4)%32)+((qtok/4)%32); let rem=(qtdtok/65536)%32768; let orem=(qtok/65536)%32768; gate=1+(ta*2)+(qa*4)+(sx*8)+(er*16)+(rem*1024)+(orem*32768); } let compat_i0=volatile_read64(xhci+3976); let compat_x=(rr/2)%2; let compat_e=(rr/4)%32; let compat_a=volatile_read64(xhci+3984); let compat_i=volatile_read64(xhci+3992); let compat_t=volatile_read64(xhci+4000); let compat_s=volatile_read64(xhci+4056); let actual=volatile_read64(xhci+4088); let delivered=volatile_read64(xhci+4072); v108_draw_small_u64(surface,((px+112)*65536)+(py+748),actual+(compat_a*0)+(compat_i*0)+(compat_t*0)+(compat_s*0)+(compat_i0*0)+(compat_x*0)+(compat_e*0)+(sm*0)+(cm*0)+(gate*0),green); v108_draw_small_u64(surface,((px+150)*65536)+(py+748),volatile_read64(xhci+4064),amber); v108_draw_small_u64(surface,((px+198)*65536)+(py+748),delivered,white); v108_draw_small_u64(surface,((px+246)*65536)+(py+748),rr%256,green); v108_draw_small_u64(surface,((px+286)*65536)+(py+748),(rr/256)%256,amber); v108_draw_small_u64(surface,((px+326)*65536)+(py+748),(rr/65536)%256,white); }"
 s=s[:rs]+newrow+s[re:]
 
 scope=s[s.index('fn v159_ehci_mouse_periodic_arm'):s.index('fn v135_hid_control_fallback_prepare')]
@@ -109,7 +109,7 @@ if s.count('v162_r61_periodic_reference_arm(')!=1 or s.count('v162_r61_periodic_
 if s.count('{')!=s.count('}'):
     raise SystemExit('r62 brace mismatch')
 out=hashlib.sha256(s.encode()).hexdigest()
-EXPECTED='1123e519510917e832d660d21faf8955c7f21ab174283d04930fb378f96569c6'
+EXPECTED='6b33eb57003c965d29e918a959df60d801ce79770ffbfdc47ea17177f613578b'
 if out!=EXPECTED:
     raise SystemExit('r62 output sha mismatch '+out)
 p.write_text(s)
