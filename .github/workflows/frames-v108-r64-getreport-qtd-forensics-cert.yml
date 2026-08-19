@@ -7,7 +7,9 @@ on:
     paths:
       - '.github/workflows/frames-v108-r64-getreport-qtd-forensics-cert.yml'
       - 'tools/ci/r65_cert_driver.py'
+      - 'tools/ci/r65_final_cert_driver.py'
       - 'tools/ci/patch_v108_r65_persistent_tt_periodic_qh.py'
+      - 'tools/ci/patch_v108_r65_display_compat.py'
 
 permissions:
   contents: read
@@ -50,7 +52,7 @@ jobs:
       - name: Harden inherited text readiness harness
         run: python3 tools/ci/harden_qemu_text_edit_gate_r28.py
       - name: Build and certify r65
-        run: python3 tools/ci/r65_cert_driver.py
+        run: python3 tools/ci/r65_final_cert_driver.py
       - name: Validate sealed Rufus physical handoff
         run: python3 tools/ci/validate_physical_handoff.py --final final
       - name: Upload r65 evidence
