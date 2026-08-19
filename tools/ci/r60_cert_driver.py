@@ -60,6 +60,10 @@ old="    req('volatile_read8(dma+576)!=1' in r59ffn,'r59f report-protocol verifi
 new="    req(('volatile_read8(dma+576)!=1' in r59ffn) or ('volatile_read8(dma+576)!=0' in r59ffn),'r59f/r60 GET_PROTOCOL verification gate missing')"
 if t.count(old)==1: t=t.replace(old,new,1)
 elif t.count(new)!=1: raise SystemExit('r60 inherited GET_PROTOCOL gate anchor missing')
+old="    req('volatile_read32(op+12)%16384' in r59ffn and 'volatile_read32(op+4)/16384' in r59ffn,'r59f inherited EHCI periodic forensics missing')"
+new="    req((('volatile_read32(op+12)%16384' in r59ffn and 'volatile_read32(op+4)/16384' in r59ffn) or ('volatile_read32(qh+24)' in r59ffn and 'volatile_read32(op+4)/16384' in r59ffn)),'r59f/r60 inherited EHCI execution observation missing')"
+if t.count(old)==1: t=t.replace(old,new,1)
+elif t.count(new)!=1: raise SystemExit('r60 inherited r59f execution gate anchor missing')
 p.write_text(t)
 
 p=here/'r59_cert_driver.py'; t=p.read_text()
@@ -71,6 +75,15 @@ old="    req('r59_redraw=v159_ehci_mouse_periodic_tick(xhci)' in s and 'var tele
 new="    req((('r59_redraw=v159_ehci_mouse_periodic_tick(xhci)' in s) or ('r59_redraw=v159_ehci_mouse_periodic_tick(xhci,input_state)' in s)) and 'var telemetry_redraw:u64=r59_redraw' in s,'r59/r60 live desktop polling/redraw hook missing')"
 if t.count(old)==1: t=t.replace(old,new,1)
 elif t.count(new)!=1: raise SystemExit('r60 inherited live polling gate anchor missing')
+p.write_text(t)
+
+# r59g separately pinned the no-IOC diagnostic qTD token. r60 intentionally
+# uses IOC on the final qTD while still polling with USBINTR disabled.
+p=here/'r59g_cert_driver.py'; t=p.read_text()
+old="    req('let token=527744' in r59gfn,'r59g inherited EHCI IN qTD token unexpectedly changed')"
+new="    req(('let token=527744' in r59gfn) or ('let token=560512' in r59gfn),'r59g/r60 EHCI IN qTD token missing')"
+if t.count(old)==1: t=t.replace(old,new,1)
+elif t.count(new)!=1: raise SystemExit('r60 inherited r59g qTD token gate anchor missing')
 p.write_text(t)
 
 # r59e's forensic contract was written for the earlier diagnostic-only layout.
