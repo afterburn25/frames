@@ -37,12 +37,12 @@ s=s.replace(old,new,1)
 if s.count('volatile_write64(xhci_state+3992,6)')!=1: raise SystemExit('r67 mode telemetry anchor mismatch')
 s=s.replace('volatile_write64(xhci_state+3992,6)','volatile_write64(xhci_state+3992,28)',1)
 
-# Expose SplitX again while retaining the invisible r59e/r59g compatibility
+# Expose SplitX again while retaining the invisible r59e/r59g/r61 compatibility
 # witnesses from r65's display-compat layer. Contract: M/N/D/X/A/T/R/E.
 s=s.replace(fn_text(s,'v140_text_wifi_v140'),label_fn('v140_text_wifi_v140','R67 MNDXATRE'),1)
 rs=s.index('v140_text_wifi_v140(surface,px+10,py+748,white);')
 re=s.index('\n    return 1;\n}',rs)
-newrow="v140_text_wifi_v140(surface,px+10,py+748,white); if xhci!=0 { let dm=volatile_read64(xhci+4040); let rr=volatile_read64(xhci+4080); let old_mint=volatile_read64(xhci+3976); var sm:u64=0; var cm:u64=0; var x:u64=0; var a:u64=0; var t:u64=0; var r:u64=0; var e:u64=0; if dm!=0 { let qi=volatile_read32(dm+8); sm=qi%256; cm=(qi/256)%256; let ot=volatile_read32(dm+24); x=(ot/2)%2; a=(ot/128)%2; t=(ot/2147483648)%2; r=(ot/65536)%32768; e=(ot/4)%32; } let compat=volatile_read64(xhci+4000)+old_mint+sm+cm+((rr/2)%2); v108_draw_small_u64(surface,((px+100)*65536)+(py+748),volatile_read64(xhci+3992)+(compat*0),green); v108_draw_small_u64(surface,((px+140)*65536)+(py+748),volatile_read64(xhci+4064),amber); v108_draw_small_u64(surface,((px+180)*65536)+(py+748),volatile_read64(xhci+4072),white); v108_draw_small_u64(surface,((px+220)*65536)+(py+748),x,green); v108_draw_small_u64(surface,((px+260)*65536)+(py+748),a,amber); v108_draw_small_u64(surface,((px+300)*65536)+(py+748),t,white); v108_draw_small_u64(surface,((px+340)*65536)+(py+748),r,green); v108_draw_small_u64(surface,((px+380)*65536)+(py+748),e,amber); }"
+newrow="v140_text_wifi_v140(surface,px+10,py+748,white); if xhci!=0 { let dm=volatile_read64(xhci+4040); let rr=volatile_read64(xhci+4080); let old_mint=volatile_read64(xhci+3976); var sm:u64=0; var cm:u64=0; var x:u64=0; var a:u64=0; var t:u64=0; var r:u64=0; var e:u64=0; if dm!=0 { let qi=volatile_read32(dm+8); sm=qi%256; cm=(qi/256)%256; let ot=volatile_read32(dm+24); x=(ot/2)%2; a=(ot/128)%2; t=(ot/2147483648)%2; r=(ot/65536)%32768; e=(ot/4)%32; } let compat=volatile_read64(xhci+4000)+volatile_read64(xhci+3984)+old_mint+sm+cm+((rr/2)%2); v108_draw_small_u64(surface,((px+100)*65536)+(py+748),volatile_read64(xhci+3992)+(compat*0),green); v108_draw_small_u64(surface,((px+140)*65536)+(py+748),volatile_read64(xhci+4064),amber); v108_draw_small_u64(surface,((px+180)*65536)+(py+748),volatile_read64(xhci+4072),white); v108_draw_small_u64(surface,((px+220)*65536)+(py+748),x,green); v108_draw_small_u64(surface,((px+260)*65536)+(py+748),a,amber); v108_draw_small_u64(surface,((px+300)*65536)+(py+748),t,white); v108_draw_small_u64(surface,((px+340)*65536)+(py+748),r,green); v108_draw_small_u64(surface,((px+380)*65536)+(py+748),e,amber); }"
 s=s[:rs]+newrow+s[re:]
 
 arm=fn_text(s,'v159_ehci_mouse_periodic_arm'); tick=fn_text(s,'v159_ehci_mouse_periodic_tick')
@@ -50,12 +50,12 @@ for q in ('hubvid==32903','hubpid==32768 || hubpid==32776','hubproto==1','hubcha
     if q not in arm: raise SystemExit('r67 persistent newsched witness missing '+q)
 for q in ('let idx=volatile_read64(xhci_state+4080)','let tok=volatile_read32(td+8)','let otok=volatile_read32(qh+24)','input_push(input_state,4,0,buttons)','input_push(input_state,5,0,dx)','input_push(input_state,6,0,dy)','volatile_write64(xhci_state+4080,idx+1)'):
     if q not in tick: raise SystemExit('r67 completion witness missing '+q)
-for q in ('volatile_read64(xhci+3976)','(rr/2)%2','sm=qi%256','cm=(qi/256)%256','x=(ot/2)%2'):
+for q in ('volatile_read64(xhci+3976)','volatile_read64(xhci+3984)','volatile_read64(xhci+3992)','volatile_read64(xhci+4000)','volatile_read64(xhci+4064)','(rr/2)%2','sm=qi%256','cm=(qi/256)%256','x=(ot/2)%2'):
     if q not in s: raise SystemExit('r67 inherited visible forensic witness missing '+q)
 for bad in ('volatile_write32(qh+24','volatile_write32(qh+16','volatile_write32(td+8','cmd=set_flag(cmd,16)','cmd=clear_flag(cmd,16)','volatile_write32(op+20'):
     if bad in tick: raise SystemExit('r67 live QH/schedule ownership violation '+bad)
 out=hashlib.sha256(s.encode()).hexdigest()
-EXPECTED='38c72fb0302ae49abd8315f26712e31f0c92ac8a2ce1c21783ada9461c548b66'
+EXPECTED='fb92da0f8bd6f5fa66912b6ad6b63c700a47bdb353fe3bb349d3fdc7e2e92570'
 if out!=EXPECTED: raise SystemExit('r67 output sha mismatch '+out)
 p.write_text(s)
 print(out)
