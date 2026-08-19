@@ -30,6 +30,20 @@ old_phys="'physical_r59h':'PENDING','physical_r60':'NOT_PHYSICALLY_TESTED_SUPERS
 new_phys="'physical_r59h':'PENDING','physical_r60':'NOT_PHYSICALLY_TESTED_SUPERSEDED_BY_R61','physical_r59t2':'PHYSICAL_ASYNC_SPLIT_ACTIVE_NO_PROGRESS','physical_r59t2_telemetry':'R5T_G270351_N0_B0_0_B1_0_B2_0_B3_0','physical_r61':'PHYSICAL_ALT0_RESET_TT_OK_PERIODIC_ACTIVE_NO_PROGRESS','physical_r61_telemetry':'R61_A0_I0_T1_G270343_N0_B0_X0','physical_r62':'PENDING'"
 repl(old_phys,new_phys,'physical evidence handoff')
 
+# r59h intentionally removed r59g's failed GET_REPORT experiment and its
+# inherited certification therefore bans that exact request.  r62 is a new,
+# deliberately isolated use of the same HID request: both EHCI schedules are
+# quiesced and the already-proven endpoint-0 split-control transport performs
+# the poll.  Widen only that historical r59h assertion, and require the full
+# r62 isolation/delivery shape before GET_REPORT is accepted again.
+r59hp=here/'r59h_cert_driver.py'; r59hsrc=r59hp.read_text()
+old_gate="\"    req('161+(1*256)+(256*65536)+(mif*4294967296)+(8*281474976710656)' not in r59gfn,'r59h failed GET_REPORT control probe remains')\""
+new_gate="\"    req(('161+(1*256)+(256*65536)+(mif*4294967296)+(8*281474976710656)' not in r59gfn) or ('let getreport=161+(1*256)+(256*65536)+(mif*4294967296)+(8*281474976710656)' in s[s.index('fn v159_ehci_mouse_periodic_tick'):s.index('fn v162_r61_periodic_reference_arm')] and 'v157_ehci_tt_control(xhci_state,2,getreport,8)' in s[s.index('fn v159_ehci_mouse_periodic_tick'):s.index('fn v162_r61_periodic_reference_arm')] and 'input_push(input_state,4,0,buttons)' in s[s.index('fn v159_ehci_mouse_periodic_tick'):s.index('fn v162_r61_periodic_reference_arm')] and 'cmd=clear_flag(cmd,32); cmd=clear_flag(cmd,16)' in s[s.index('fn v159_ehci_mouse_periodic_arm'):s.index('fn v159_ehci_mouse_periodic_tick')] and 'cmd=set_flag(cmd,16)' not in s[s.index('fn v159_ehci_mouse_periodic_arm'):s.index('fn v162_r61_periodic_reference_arm')]),'r59h/r62 GET_REPORT transport isolation policy violated')\""
+if r59hsrc.count(old_gate)==1:
+    r59hp.write_text(r59hsrc.replace(old_gate,new_gate,1))
+elif r59hsrc.count(new_gate)!=1:
+    raise SystemExit('r62 r59h GET_REPORT policy adapter anchor missing')
+
 ns={'__name__':'__main__','__file__':str(base)}
 try:
     exec(compile(src,str(base),'exec'),ns,ns)
