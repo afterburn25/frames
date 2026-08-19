@@ -15,7 +15,7 @@ def repl(old,new,label,min_count=1):
 
 repl("'patch_v108_r63_boot3_control_poll_mouse.py'","'patch_v108_r64_getreport_qtd_forensics.py'",'patch target')
 repl('kernel-r63.nx','kernel-r64.nx','kernel evidence target',2)
-repl('8f5b1dbad31aaaf68db45ea53bf73df45ae1ae05d83dc96979d1665485721cfd','35a2721b69a6ed12bdfe319ca47db8bc51cfc3cf75030be333411dbd6b8d3919','exact r64 identity target',2)
+repl('8f5b1dbad31aaaf68db45ea53bf73df45ae1ae05d83dc96979d1665485721cfd','db605f05538b796d7553ad45cf9de7881b8e111ee8eda30e034a29821b3fd316','exact r64 identity target',2)
 repl("'Frames-0.9.98-v108-r63-Boot3-Control-Poll-Mouse-Recovery-Rufus-UEFI.iso'","'Frames-0.9.98-v108-r64-GETREPORT-qTD-Forensics-Rufus-UEFI.iso'",'ISO target')
 repl("'R63-SHA.txt'","'R64-SHA.txt'",'SHA evidence target')
 repl("'R25K-R63.patch'","'R25K-R64.patch'",'patch evidence target')
@@ -34,14 +34,10 @@ try:
     k=Path('evidence/kernel-r64.nx')
     if not k.exists(): raise SystemExit('r64 evidence kernel missing')
     s=k.read_text()
-    if hashlib.sha256(s.encode()).hexdigest()!='35a2721b69a6ed12bdfe319ca47db8bc51cfc3cf75030be333411dbd6b8d3919':
+    if hashlib.sha256(s.encode()).hexdigest()!='db605f05538b796d7553ad45cf9de7881b8e111ee8eda30e034a29821b3fd316':
         raise SystemExit('r64 evidence kernel SHA mismatch')
-    hst=s.index('fn v157_ehci_tt_control')
-    hend=s.index('fn v157_ehci_child_hid_probe')
-    helper=s[hst:hend]
-    ast=s.index('fn v159_ehci_mouse_periodic_arm')
-    tst=s.index('fn v159_ehci_mouse_periodic_tick')
-    rst=s.index('fn v162_r61_periodic_reference_arm')
+    hst=s.index('fn v157_ehci_tt_control'); hend=s.index('fn v157_ehci_child_hid_probe'); helper=s[hst:hend]
+    ast=s.index('fn v159_ehci_mouse_periodic_arm'); tst=s.index('fn v159_ehci_mouse_periodic_tick'); rst=s.index('fn v162_r61_periodic_reference_arm')
     arm=s[ast:tst]; tick=s[tst:rst]
     for q in (
         'let getreport=161+(1*256)+(256*65536)+(mif*4294967296)+(3*281474976710656)',
@@ -49,7 +45,7 @@ try:
     ):
         if q not in tick: raise SystemExit('r64 lost live three-byte GET_REPORT witness '+q)
     for q in (
-        'let is_getreport=(setupv%256)==161 && ((setupv/256)%256)==1',
+        'var is_getreport:u64=0',
         'let dactive=(dtok/128)%2',
         'let dhalt=(dtok/64)%2',
         'let derr=(dtok/4)%16',
