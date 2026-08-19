@@ -4,6 +4,7 @@ import traceback
 here=Path(__file__).parent
 base=here/'r65_cert_driver.py'
 src=base.read_text()
+# Hash-capture rerun after retaining the inherited r59h qTD-error expression.
 old_patch="'patch_v108_r65_persistent_tt_periodic_qh.py'"
 new_patch="'patch_v108_r65_display_compat.py'"
 if src.count(old_patch)!=1: raise SystemExit('r65 final patch-target anchor mismatch '+str(src.count(old_patch)))
