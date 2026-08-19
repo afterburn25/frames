@@ -24,6 +24,25 @@ if r59h.count(old)==1:
 elif r59h.count(new)!=1:
     raise SystemExit('r65 r59h error telemetry compatibility anchor missing')
 
+# r61's final verifier expected the generic single/multi-TT branch because r61
+# did not yet know the exact physical hub. r65 deliberately requires the
+# observed 8087:8008 protocol-1/single-TT profile and port 2 instead. It also
+# replaces r61's packed G display with direct live QH-overlay A/T/R/E fields.
+r61p=here/'r61_cert_driver.py'; r61=r61p.read_text()
+old_tt="'if hubproto==2 { ttidx=port; }'"
+new_tt="'hubvid==32903','hubpid==32776','hubproto==1','hubchars==9','port==2','thinkbits==8'"
+if r61.count(old_tt)==1:
+    r61=r61.replace(old_tt,new_tt,1)
+elif r61.count(new_tt)!=1:
+    raise SystemExit('r65 r61 exact-TT-profile compatibility anchor missing')
+old_gate="'gate=1+(ta*2)+(qa*4)+(sx*8)+(er*16)+(rem*1024)+(orem*32768)'"
+new_gate="'a=(ot/128)%2'"
+if r61.count(old_gate)==1:
+    r61=r61.replace(old_gate,new_gate,1)
+elif r61.count(new_gate)!=1:
+    raise SystemExit('r65 r61 QH-overlay telemetry compatibility anchor missing')
+r61p.write_text(r61)
+
 ns={'__name__':'__main__','__file__':str(base)}
 try:
     exec(compile(src,str(base),'exec'),ns,ns)
