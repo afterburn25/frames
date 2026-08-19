@@ -35,6 +35,20 @@ alln("'R60-FAILURE.txt'","'R61-FAILURE.txt'",2,'failure target')
 one('r60 exact kernel identity mismatch','r61 exact kernel identity mismatch','identity label')
 one("'physical_r59h':'PENDING','physical_r60':'PENDING'","'physical_r59h':'PENDING','physical_r60':'NOT_PHYSICALLY_TESTED_SUPERSEDED_BY_R61','physical_r59t2':'PHYSICAL_ASYNC_SPLIT_ACTIVE_NO_PROGRESS','physical_r59t2_telemetry':'R5T_G270351_N0_B0_0_B1_0_B2_0_B3_0','physical_r61':'PENDING'",'physical evidence handoff')
 
+# r57 owns the idempotent compatibility rewrite for the old r52/r54/r56
+# bottom-row assertion. r61 replaces only the visible row while retaining the
+# original bounded Intel route mutation and its before/after telemetry writes.
+# Teach that private inherited verifier to recognize the r61 A/I/T/G/N row;
+# the route-before/after proof remains mandatory.
+r57p=here/'r57_cert_driver.py'
+r57src=r57p.read_text()
+old_tail="or ('volatile_read64(xhci+3920)' in s and 'volatile_read64(xhci+3928)' in s and 'volatile_read64(xhci+3936)' in s and 'volatile_read64(xhci+3944)' in s and 'volatile_read64(xhci+3952)' in s and 'volatile_read64(xhci+3960)' in s and 'volatile_read64(xhci+3968)' in s)) and 'volatile_write64(xhci_state+3752,before_bit)' in s and 'volatile_write64(xhci_state+3760,after_bit)' in s),'r52/r54/r56 physical EHCI row/route proof missing')"
+new_tail="or ('volatile_read64(xhci+3920)' in s and 'volatile_read64(xhci+3928)' in s and 'volatile_read64(xhci+3936)' in s and 'volatile_read64(xhci+3944)' in s and 'volatile_read64(xhci+3952)' in s and 'volatile_read64(xhci+3960)' in s and 'volatile_read64(xhci+3968)' in s) or ('volatile_read64(xhci+3984)' in s and 'volatile_read64(xhci+3992)' in s and 'volatile_read64(xhci+4000)' in s and 'volatile_read64(xhci+4064)' in s)) and 'volatile_write64(xhci_state+3752,before_bit)' in s and 'volatile_write64(xhci_state+3760,after_bit)' in s),'r52/r54/r56/r61 physical EHCI row/route proof missing')"
+if r57src.count(old_tail)==1:
+    r57p.write_text(r57src.replace(old_tail,new_tail,1))
+elif r57src.count(new_tail)!=1:
+    raise SystemExit('r61 r57/r52 route-row compatibility anchor missing')
+
 ns={'__name__':'__main__','__file__':str(base)}
 try:
     exec(compile(src,str(base),'exec'),ns,ns)
