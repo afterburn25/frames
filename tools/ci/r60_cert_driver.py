@@ -63,6 +63,10 @@ old="    req('token=527744' in r59fn and 'volatile_write32(qtd+8,527744)' in r59
 new="    req((('token=527744' in r59fn and 'volatile_write32(qtd+8,527744)' in r59fn) or ('token=560512' in r59fn and 'volatile_write32(qtd+8,560512)' in r59fn)),'r59/r60 8-byte interrupt-IN qTD arm/rearm missing')"
 if t.count(old)==1: t=t.replace(old,new,1)
 elif t.count(new)!=1: raise SystemExit('r60 inherited qTD token gate anchor missing')
+old="    req('r59_redraw=v159_ehci_mouse_periodic_tick(xhci)' in s and 'var telemetry_redraw:u64=r59_redraw' in s,'r59 live desktop polling/redraw hook missing')"
+new="    req((('r59_redraw=v159_ehci_mouse_periodic_tick(xhci)' in s) or ('r59_redraw=v159_ehci_mouse_periodic_tick(xhci,input_state)' in s)) and 'var telemetry_redraw:u64=r59_redraw' in s,'r59/r60 live desktop polling/redraw hook missing')"
+if t.count(old)==1: t=t.replace(old,new,1)
+elif t.count(new)!=1: raise SystemExit('r60 inherited live polling gate anchor missing')
 p.write_text(t)
 
 ns={'__name__':'__main__','__file__':str(base)}
