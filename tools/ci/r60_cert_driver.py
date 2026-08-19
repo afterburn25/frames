@@ -19,7 +19,7 @@ def alln(old,new,count,label):
 
 one("'patch_v108_r59h_linux_split_schedule_repair.py'","'patch_v108_r60_reference_ehci_boot_mouse.py'",'patch target')
 one('kernel-r59h.nx','kernel-r60.nx','kernel evidence target')
-one('ee129f22dca19ba7d1d7a1cc41a7b90bfcba0dc472ad7493c38ca2a1537c094e','dc1d8d0590965f6d499eba0fe2d010287d6052d2c7ceab73dff41120fadcc04d','exact r60 identity target')
+one('ee129f22dca19ba7d1a1cc41a7b90bfcba0dc472ad7493c38ca2a1537c094e','dc1d8d0590965f6d499eba0fe2d010287d6052d2c7ceab73dff41120fadcc04d','exact r60 identity target')
 one("'Frames-0.9.98-v108-r59h-Linux-Split-Schedule-Repair-Rufus-UEFI.iso'","'Frames-0.9.98-v108-r60-Reference-EHCI-Boot-Mouse-Rufus-UEFI.iso'",'ISO target')
 one("'R59H-SHA.txt'","'R60-SHA.txt'",'SHA evidence target')
 one("'R25K-R59H.patch'","'R25K-R60.patch'",'patch evidence target')
@@ -36,8 +36,12 @@ oldgeom="    req('let info2=1090586113' in r59gfn and 'let info2=1090591745' not
 newgeom="    req('let info2=1090591745' in r59gfn and 'let info2=1090586113' not in r59gfn,'r60 default TT new-scheduler C-mask 0x1c missing')"
 one(oldgeom,newgeom,'default Linux split geometry')
 
+# r59b through r59g were intentionally raw-diagnostic builds and therefore
+# banned input_push() inside the EHCI slice. r60 is the first bounded input
+# integration build, so relax only that inherited ban while retaining every
+# storage-write prohibition and adding explicit r60 pointer-delivery gates.
 relaxed=0
-for name in ('r59_cert_driver.py','r59e_cert_driver.py','r59f_cert_driver.py','r59g_cert_driver.py'):
+for name in ('r59b_cert_driver.py','r59c_cert_driver.py','r59d_cert_driver.py','r59_cert_driver.py','r59e_cert_driver.py','r59f_cert_driver.py','r59g_cert_driver.py'):
     p=here/name
     t=p.read_text()
     n=t.count(",'input_push('")
@@ -45,7 +49,7 @@ for name in ('r59_cert_driver.py','r59e_cert_driver.py','r59f_cert_driver.py','r
         t=t.replace(",'input_push('","")
         p.write_text(t)
         relaxed+=n
-if relaxed<4: raise SystemExit(f'r60 inherited diagnostic input-delivery gates relaxed {relaxed}, expected >=4')
+if relaxed<7: raise SystemExit(f'r60 inherited diagnostic input-delivery gates relaxed {relaxed}, expected >=7')
 
 p=here/'r59f_cert_driver.py'; t=p.read_text()
 old="    req('33+(11*256)+65536+(mif*4294967296)' in r59ffn,'r59f HID report-protocol SET_PROTOCOL missing')"
