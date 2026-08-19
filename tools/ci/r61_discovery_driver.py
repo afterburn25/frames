@@ -13,7 +13,7 @@ try:
         raise SystemExit('r61 discovery r59s source identity mismatch')
     target=out/'kernel-r61-discovery.nx'
     shutil.copy2(base,target)
-    subprocess.run([sys.executable,str(here/'r61_transform.py'),str(target)],check=True)
+    subprocess.run([sys.executable,str(here/'r61_compat_transform.py'),str(target)],check=True)
     sha=hashlib.sha256(target.read_bytes()).hexdigest()
     (out/'R61-DISCOVERED-SHA.txt').write_text(sha+'  kernel-r61-discovery.nx\n')
     print('R61_DISCOVERED_SHA='+sha)
