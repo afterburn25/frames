@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# r59t2 is behavior-identical to r59t; this layer restores inherited display-only certification witnesses.
 from pathlib import Path
 import hashlib, subprocess, sys
 if len(sys.argv)!=2: raise SystemExit('usage: patch_v108_r59t2_display_compat.py <kernel/main.nx>')
