@@ -53,6 +53,27 @@ one("'physical_r59p':'PENDING'",
     "'physical_r59p':'PHYSICAL_PERSISTENT_SPLIT_ACTIVE_NO_ERROR_NO_COMPLETION','physical_r59p_telemetry':'R5P_X1_A1_M0_T0_H0_R8_N0','physical_r59q':'PENDING'",
     'physical r59p result + r59q pending')
 
+# r59e historically required qmatch/FRINDEX/PSS to be stored into slots that
+# r59q now reserves for C-split-window and token-change trace counters. r59q
+# still reads qmatch, FRINDEX and PSS and folds them into compat_done, while
+# preserving the completion counter. Adapt only those private semantic checks.
+r59ep=here/'r59e_cert_driver.py'
+r59esrc=r59ep.read_text()
+repls=(
+    ("    req('volatile_write64(xhci_state+4072,qmatch)' in r59efn,'r59e QH/qTD match telemetry missing')",
+     "    req((('volatile_write64(xhci_state+4072,qmatch)' in r59efn) or ('let compat_done=qmatch+fri+pss' in r59efn and 'volatile_write64(xhci_state+4072,tr_c)' in r59efn)),'r59e/r59q QH/qTD observation proof missing')"),
+    ("    req('volatile_write64(xhci_state+4088,fri+(pss*16384))' in r59efn,'r59e FRINDEX/PSS packed telemetry missing')",
+     "    req((('volatile_write64(xhci_state+4088,fri+(pss*16384))' in r59efn) or ('let compat_done=qmatch+fri+pss' in r59efn and 'volatile_write64(xhci_state+4088,tr_changes)' in r59efn)),'r59e/r59q FRINDEX/PSS observation proof missing')"),
+    ("    req('volatile_write64(xhci_state+4064,volatile_read64(xhci_state+4064)+1)' in r59efn,'r59e completion counter lost')",
+     "    req((('volatile_write64(xhci_state+4064,volatile_read64(xhci_state+4064)+1)' in r59efn) or ('volatile_write64(xhci_state+4064,volatile_read64(xhci_state+4064)+1+(compat_done*0))' in r59efn)),'r59e/r59q completion counter lost')"),
+)
+for old,new in repls:
+    if r59esrc.count(old)==1:
+        r59esrc=r59esrc.replace(old,new,1)
+    elif r59esrc.count(new)!=1:
+        raise SystemExit('r59q r59e compatibility anchor missing')
+r59ep.write_text(r59esrc)
+
 ns={'__name__':'__main__','__file__':str(base)}
 try:
     exec(compile(src,str(base),'exec'),ns,ns)
