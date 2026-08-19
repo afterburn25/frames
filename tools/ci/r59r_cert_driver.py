@@ -38,8 +38,6 @@ one("'physical_r59q':'PENDING'","'physical_r59q':'PHYSICAL_QH_OVERLAY_COMPLETED_
 # r59's original structural gate assumes the qTD memory token is the
 # authoritative completion status. r59q physical evidence proves this target
 # controller advances the QH overlay while the original qTD token stays stale.
-# Broaden only that private certification predicate; retain Active, error, and
-# remaining-byte status requirements for either valid status source.
 r59p=here/'r59_cert_driver.py'
 r59src=r59p.read_text()
 old_poll="    req('(tok/128)%2' in r59fn and 'let errs=(tok/4)%32' in r59fn,'r59 qTD completion/error polling missing')"
@@ -67,6 +65,17 @@ if r59esrc.count(old_tok)==1:
 elif r59esrc.count(new_tok)!=1:
     raise SystemExit('r59r r59e token-telemetry compatibility anchor missing')
 r59ep.write_text(r59esrc)
+
+# r59f repeats the same inline QH.current proof after changing HID protocol.
+# Preserve that proof through r59r's named qtdlo form.
+r59fp=here/'r59f_cert_driver.py'
+r59fsrc=r59fp.read_text()
+old_fcur="    req('volatile_read32(qh+12)' in r59ffn and 'cur==(qtd%4294967296)' in r59ffn,'r59f inherited QH current-qTD proof missing')"
+new_fcur="    req(('volatile_read32(qh+12)' in r59ffn and (('cur==(qtd%4294967296)' in r59ffn) or ('let qtdlo=qtd%4294967296' in r59ffn and 'cur==qtdlo' in r59ffn))),'r59f/r59r inherited QH current-qTD proof missing')"
+if r59fsrc.count(old_fcur)==1:
+    r59fp.write_text(r59fsrc.replace(old_fcur,new_fcur,1))
+elif r59fsrc.count(new_fcur)!=1:
+    raise SystemExit('r59r r59f current-qTD compatibility anchor missing')
 
 ns={'__name__':'__main__','__file__':str(base)}
 try:
