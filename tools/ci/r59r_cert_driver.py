@@ -51,15 +51,22 @@ elif r59src.count(new_poll)!=1:
 
 # r59e's original proof spells the qTD physical address inline. r59r assigns
 # that exact address to qtdlo first, then compares QH.current against qtdlo.
-# Accept either spelling while preserving the required QH current-qTD read.
+# It also records the live QH overlay token in the legacy token telemetry slot.
 r59ep=here/'r59e_cert_driver.py'
 r59esrc=r59ep.read_text()
 old_cur="    req('volatile_read32(qh+12)' in r59efn and 'cur==(qtd%4294967296)' in r59efn,'r59e QH current-qTD fetch proof missing')"
 new_cur="    req(('volatile_read32(qh+12)' in r59efn and (('cur==(qtd%4294967296)' in r59efn) or ('let qtdlo=qtd%4294967296' in r59efn and 'cur==qtdlo' in r59efn))),'r59e/r59r QH current-qTD fetch proof missing')"
 if r59esrc.count(old_cur)==1:
-    r59ep.write_text(r59esrc.replace(old_cur,new_cur,1))
+    r59esrc=r59esrc.replace(old_cur,new_cur,1)
 elif r59esrc.count(new_cur)!=1:
     raise SystemExit('r59r r59e current-qTD compatibility anchor missing')
+old_tok="    req('volatile_write64(xhci_state+4080,tok)' in r59efn,'r59e qTD token telemetry missing')"
+new_tok="    req((('volatile_write64(xhci_state+4080,tok)' in r59efn) or ('volatile_write64(xhci_state+4080,live_tok)' in r59efn)),'r59e/r59r execution-token telemetry missing')"
+if r59esrc.count(old_tok)==1:
+    r59esrc=r59esrc.replace(old_tok,new_tok,1)
+elif r59esrc.count(new_tok)!=1:
+    raise SystemExit('r59r r59e token-telemetry compatibility anchor missing')
+r59ep.write_text(r59esrc)
 
 ns={'__name__':'__main__','__file__':str(base)}
 try:
