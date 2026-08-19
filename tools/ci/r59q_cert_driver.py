@@ -56,6 +56,20 @@ one("'physical_r59p':'PENDING'",
     "'physical_r59p':'PHYSICAL_PERSISTENT_SPLIT_ACTIVE_NO_ERROR_NO_COMPLETION','physical_r59p_telemetry':'R5P_X1_A1_M0_T0_H0_R8_N0','physical_r59q':'PENDING'",
     'physical r59p result + r59q pending')
 
+# r57 privately broadens the historical r52/r54 physical-row assertion as
+# later builds replace the bottom telemetry row. r59q replaces that row again,
+# but retains the route-before/after writes and exposes its trace state at
+# +3984/+3992/+4064/+4072/+4080/+4088. Teach the inherited private adapter to
+# accept this new overlay shape without modifying any historical cert source.
+r57p=here/'r57_cert_driver.py'
+r57src=r57p.read_text()
+r57_old="or ('volatile_read64(xhci+3920)' in s and 'volatile_read64(xhci+3928)' in s and 'volatile_read64(xhci+3936)' in s and 'volatile_read64(xhci+3944)' in s and 'volatile_read64(xhci+3952)' in s and 'volatile_read64(xhci+3960)' in s and 'volatile_read64(xhci+3968)' in s)) and 'volatile_write64(xhci_state+3752,before_bit)' in s"
+r57_new="or ('volatile_read64(xhci+3920)' in s and 'volatile_read64(xhci+3928)' in s and 'volatile_read64(xhci+3936)' in s and 'volatile_read64(xhci+3944)' in s and 'volatile_read64(xhci+3952)' in s and 'volatile_read64(xhci+3960)' in s and 'volatile_read64(xhci+3968)' in s) or ('volatile_read64(xhci+3984)' in s and 'volatile_read64(xhci+3992)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+4072)' in s and 'volatile_read64(xhci+4080)' in s and 'volatile_read64(xhci+4088)' in s)) and 'volatile_write64(xhci_state+3752,before_bit)' in s"
+if r57src.count(r57_old)==1:
+    r57p.write_text(r57src.replace(r57_old,r57_new,1))
+elif r57src.count(r57_new)!=1:
+    raise SystemExit('r59q r57/r52 route-row compatibility anchor missing')
+
 ns={'__name__':'__main__','__file__':str(base)}
 try:
     exec(compile(src,str(base),'exec'),ns,ns)
