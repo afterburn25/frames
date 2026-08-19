@@ -1,0 +1,129 @@
+name: Frames v108 r65 Parallel USB Repair Matrix
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-matrix:
+    name: ${{ matrix.variant }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - variant: r65A-qh-overlay-authority
+            overlay_authority: '1'
+            preserve_toggle: '0'
+            persistent_periodic_qh: '0'
+            dummy_qtd: '0'
+          - variant: r65B-overlay-toggle
+            overlay_authority: '1'
+            preserve_toggle: '1'
+            persistent_periodic_qh: '0'
+            dummy_qtd: '0'
+          - variant: r65C-persistent-periodic-qh
+            overlay_authority: '1'
+            preserve_toggle: '1'
+            persistent_periodic_qh: '1'
+            dummy_qtd: '0'
+          - variant: r65D-persistent-qh-dummy-qtd
+            overlay_authority: '1'
+            preserve_toggle: '1'
+            persistent_periodic_qh: '1'
+            dummy_qtd: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record variant contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cat > out/USB-CHAIN-RESULT.json <<EOF
+          {
+            "variant": "${{ matrix.variant }}",
+            "overlay_authority": ${{ matrix.overlay_authority }},
+            "preserve_toggle": ${{ matrix.preserve_toggle }},
+            "persistent_periodic_qh": ${{ matrix.persistent_periodic_qh }},
+            "dummy_qtd": ${{ matrix.dummy_qtd }},
+            "physical_pass_requires": [
+              "8086:8c2d EHCI2 selected",
+              "8087:8008 hub path retained",
+              "endpoint 0x82 MPS8 interval4 retained",
+              "QH fetched",
+              "split completion observed",
+              "valid HID report length",
+              "DATA toggle advances/preserved",
+              "rearm succeeds",
+              "second consecutive interrupt-IN completion observed",
+              "HID event delivered to pointer layer"
+            ],
+            "ci_status": "prepared"
+          }
+          EOF
+
+      - name: Apply r65 variant transform
+        shell: bash
+        env:
+          OVERLAY_AUTHORITY: ${{ matrix.overlay_authority }}
+          PRESERVE_TOGGLE: ${{ matrix.preserve_toggle }}
+          PERSISTENT_PERIODIC_QH: ${{ matrix.persistent_periodic_qh }}
+          DUMMY_QTD: ${{ matrix.dummy_qtd }}
+        run: |
+          set -euo pipefail
+          test -f tools/ci/r65_parallel_usb_transform.py
+          python3 tools/ci/r65_parallel_usb_transform.py
+
+      - name: Run repository USB safety/certification checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -x tools/ci/run_tests.sh ]; then tools/ci/run_tests.sh; fi
+          if [ -f tools/ci/r61_verify.py ]; then python3 tools/ci/r61_verify.py; fi
+          if [ -f tools/ci/r64_verify.py ]; then python3 tools/ci/r64_verify.py; fi
+
+      - name: Build Rufus UEFI ISO
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -x tools/ci/build_rufus_iso.sh ]; then
+            tools/ci/build_rufus_iso.sh "${{ matrix.variant }}"
+          elif [ -x build.sh ]; then
+            ./build.sh
+          else
+            echo "No supported build entrypoint found" >&2
+            exit 1
+          fi
+
+      - name: Seal artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          find . -maxdepth 4 -type f -name '*.iso' -print -exec sha256sum {} \; | tee out/ISO-SHA256.txt
+          test -s out/ISO-SHA256.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frames-v108-${{ matrix.variant }}-Rufus-UEFI
+          path: |
+            **/*.iso
+            out/USB-CHAIN-RESULT.json
+            out/ISO-SHA256.txt
+          if-no-files-found: error
+
+  aggregate:
+    name: r65 matrix aggregate
+    needs: build-matrix
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Assert all four variants completed CI
+        shell: bash
+        run: |
+          echo "matrix result: ${{ needs.build-matrix.result }}"
+          test "${{ needs.build-matrix.result }}" = success
