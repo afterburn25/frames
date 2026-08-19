@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# r60 certification trigger after workflow registration
 from pathlib import Path
 import traceback
 here=Path(__file__).parent
@@ -37,10 +38,6 @@ oldgeom="    req('let info2=1090586113' in r59gfn and 'let info2=1090591745' not
 newgeom="    req('let info2=1090591745' in r59gfn and 'let info2=1090586113' not in r59gfn,'r60 default TT new-scheduler C-mask 0x1c missing')"
 one(oldgeom,newgeom,'default Linux split geometry')
 
-# The lower r59 safety contracts prohibited input delivery because those builds
-# were diagnostics. r60 is the bounded integration candidate; preserve all
-# storage-write prohibitions while allowing only the explicitly certified
-# generic-pointer event delivery below.
 relaxed=0
 for name in ('r59_cert_driver.py','r59e_cert_driver.py','r59f_cert_driver.py','r59g_cert_driver.py'):
     p=here/name
@@ -52,9 +49,6 @@ for name in ('r59_cert_driver.py','r59e_cert_driver.py','r59f_cert_driver.py','r
         relaxed+=n
 if relaxed<4: raise SystemExit(f'r60 inherited diagnostic input-delivery gates relaxed {relaxed}, expected >=4')
 
-# r59f intentionally selected HID report protocol. r60 uses the HID boot-mouse
-# protocol so the already-certified Generic Pointer decoder can consume the
-# standard buttons/X/Y bytes directly.
 p=here/'r59f_cert_driver.py'; t=p.read_text()
 old="    req('33+(11*256)+65536+(mif*4294967296)' in r59ffn,'r59f HID report-protocol SET_PROTOCOL missing')"
 new="    req(('33+(11*256)+65536+(mif*4294967296)' in r59ffn) or ('33+(11*256)+(mif*4294967296)' in r59ffn),'r59f/r60 HID protocol selection missing')"
@@ -66,9 +60,6 @@ if t.count(old)==1: t=t.replace(old,new,1)
 elif t.count(new)!=1: raise SystemExit('r60 inherited GET_PROTOCOL gate anchor missing')
 p.write_text(t)
 
-# r59 used a polling qTD without IOC. r60 matches Linux's ordinary final-qTD
-# construction more closely by adding IOC, while USBINTR remains disabled and
-# Frames continues to poll the descriptor safely.
 p=here/'r59_cert_driver.py'; t=p.read_text()
 old="    req('token=527744' in r59fn and 'volatile_write32(qtd+8,527744)' in r59fn,'r59 8-byte interrupt-IN qTD arm/rearm missing')"
 new="    req((('token=527744' in r59fn and 'volatile_write32(qtd+8,527744)' in r59fn) or ('token=560512' in r59fn and 'volatile_write32(qtd+8,560512)' in r59fn)),'r59/r60 8-byte interrupt-IN qTD arm/rearm missing')"
@@ -76,7 +67,6 @@ if t.count(old)==1: t=t.replace(old,new,1)
 elif t.count(new)!=1: raise SystemExit('r60 inherited qTD token gate anchor missing')
 p.write_text(t)
 
-# Add explicit r60 model/safety gates to the generated r59h adapter.
 anchor="one(anchor,anchor+\"\\n    req('(rr/4)%32' in s,'r59h qTD error telemetry missing')\",'r59h qTD error telemetry gate')"
 extra=anchor+"""
 
