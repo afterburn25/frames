@@ -5,7 +5,7 @@ This intentionally fails closed unless the source exposes the known r61/r64
 EHCI patch anchors. It does not silently patch an unrelated baseline.
 
 PR synchronization marker: workflow registered on main for pull_request CI.
-Synchronization pulse 2: force a post-registration PR synchronize event.
+Synchronization pulse 3: force push + PR synchronize after workflow registration.
 """
 from pathlib import Path
 import os, sys
