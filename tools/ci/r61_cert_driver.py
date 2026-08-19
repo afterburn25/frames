@@ -81,8 +81,17 @@ elif 'volatile_read64(xhci+3992)' in r59src and 'volatile_read64(xhci+4000)' in 
     pass
 else:
     raise SystemExit('r59g/r61 r59/r56 overlay compatibility adapter anchor missing')"""
-if r59gsrc.count(g_old)==1: r59gp.write_text(r59gsrc.replace(g_old,g_new,1))
+if r59gsrc.count(g_old)==1: r59gsrc=r59gsrc.replace(g_old,g_new,1)
 elif r59gsrc.count(g_new)!=1: raise SystemExit('r61 r59g overlay-adapter compatibility anchor missing')
+
+# r59g also owns the visible-row expansion used by the inherited r59 model.
+# Add the r61 A/I/T/G/N/B/X row as a third allowed display shape. This does
+# not weaken any transport, route, DMA, or safety assertion.
+vis_old="new_vis=\"    req((('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+4072)' in s and 'volatile_read64(xhci+4080)' in s) or ('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+3976)' in s and 'volatile_read64(xhci+3984)' in s and 'volatile_read64(xhci+4040)' in s and 'volatile_read64(xhci+4080)' in s)),'r59/r59g visible runtime telemetry row missing')\""
+vis_new="new_vis=\"    req((('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+4072)' in s and 'volatile_read64(xhci+4080)' in s) or ('volatile_read64(xhci+4056)' in s and 'volatile_read64(xhci+4064)' in s and 'volatile_read64(xhci+3976)' in s and 'volatile_read64(xhci+3984)' in s and 'volatile_read64(xhci+4040)' in s and 'volatile_read64(xhci+4080)' in s) or ('volatile_read64(xhci+3984)' in s and 'volatile_read64(xhci+3992)' in s and 'volatile_read64(xhci+4000)' in s and 'volatile_read64(xhci+4064)' in s)),'r59/r59g/r61 visible runtime telemetry row missing')\""
+if r59gsrc.count(vis_old)==1: r59gsrc=r59gsrc.replace(vis_old,vis_new,1)
+elif r59gsrc.count(vis_new)!=1: raise SystemExit('r61 r59g visible-row assignment anchor missing')
+r59gp.write_text(r59gsrc)
 
 ns={'__name__':'__main__','__file__':str(base)}
 try:
