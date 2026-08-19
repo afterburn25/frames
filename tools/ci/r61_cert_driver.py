@@ -38,8 +38,6 @@ one("'physical_r59h':'PENDING','physical_r60':'PENDING'","'physical_r59h':'PENDI
 # r57 owns the idempotent compatibility rewrite for the old r52/r54/r56
 # bottom-row assertion. r61 replaces only the visible row while retaining the
 # original bounded Intel route mutation and its before/after telemetry writes.
-# Teach that private inherited verifier to recognize the r61 A/I/T/G/N row;
-# the route-before/after proof remains mandatory.
 r57p=here/'r57_cert_driver.py'
 r57src=r57p.read_text()
 old_tail="or ('volatile_read64(xhci+3920)' in s and 'volatile_read64(xhci+3928)' in s and 'volatile_read64(xhci+3936)' in s and 'volatile_read64(xhci+3944)' in s and 'volatile_read64(xhci+3952)' in s and 'volatile_read64(xhci+3960)' in s and 'volatile_read64(xhci+3968)' in s)) and 'volatile_write64(xhci_state+3752,before_bit)' in s and 'volatile_write64(xhci_state+3760,after_bit)' in s),'r52/r54/r56 physical EHCI row/route proof missing')"
@@ -48,6 +46,28 @@ if r57src.count(old_tail)==1:
     r57p.write_text(r57src.replace(old_tail,new_tail,1))
 elif r57src.count(new_tail)!=1:
     raise SystemExit('r61 r57/r52 route-row compatibility anchor missing')
+
+# r59 subsequently tries to extend r57's old row assertion to the original
+# r59 runtime row. Make that adapter idempotent when r61 has already widened
+# r57 first. This changes only private certification plumbing.
+r59p=here/'r59_cert_driver.py'
+r59src=r59p.read_text()
+old_block="""if r57src.count(old_compat)==1:
+    r57p.write_text(r57src.replace(old_compat,new_compat,1))
+elif r57src.count(new_compat)!=1:
+    raise SystemExit('r59 r57/r52 row compatibility anchor missing')"""
+new_block="""if r57src.count(old_compat)==1:
+    r57p.write_text(r57src.replace(old_compat,new_compat,1))
+elif r57src.count(new_compat)==1:
+    pass
+elif 'volatile_read64(xhci+3984)' in r57src and 'volatile_read64(xhci+4064)' in r57src and 'r52/r54/r56/r61 physical EHCI row/route proof missing' in r57src:
+    pass
+else:
+    raise SystemExit('r59/r61 r57/r52 row compatibility anchor missing')"""
+if r59src.count(old_block)==1:
+    r59p.write_text(r59src.replace(old_block,new_block,1))
+elif r59src.count(new_block)!=1:
+    raise SystemExit('r61 r59 row-adapter compatibility anchor missing')
 
 ns={'__name__':'__main__','__file__':str(base)}
 try:
