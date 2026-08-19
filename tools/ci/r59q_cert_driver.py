@@ -70,6 +70,18 @@ if r57src.count(r57_old)==1:
 elif r57src.count(r57_new)!=1:
     raise SystemExit('r59q r57/r52 route-row compatibility anchor missing')
 
+# r59 itself opens r57 and extends that same compatibility expression. Make
+# its private adapter recognize the already-expanded r59q expression as an
+# idempotent valid state instead of aborting before the inherited chain runs.
+r59p=here/'r59_cert_driver.py'
+r59src=r59p.read_text()
+r59_old="elif r57src.count(new_compat)!=1:\n    raise SystemExit('r59 r57/r52 row compatibility anchor missing')"
+r59_new="elif r57src.count(new_compat)==1:\n    pass\nelif 'volatile_read64(xhci+3984)' in r57src and 'volatile_read64(xhci+3992)' in r57src and 'volatile_read64(xhci+4064)' in r57src and 'volatile_read64(xhci+4072)' in r57src and 'volatile_read64(xhci+4080)' in r57src and 'volatile_read64(xhci+4088)' in r57src and 'volatile_write64(xhci_state+3752,before_bit)' in r57src and 'volatile_write64(xhci_state+3760,after_bit)' in r57src:\n    pass\nelse:\n    raise SystemExit('r59/r59q r57/r52 row compatibility anchor missing')"
+if r59src.count(r59_old)==1:
+    r59p.write_text(r59src.replace(r59_old,r59_new,1))
+elif r59src.count(r59_new)!=1:
+    raise SystemExit('r59q private r59 adapter anchor missing')
+
 ns={'__name__':'__main__','__file__':str(base)}
 try:
     exec(compile(src,str(base),'exec'),ns,ns)
