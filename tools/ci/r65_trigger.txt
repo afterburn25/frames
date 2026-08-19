@@ -1,0 +1,1 @@
+r65 persistent Intel TT periodic QH certification trigger
