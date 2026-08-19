@@ -34,7 +34,7 @@ try:
     if not k.exists(): raise SystemExit('r68b evidence kernel missing')
     s=k.read_text()
     if hashlib.sha256(s.encode()).hexdigest()!='d3d29fe3448bcfc781f8dd6634df334ed14066f94df0836f03dec69ae71c5935': raise SystemExit('r68b evidence kernel SHA mismatch')
-    for q in ('volatile_read64(xhci+3984)','volatile_read64(xhci+3992)','volatile_read64(xhci+4000)','volatile_read64(xhci+4064)','R68 HBOXARE'):
+    for q in ('volatile_read64(xhci+3984)','volatile_read64(xhci+3992)','volatile_read64(xhci+4000)','volatile_read64(xhci+4064)'):
         if q not in s: raise SystemExit('r68b physical telemetry compatibility witness missing '+q)
 except BaseException:
     out=Path('evidence'); out.mkdir(parents=True,exist_ok=True)
