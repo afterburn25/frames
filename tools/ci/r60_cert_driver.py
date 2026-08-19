@@ -19,7 +19,7 @@ def alln(old,new,count,label):
 
 one("'patch_v108_r59h_linux_split_schedule_repair.py'","'patch_v108_r60_reference_ehci_boot_mouse.py'",'patch target')
 one('kernel-r59h.nx','kernel-r60.nx','kernel evidence target')
-one('ee129f22dca19ba7d1a1cc41a7b90bfcba0dc472ad7493c38ca2a1537c094e','dc1d8d0590965f6d499eba0fe2d010287d6052d2c7ceab73dff41120fadcc04d','exact r60 identity target')
+one('ee129f22dca19ba7d1d7a1cc41a7b90bfcba0dc472ad7493c38ca2a1537c094e','dc1d8d0590965f6d499eba0fe2d010287d6052d2c7ceab73dff41120fadcc04d','exact r60 identity target')
 one("'Frames-0.9.98-v108-r59h-Linux-Split-Schedule-Repair-Rufus-UEFI.iso'","'Frames-0.9.98-v108-r60-Reference-EHCI-Boot-Mouse-Rufus-UEFI.iso'",'ISO target')
 one("'R59H-SHA.txt'","'R60-SHA.txt'",'SHA evidence target')
 one("'R25K-R59H.patch'","'R25K-R60.patch'",'patch evidence target')
